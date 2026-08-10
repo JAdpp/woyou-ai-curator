@@ -1,0 +1,239 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
+import { useFrame, useThree } from "@react-three/fiber";
+import { PointerLockControls } from "@react-three/drei";
+import type { PointerLockControls as PointerLockControlsImpl } from "three-stdlib";
+import { EYE_HEIGHT, flightDuration, walkableBounds, type HallLayout, type TourStop } from "./layout";
+import {
+  buildGuidedRoute,
+  routeFlightDuration,
+  sampleNavigationRoute,
+  type NavigationRoute,
+} from "./navigation";
+
+/**
+ * Guided camera.
+ *
+ * Flies to the current tour stop with an eased interpolation, or cuts straight
+ * there when the visitor has asked for reduced motion — camera flight is the
+ * single most nausea-inducing thing in a walkable scene.
+ */
+export function GuidedCamera({
+  layout,
+  stop,
+  pacing,
+  reduceMotion,
+  onArrive,
+}: {
+  layout: HallLayout;
+  stop: TourStop;
+  pacing: HallLayout["design"]["pacing"];
+  reduceMotion: boolean;
+  onArrive?: () => void;
+}) {
+  const { camera } = useThree();
+  const from = useRef(new THREE.Vector3());
+  const fromTarget = useRef(new THREE.Vector3());
+  const elapsed = useRef(0);
+  const arrived = useRef(false);
+  const currentTarget = useRef(new THREE.Vector3(...stop.target));
+  const route = useRef<NavigationRoute | null>(null);
+  const flightSeconds = useRef(reduceMotion ? 0 : flightDuration(pacing));
+  // Reused each frame instead of allocating two vectors per tick.
+  const scratch = useRef({
+    destination: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+  });
+
+  useEffect(() => {
+    from.current.copy(camera.position);
+    fromTarget.current.copy(currentTarget.current);
+    const nextRoute = buildGuidedRoute(
+      [camera.position.x, camera.position.y, camera.position.z],
+      stop,
+      layout,
+    );
+    route.current = nextRoute;
+    flightSeconds.current = reduceMotion
+      ? 0
+      : routeFlightDuration(flightDuration(pacing), nextRoute.totalLength);
+    elapsed.current = 0;
+    arrived.current = false;
+  }, [stop, layout, camera, pacing, reduceMotion]);
+
+  useFrame((_state, delta) => {
+    if (arrived.current) return;
+    const activeRoute = route.current;
+    const destination = scratch.current.destination.set(...stop.position);
+    const target = scratch.current.target.set(...stop.target);
+
+    const duration = flightSeconds.current;
+    if (duration <= 0) {
+      camera.position.copy(destination);
+      currentTarget.current.copy(target);
+      camera.lookAt(target);
+      arrived.current = true;
+      onArrive?.();
+      return;
+    }
+
+    elapsed.current += delta;
+    const progress = Math.min(1, elapsed.current / duration);
+    // Smoothstep: no sudden start or stop, which is what makes flight readable.
+    const eased = progress * progress * (3 - 2 * progress);
+
+    if (activeRoute && activeRoute.totalLength > 0) {
+      const travelled = activeRoute.totalLength * eased;
+      camera.position.set(...sampleNavigationRoute(activeRoute, travelled));
+
+      // Look a little way down the circulation path while travelling, then
+      // turn toward the object only on approach. This prevents the camera
+      // staring sideways through several rooms while following the doorway.
+      const lookAhead = sampleNavigationRoute(
+        activeRoute,
+        Math.min(activeRoute.totalLength, travelled + 1.8),
+      );
+      const guideTarget = scratch.current.destination.set(...lookAhead);
+      guideTarget.y = camera.position.y;
+      const startTurn = Math.min(1, progress / 0.15);
+      currentTarget.current.lerpVectors(fromTarget.current, guideTarget, startTurn);
+      const finalTurn = Math.max(0, Math.min(1, (progress - 0.72) / 0.28));
+      const easedFinalTurn = finalTurn * finalTurn * (3 - 2 * finalTurn);
+      currentTarget.current.lerp(target, easedFinalTurn);
+    } else {
+      camera.position.lerpVectors(from.current, destination, eased);
+      currentTarget.current.lerpVectors(fromTarget.current, target, eased);
+    }
+    camera.lookAt(currentTarget.current);
+
+    if (progress >= 1) {
+      arrived.current = true;
+      onArrive?.();
+    }
+  });
+
+  return null;
+}
+
+const MOVE_SPEED = 3.2;
+const KEY_BINDINGS: Record<string, "forward" | "back" | "left" | "right"> = {
+  KeyW: "forward",
+  ArrowUp: "forward",
+  KeyS: "back",
+  ArrowDown: "back",
+  KeyA: "left",
+  ArrowLeft: "left",
+  KeyD: "right",
+  ArrowRight: "right",
+};
+
+export interface JoystickState {
+  x: number;
+  y: number;
+}
+
+/**
+ * Free-walk camera.
+ *
+ * Pointer lock plus WASD on desktop, virtual joystick on touch. Movement is
+ * clamped to the walkable bounds of the room the visitor is in, so there is no
+ * walking through walls and no getting lost outside the hall. Eye height is
+ * fixed and there is no run modifier or head bob — all three are common
+ * motion-sickness triggers and none of them serve a gallery.
+ */
+export function FreeWalkCamera({
+  layout,
+  joystick,
+  enabled,
+  onLockChange,
+}: {
+  layout: HallLayout;
+  joystick: React.RefObject<JoystickState>;
+  enabled: boolean;
+  onLockChange: (locked: boolean) => void;
+}) {
+  const { camera } = useThree();
+  const controls = useRef<PointerLockControlsImpl>(null);
+  const pressed = useRef<Set<string>>(new Set());
+  // Scratch vectors reused every frame. They live in refs rather than memos
+  // because they are mutated in the render loop, and allocating three vectors
+  // per frame would churn the GC at 60 fps.
+  const scratch = useRef({
+    direction: new THREE.Vector3(),
+    forward: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    up: new THREE.Vector3(0, 1, 0),
+  });
+
+  useEffect(() => {
+    if (!enabled) return;
+    const down = (event: KeyboardEvent) => {
+      const action = KEY_BINDINGS[event.code];
+      if (action) {
+        pressed.current.add(action);
+        event.preventDefault();
+      }
+    };
+    const up = (event: KeyboardEvent) => {
+      const action = KEY_BINDINGS[event.code];
+      if (action) pressed.current.delete(action);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    const held = pressed.current;
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      held.clear();
+    };
+  }, [enabled]);
+
+  useFrame((_state, delta) => {
+    if (!enabled) return;
+
+    const { direction, forward, right, up } = scratch.current;
+    direction.set(0, 0, 0);
+    if (pressed.current.has("forward")) direction.z -= 1;
+    if (pressed.current.has("back")) direction.z += 1;
+    if (pressed.current.has("left")) direction.x -= 1;
+    if (pressed.current.has("right")) direction.x += 1;
+
+    const stick = joystick.current;
+    if (stick && (stick.x !== 0 || stick.y !== 0)) {
+      direction.x += stick.x;
+      direction.z += stick.y;
+    }
+
+    if (direction.lengthSq() === 0) return;
+    direction.normalize();
+
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+    right.crossVectors(forward, up).normalize();
+
+    const step = MOVE_SPEED * Math.min(delta, 0.05);
+    const next = camera.position.clone();
+    next.addScaledVector(forward, -direction.z * step);
+    next.addScaledVector(right, direction.x * step);
+
+    const bounds = walkableBounds(layout, next.z);
+    next.x = Math.max(bounds.minX, Math.min(bounds.maxX, next.x));
+    next.z = Math.max(bounds.minZ, Math.min(bounds.maxZ, next.z));
+    next.y = EYE_HEIGHT;
+
+    camera.position.copy(next);
+  });
+
+  if (!enabled) return null;
+
+  return (
+    <PointerLockControls
+      ref={controls}
+      onLock={() => onLockChange(true)}
+      onUnlock={() => onLockChange(false)}
+    />
+  );
+}

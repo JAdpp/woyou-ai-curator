@@ -1,0 +1,225 @@
+{
+  "schema_version": "1.0",
+  "collection_id": "cma-chinese-art-cc0-seed",
+  "collection_version": "cma-chinese-art-cc0-20260806T044524Z",
+  "status": "prevalidated_structure_pending_content_review",
+  "count": 6,
+  "cards": [
+    {
+      "id": "qc-landscape-record-or-argument",
+      "theme_id": "landscape-writing",
+      "title": "山水是在记录风景，还是提出观点？",
+      "question": "中国山水作品为什么不能只被理解为对自然风景的写生记录？",
+      "coverage_status": "supported",
+      "required_evidence_roles": [
+        "opening",
+        "context",
+        "core_evidence",
+        "contrast",
+        "synthesis"
+      ],
+      "starter_object_ids": [
+        "cma:1966.367",
+        "cma:1955.36",
+        "cma:1988.20",
+        "cma:1961.421.2",
+        "cma:2025.192"
+      ],
+      "coverage_limits": [
+        "仅依据本种子集中 CMA 的中国艺术藏品记录回答。",
+        "不能据此代表全部中国山水传统或所有社会群体的观看经验。"
+      ],
+      "prior_knowledge_levels": [
+        "none",
+        "some",
+        "familiar"
+      ],
+      "duration_minutes": [
+        5,
+        10,
+        15
+      ],
+      "review_status": "pending_content_review"
+    },
+    {
+      "id": "qc-copying-and-innovation",
+      "theme_id": "landscape-writing",
+      "title": "临古为什么不等于复制？",
+      "question": "画家反复仿效古代大师时，如何同时表达传承、选择与创新？",
+      "coverage_status": "supported",
+      "required_evidence_roles": [
+        "opening",
+        "context",
+        "core_evidence",
+        "contrast",
+        "synthesis"
+      ],
+      "starter_object_ids": [
+        "cma:1955.36",
+        "cma:1966.367",
+        "cma:1988.20",
+        "cma:1961.421.2",
+        "cma:2025.192"
+      ],
+      "coverage_limits": [
+        "只能讨论馆藏说明明确提到的风格来源、临仿或书写关系。",
+        "不能补写艺术家的心理动机。"
+      ],
+      "prior_knowledge_levels": [
+        "none",
+        "some",
+        "familiar"
+      ],
+      "duration_minutes": [
+        5,
+        10,
+        15
+      ],
+      "review_status": "pending_content_review"
+    },
+    {
+      "id": "qc-poetry-calligraphy-painting",
+      "theme_id": "landscape-writing",
+      "title": "诗、书、画如何共同作用？",
+      "question": "题跋、诗句与书法怎样改变一件绘画作品的观看顺序和意义？",
+      "coverage_status": "supported",
+      "required_evidence_roles": [
+        "opening",
+        "context",
+        "core_evidence",
+        "contrast",
+        "synthesis"
+      ],
+      "starter_object_ids": [
+        "cma:1961.421.2",
+        "cma:2025.192",
+        "cma:1966.367",
+        "cma:1955.36",
+        "cma:1988.20"
+      ],
+      "coverage_limits": [
+        "原文释读以 CMA 已提供的机构说明和铭文信息为界。",
+        "未提供译文的诗文不得由模型自行补译。"
+      ],
+      "prior_knowledge_levels": [
+        "none",
+        "some",
+        "familiar"
+      ],
+      "duration_minutes": [
+        5,
+        10,
+        15
+      ],
+      "review_status": "pending_content_review"
+    },
+    {
+      "id": "qc-ritual-order-visible",
+      "theme_id": "objects-ritual",
+      "title": "礼仪秩序如何变得可见？",
+      "question": "礼器的形制、铭文和使用场景如何把社会或宗教秩序变成可见的形式？",
+      "coverage_status": "supported",
+      "required_evidence_roles": [
+        "opening",
+        "context",
+        "core_evidence",
+        "contrast",
+        "synthesis"
+      ],
+      "starter_object_ids": [
+        "cma:1974.73",
+        "cma:1963.103",
+        "cma:1987.58",
+        "cma:2017.15",
+        "cma:1950.579"
+      ],
+      "coverage_limits": [
+        "不能凭单件器物完整复原一场历史仪式。",
+        "用途判断以机构记录中的类型、铭文和说明为界。"
+      ],
+      "prior_knowledge_levels": [
+        "none",
+        "some",
+        "familiar"
+      ],
+      "duration_minutes": [
+        5,
+        10,
+        15
+      ],
+      "review_status": "pending_content_review"
+    },
+    {
+      "id": "qc-material-technique-meaning",
+      "theme_id": "objects-ritual",
+      "title": "材料与工艺为何重要？",
+      "question": "材料、釉色和制作工艺怎样影响器物的用途、外观与意义？",
+      "coverage_status": "supported",
+      "required_evidence_roles": [
+        "opening",
+        "context",
+        "core_evidence",
+        "contrast",
+        "synthesis"
+      ],
+      "starter_object_ids": [
+        "cma:2017.15",
+        "cma:1950.579",
+        "cma:1974.73",
+        "cma:1963.103",
+        "cma:1987.58"
+      ],
+      "coverage_limits": [
+        "技术过程只采用 CMA 明示信息，不从外部常识补齐烧造细节。",
+        "不能由材料直接推断具体使用者身份。"
+      ],
+      "prior_knowledge_levels": [
+        "none",
+        "some",
+        "familiar"
+      ],
+      "duration_minutes": [
+        5,
+        10,
+        15
+      ],
+      "review_status": "pending_content_review"
+    },
+    {
+      "id": "qc-buddhist-objects-local-context",
+      "theme_id": "objects-ritual",
+      "title": "宗教器物如何进入中国语境？",
+      "question": "佛教图像与器物如何通过材质、造型和用途进入中国宗教生活？",
+      "coverage_status": "supported",
+      "required_evidence_roles": [
+        "opening",
+        "context",
+        "core_evidence",
+        "contrast",
+        "synthesis"
+      ],
+      "starter_object_ids": [
+        "cma:1987.58",
+        "cma:1950.579",
+        "cma:1963.103",
+        "cma:1974.73",
+        "cma:2017.15"
+      ],
+      "coverage_limits": [
+        "本题只覆盖种子集中具有明确佛教说明的对象。",
+        "不能据此概括全部佛教传播史或跨区域因果机制。"
+      ],
+      "prior_knowledge_levels": [
+        "none",
+        "some",
+        "familiar"
+      ],
+      "duration_minutes": [
+        5,
+        10,
+        15
+      ],
+      "review_status": "pending_content_review"
+    }
+  ]
+}

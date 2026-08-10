@@ -32,6 +32,23 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!api/.env.example
+
+# local runtime state
+/api/.runtime/
+/api/runtime/cache/
+/api/runtime/logs/
+/data/runtime/
+/public/generated/posters/
+/data/collections/*/raw/snapshots/
+*.sqlite3
+
+# Python
+/.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
 
 # vercel
 .vercel
@@ -39,3 +56,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Large regenerable collection dump (rebuild: scripts/import_global_collections.py)
+/data/collections/global_open/objects.json

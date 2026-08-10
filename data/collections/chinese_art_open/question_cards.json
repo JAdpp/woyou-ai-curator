@@ -1,0 +1,260 @@
+{
+  "schemaVersion": "2.0",
+  "collectionVersion": "20260808-1817",
+  "generatedAt": "2026-08-08T06:35:44Z",
+  "note": "问题卡按证据覆盖域生成；覆盖域是语料路由标签，不是访客端固定主题。",
+  "cards": [
+    {
+      "id": "landscape-brush-1",
+      "question": "中国山水作品为什么不能只被理解为对自然风景的写生记录？",
+      "evidenceDomainId": "landscape-brush",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1915.110",
+        "cma:1915.334.2",
+        "cma:1915.536",
+        "cma:1915.680",
+        "cma:1915.702"
+      ],
+      "coverageLimits": [
+        "本域当前有 571 件可用藏品，其中 309 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "landscape-brush-2",
+      "question": "画家反复仿效古代大师时，如何同时表达传承、选择与创新？",
+      "evidenceDomainId": "landscape-brush",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1915.110",
+        "cma:1915.334.2",
+        "cma:1915.536",
+        "cma:1915.680",
+        "cma:1915.702"
+      ],
+      "coverageLimits": [
+        "本域当前有 571 件可用藏品，其中 309 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "calligraphy-inscription-1",
+      "question": "题跋、诗句与书法怎样改变一件绘画作品的观看顺序和意义？",
+      "evidenceDomainId": "calligraphy-inscription",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1914.567",
+        "cma:1915.561",
+        "cma:1919.75",
+        "cma:1919.77",
+        "cma:1929.983"
+      ],
+      "coverageLimits": [
+        "本域当前有 105 件可用藏品，其中 41 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "calligraphy-inscription-2",
+      "question": "器物上的铭文和纸上的书法，承担的功能有什么不同？",
+      "evidenceDomainId": "calligraphy-inscription",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1914.567",
+        "cma:1915.561",
+        "cma:1919.75",
+        "cma:1919.77",
+        "cma:1929.983"
+      ],
+      "coverageLimits": [
+        "本域当前有 105 件可用藏品，其中 41 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "ritual-bronze-1",
+      "question": "商周青铜礼器的造型与纹饰，如何体现当时的等级与祭祀秩序？",
+      "evidenceDomainId": "ritual-bronze",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1915.630",
+        "cma:1916.19",
+        "cma:1917.974",
+        "cma:1918.560",
+        "cma:1921.263"
+      ],
+      "coverageLimits": [
+        "本域当前有 292 件可用藏品，其中 112 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "ritual-bronze-2",
+      "question": "一件礼器从祭祀现场进入博物馆展柜，意义发生了哪些变化？",
+      "evidenceDomainId": "ritual-bronze",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1915.630",
+        "cma:1916.19",
+        "cma:1917.974",
+        "cma:1918.560",
+        "cma:1921.263"
+      ],
+      "coverageLimits": [
+        "本域当前有 292 件可用藏品，其中 112 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "ceramics-glaze-1",
+      "question": "釉色与烧造技术的变化，如何改变了陶瓷器的使用场景与观看方式？",
+      "evidenceDomainId": "ceramics-glaze",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1917.13",
+        "cma:1920.424",
+        "cma:1921.263",
+        "cma:1921.644",
+        "cma:1929.995"
+      ],
+      "coverageLimits": [
+        "本域当前有 503 件可用藏品，其中 207 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "ceramics-glaze-2",
+      "question": "青花瓷的钴料与纹样，能说明哪些跨地区的物质流动？",
+      "evidenceDomainId": "ceramics-glaze",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1917.13",
+        "cma:1920.424",
+        "cma:1921.263",
+        "cma:1921.644",
+        "cma:1929.995"
+      ],
+      "coverageLimits": [
+        "本域当前有 503 件可用藏品，其中 207 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "buddhist-devotion-1",
+      "question": "佛教造像的姿态、手印与材质，如何服务于具体的礼拜与观想方式？",
+      "evidenceDomainId": "buddhist-devotion",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1914.567",
+        "cma:1915.334.1",
+        "cma:1915.334.2",
+        "cma:1916.19",
+        "cma:1923.54"
+      ],
+      "coverageLimits": [
+        "本域当前有 228 件可用藏品，其中 53 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "buddhist-devotion-2",
+      "question": "同一尊菩萨在不同时代的形象差异，反映了哪些信仰实践的改变？",
+      "evidenceDomainId": "buddhist-devotion",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1914.567",
+        "cma:1915.334.1",
+        "cma:1915.334.2",
+        "cma:1916.19",
+        "cma:1923.54"
+      ],
+      "coverageLimits": [
+        "本域当前有 228 件可用藏品，其中 53 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "funerary-afterlife-1",
+      "question": "墓葬中的俑像与明器，透露出古人对身后世界的哪些想象？",
+      "evidenceDomainId": "funerary-afterlife",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1925.134",
+        "cma:1925.135",
+        "cma:1925.136",
+        "cma:1925.137",
+        "cma:1925.138"
+      ],
+      "coverageLimits": [
+        "本域当前有 74 件可用藏品，其中 39 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "funerary-afterlife-2",
+      "question": "随葬品的选择与摆放，如何反映死者生前的身份与家族意图？",
+      "evidenceDomainId": "funerary-afterlife",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1925.134",
+        "cma:1925.135",
+        "cma:1925.136",
+        "cma:1925.137",
+        "cma:1925.138"
+      ],
+      "coverageLimits": [
+        "本域当前有 74 件可用藏品，其中 39 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "court-daily-life-1",
+      "question": "服饰、家具与文房用具，如何在日常生活中标记身份与礼制？",
+      "evidenceDomainId": "court-daily-life",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1918.371",
+        "cma:1920.424",
+        "cma:1983.86",
+        "cma:1938.9",
+        "cma:1941.594"
+      ],
+      "coverageLimits": [
+        "本域当前有 284 件可用藏品，其中 67 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    },
+    {
+      "id": "court-daily-life-2",
+      "question": "宫廷器用与民间用品在材料与工艺上的差别说明了什么？",
+      "evidenceDomainId": "court-daily-life",
+      "coverageStatus": "supported",
+      "reviewStatus": "source_exact_match",
+      "starterObjectIds": [
+        "cma:1918.371",
+        "cma:1920.424",
+        "cma:1983.86",
+        "cma:1938.9",
+        "cma:1941.594"
+      ],
+      "coverageLimits": [
+        "本域当前有 284 件可用藏品，其中 67 件带机构撰写的说明文本。",
+        "馆方英文原文保持原样；中文策展关系属于系统推断。"
+      ]
+    }
+  ]
+}

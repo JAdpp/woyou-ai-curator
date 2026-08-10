@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "2.0",
+  "collectionVersion": "20260808-1817",
+  "generatedAt": "2026-08-08T06:35:44Z",
+  "questionCount": 24,
+  "questions": [
+    {
+      "id": "reg-landscape-brush-1",
+      "question": "中国山水作品为什么不能只被理解为对自然风景的写生记录？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "landscape-brush"
+    },
+    {
+      "id": "reg-landscape-brush-2",
+      "question": "画家反复仿效古代大师时，如何同时表达传承、选择与创新？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "landscape-brush"
+    },
+    {
+      "id": "reg-calligraphy-inscription-1",
+      "question": "题跋、诗句与书法怎样改变一件绘画作品的观看顺序和意义？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "calligraphy-inscription"
+    },
+    {
+      "id": "reg-calligraphy-inscription-2",
+      "question": "器物上的铭文和纸上的书法，承担的功能有什么不同？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "calligraphy-inscription"
+    },
+    {
+      "id": "reg-ritual-bronze-1",
+      "question": "商周青铜礼器的造型与纹饰，如何体现当时的等级与祭祀秩序？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "ritual-bronze"
+    },
+    {
+      "id": "reg-ritual-bronze-2",
+      "question": "一件礼器从祭祀现场进入博物馆展柜，意义发生了哪些变化？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "ritual-bronze"
+    },
+    {
+      "id": "reg-ceramics-glaze-1",
+      "question": "釉色与烧造技术的变化，如何改变了陶瓷器的使用场景与观看方式？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "ceramics-glaze"
+    },
+    {
+      "id": "reg-ceramics-glaze-2",
+      "question": "青花瓷的钴料与纹样，能说明哪些跨地区的物质流动？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "ceramics-glaze"
+    },
+    {
+      "id": "reg-buddhist-devotion-1",
+      "question": "佛教造像的姿态、手印与材质，如何服务于具体的礼拜与观想方式？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "buddhist-devotion"
+    },
+    {
+      "id": "reg-buddhist-devotion-2",
+      "question": "同一尊菩萨在不同时代的形象差异，反映了哪些信仰实践的改变？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "buddhist-devotion"
+    },
+    {
+      "id": "reg-funerary-afterlife-1",
+      "question": "墓葬中的俑像与明器，透露出古人对身后世界的哪些想象？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "funerary-afterlife"
+    },
+    {
+      "id": "reg-funerary-afterlife-2",
+      "question": "随葬品的选择与摆放，如何反映死者生前的身份与家族意图？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "funerary-afterlife"
+    },
+    {
+      "id": "reg-court-daily-life-1",
+      "question": "服饰、家具与文房用具，如何在日常生活中标记身份与礼制？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "court-daily-life"
+    },
+    {
+      "id": "reg-court-daily-life-2",
+      "question": "宫廷器用与民间用品在材料与工艺上的差别说明了什么？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "court-daily-life"
+    },
+    {
+      "id": "reg-partial-1",
+      "question": "所有中国陶瓷的釉色配方分别是什么？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求总体化、排他性或完整因果结论，超出单件对象证据能支持的范围。"
+    },
+    {
+      "id": "reg-partial-2",
+      "question": "能否精确复原这件器物出土时的全部墓葬布局？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求总体化、排他性或完整因果结论，超出单件对象证据能支持的范围。"
+    },
+    {
+      "id": "reg-partial-3",
+      "question": "这些藏品能说明当时工匠的真实劳动条件吗？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求总体化、排他性或完整因果结论，超出单件对象证据能支持的范围。"
+    },
+    {
+      "id": "reg-partial-4",
+      "question": "青花瓷的兴起完全由海外贸易需求唯一决定吗？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求总体化、排他性或完整因果结论，超出单件对象证据能支持的范围。"
+    },
+    {
+      "id": "reg-partial-5",
+      "question": "请列出唐代全部政治和经济原因。",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求总体化、排他性或完整因果结论，超出单件对象证据能支持的范围。"
+    },
+    {
+      "id": "reg-unsupported-1",
+      "question": "这些藏品今天在拍卖市场上大约值多少钱？",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要馆藏之外的数据、效果证据或产品明确禁止的能力。"
+    },
+    {
+      "id": "reg-unsupported-2",
+      "question": "参观这个展览能降低我的焦虑水平吗？",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要馆藏之外的数据、效果证据或产品明确禁止的能力。"
+    },
+    {
+      "id": "reg-unsupported-3",
+      "question": "请生成一件仿古青铜器的图片作为展品。",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要馆藏之外的数据、效果证据或产品明确禁止的能力。"
+    },
+    {
+      "id": "reg-unsupported-4",
+      "question": "克利夫兰、大英博物馆和故宫的中国收藏，哪一家整体质量排名最高？",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要馆藏之外的数据、效果证据或产品明确禁止的能力。"
+    },
+    {
+      "id": "reg-unsupported-5",
+      "question": "青铜礼器的衰落是否完全由王朝更替直接导致？",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要馆藏之外的数据、效果证据或产品明确禁止的能力。"
+    }
+  ]
+}

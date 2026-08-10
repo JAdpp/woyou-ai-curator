@@ -1,0 +1,580 @@
+{
+  "schemaVersion": "3.0",
+  "collectionVersion": "20260808-17245-rights1",
+  "generatedAt": "2026-08-08T19:58:22Z",
+  "note": "问题卡按全球证据域与文化包覆盖生成；它们是检索探针，不是固定展览主题。",
+  "cards": [
+    {
+      "id": "global-nature-place-1",
+      "question": "不同文化如何把自然景观变成关于地方、归属或世界秩序的图像？",
+      "evidenceDomainId": "global:nature-place",
+      "culturePackIds": [
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2025.199",
+        "aic:87045",
+        "cma:2015.517",
+        "cma:2006.148.b",
+        "cma:1940.1197"
+      ],
+      "coverageLimits": [
+        "当前域含 655 件对象、275 件 full-evidence 对象，覆盖 7 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-nature-place-2",
+      "question": "当山、河、海与城市进入艺术，它们是在记录地点，还是在塑造一种地方想象？",
+      "evidenceDomainId": "global:nature-place",
+      "culturePackIds": [
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2025.199",
+        "aic:87045",
+        "cma:2015.517",
+        "cma:2006.148.b",
+        "cma:1940.1197"
+      ],
+      "coverageLimits": [
+        "当前域含 655 件对象、275 件 full-evidence 对象，覆盖 7 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-belief-ritual-1",
+      "question": "不同文化怎样借助器物、图像与空间，让不可见的信仰变得可以实践？",
+      "evidenceDomainId": "global:belief-ritual",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2018.38",
+        "aic:86340",
+        "cma:2025.154",
+        "cma:2019.169",
+        "cma:2000.42"
+      ],
+      "coverageLimits": [
+        "当前域含 740 件对象、282 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-belief-ritual-2",
+      "question": "一件礼仪或信仰对象离开原来的使用场景进入博物馆后，我们失去了哪些理解线索？",
+      "evidenceDomainId": "global:belief-ritual",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2018.38",
+        "aic:86340",
+        "cma:2025.154",
+        "cma:2019.169",
+        "cma:2000.42"
+      ],
+      "coverageLimits": [
+        "当前域含 740 件对象、282 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-death-afterlife-1",
+      "question": "不同文化如何通过墓葬、纪念物与随葬品想象死亡之后的世界？",
+      "evidenceDomainId": "global:death-afterlife",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2025.180",
+        "aic:805",
+        "cma:2024.5.33",
+        "cma:2023.121.4.2",
+        "cma:2021.237"
+      ],
+      "coverageLimits": [
+        "当前域含 437 件对象、263 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-death-afterlife-2",
+      "question": "为逝者制作的物件，怎样同时讲述生者的身份、情感与社会秩序？",
+      "evidenceDomainId": "global:death-afterlife",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2025.180",
+        "aic:805",
+        "cma:2024.5.33",
+        "cma:2023.121.4.2",
+        "cma:2021.237"
+      ],
+      "coverageLimits": [
+        "当前域含 437 件对象、263 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-power-status-1",
+      "question": "不同文明为什么反复用服饰、动物、武器与贵重材料表现权力？",
+      "evidenceDomainId": "global:power-status",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:1926.155.a",
+        "cma:1916.1008.a",
+        "aic:592",
+        "cma:2019.78.2",
+        "cma:2015.3"
+      ],
+      "coverageLimits": [
+        "当前域含 1753 件对象、545 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-power-status-2",
+      "question": "权力在一件物品上是通过用途体现，还是通过谁能拥有、观看和使用它体现？",
+      "evidenceDomainId": "global:power-status",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:1926.155.a",
+        "cma:1916.1008.a",
+        "aic:592",
+        "cma:2019.78.2",
+        "cma:2015.3"
+      ],
+      "coverageLimits": [
+        "当前域含 1753 件对象、545 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-body-identity-1",
+      "question": "不同社会如何借肖像、服饰与身体姿态表达一个人是谁？",
+      "evidenceDomainId": "global:body-identity",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:1919.21",
+        "cma:1915.346.2",
+        "aic:592",
+        "cma:2022.14",
+        "cma:2020.259"
+      ],
+      "coverageLimits": [
+        "当前域含 2312 件对象、962 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-body-identity-2",
+      "question": "当身体成为艺术主题时，性别、阶层、职业与理想形象如何交织？",
+      "evidenceDomainId": "global:body-identity",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:1919.21",
+        "cma:1915.346.2",
+        "aic:592",
+        "cma:2022.14",
+        "cma:2020.259"
+      ],
+      "coverageLimits": [
+        "当前域含 2312 件对象、962 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-making-material-1",
+      "question": "相似的材料在不同文化中为什么会发展出不同的制作知识与审美选择？",
+      "evidenceDomainId": "global:making-material",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2024.77",
+        "aic:65061",
+        "cma:2026.4",
+        "cma:2025.273.2",
+        "cma:2023.102"
+      ],
+      "coverageLimits": [
+        "当前域含 12051 件对象、4676 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-making-material-2",
+      "question": "从泥土、金属、纤维到颜料，材料的限制如何反过来塑造作品的意义？",
+      "evidenceDomainId": "global:making-material",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2024.77",
+        "aic:65061",
+        "cma:2026.4",
+        "cma:2025.273.2",
+        "cma:2023.102"
+      ],
+      "coverageLimits": [
+        "当前域含 12051 件对象、4676 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-text-memory-1",
+      "question": "文字进入器物与图像后，怎样改变一件作品保存和传递记忆的方式？",
+      "evidenceDomainId": "global:text-memory",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:1938.301.b",
+        "aic:805",
+        "cma:2025.141",
+        "cma:2024.5",
+        "cma:2021.237"
+      ],
+      "coverageLimits": [
+        "当前域含 2070 件对象、991 件 full-evidence 对象，覆盖 7 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-text-memory-2",
+      "question": "铭文、书籍、碑刻与档案分别让谁的声音被留下，又让谁保持沉默？",
+      "evidenceDomainId": "global:text-memory",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:1938.301.b",
+        "aic:805",
+        "cma:2025.141",
+        "cma:2024.5",
+        "cma:2021.237"
+      ],
+      "coverageLimits": [
+        "当前域含 2070 件对象、991 件 full-evidence 对象，覆盖 7 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-exchange-mobility-1",
+      "question": "器物跨越贸易路线、迁徙与旅行之后，形制、材料和意义会发生什么变化？",
+      "evidenceDomainId": "global:exchange-mobility",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "aic:62509",
+        "cma:1961.44",
+        "cma:1943.658.a",
+        "cma:1929.347",
+        "cma:1957.143"
+      ],
+      "coverageLimits": [
+        "当前域含 118 件对象、47 件 full-evidence 对象，覆盖 6 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-exchange-mobility-2",
+      "question": "如何区分有文献支持的文化联系、共享特征与策展人为比较而建立的并置？",
+      "evidenceDomainId": "global:exchange-mobility",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "aic:62509",
+        "cma:1961.44",
+        "cma:1943.658.a",
+        "cma:1929.347",
+        "cma:1957.143"
+      ],
+      "coverageLimits": [
+        "当前域含 118 件对象、47 件 full-evidence 对象，覆盖 6 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-daily-life-1",
+      "question": "饮食、居家、劳动与娱乐的普通物件，能让我们看见怎样的日常生活？",
+      "evidenceDomainId": "global:daily-life",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "aic:65981",
+        "cma:2026.4",
+        "cma:2024.140",
+        "cma:1995.40",
+        "cma:1916.730"
+      ],
+      "coverageLimits": [
+        "当前域含 1486 件对象、476 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-daily-life-2",
+      "question": "博物馆为什么会收藏一些原本并不为观看而制作的日用品？",
+      "evidenceDomainId": "global:daily-life",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "aic:65981",
+        "cma:2026.4",
+        "cma:2024.140",
+        "cma:1995.40",
+        "cma:1916.730"
+      ],
+      "coverageLimits": [
+        "当前域含 1486 件对象、476 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-image-story-1",
+      "question": "不同文化如何把神话、历史与文学故事转换成可观看的图像序列？",
+      "evidenceDomainId": "global:image-story",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2024.77",
+        "aic:65709",
+        "cma:2025.141",
+        "cma:2021.5",
+        "cma:2018.34"
+      ],
+      "coverageLimits": [
+        "当前域含 6609 件对象、2601 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    },
+    {
+      "id": "global-image-story-2",
+      "question": "只看一个凝固的场景时，我们依靠哪些视觉线索辨认它之前和之后的故事？",
+      "evidenceDomainId": "global:image-story",
+      "culturePackIds": [
+        "africa",
+        "americas",
+        "east_asia",
+        "europe",
+        "oceania",
+        "south_asia",
+        "southeast_asia",
+        "west_asia_north_africa"
+      ],
+      "coverageStatus": "supported",
+      "reviewStatus": "taxonomy_probe_v1",
+      "starterObjectIds": [
+        "cma:2024.77",
+        "aic:65709",
+        "cma:2025.141",
+        "cma:2021.5",
+        "cma:2018.34"
+      ],
+      "coverageLimits": [
+        "当前域含 6609 件对象、2601 件 full-evidence 对象，覆盖 8 个文化包。",
+        "并置只表示可比较；历史联系必须由具体机构记录支持，不能由视觉相似直接推出。",
+        "首批语料是开放馆藏的分层样本，不代表世界文化的完整或均衡全貌。"
+      ]
+    }
+  ]
+}

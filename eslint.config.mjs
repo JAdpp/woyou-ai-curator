@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Browser profiles, generated audio/poster artifacts, and other local QA
+    // state live here. They are not application source and may contain large
+    // third-party extension bundles that make a repository-wide lint hang.
+    "api/runtime/**",
   ]),
 ]);
 

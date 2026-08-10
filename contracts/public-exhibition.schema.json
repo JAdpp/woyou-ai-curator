@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inquiry-curator.local/contracts/public-exhibition.schema.json",
+  "title": "PublicExhibition",
+  "description": "Read-only published projection. It intentionally excludes agenda privacy fields, revisions, reviewer identity, alternatives, and internal exhibition UUIDs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "slug",
+    "title",
+    "question",
+    "exhibitionTheme",
+    "curatorialThesis",
+    "coreAnswer",
+    "subQuestions",
+    "items",
+    "coverageLimits",
+    "status",
+    "versions",
+    "validation",
+    "publicationReview",
+    "updatedAt"
+  ],
+  "properties": {
+    "id": { "type": "string", "description": "Public slug, not the internal UUID." },
+    "slug": { "type": "string" },
+    "title": { "type": "string" },
+    "question": { "type": "string" },
+    "exhibitionTheme": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The visitor-facing theme derived from the exhibition question."
+    },
+    "curatorialThesis": { "type": "string" },
+    "coreAnswer": { "type": "string" },
+    "subQuestions": { "type": "array", "items": { "type": "string" } },
+    "curatorialBrief": {
+      "anyOf": [{ "$ref": "#/$defs/publicCuratorialBrief" }, { "type": "null" }],
+      "description": "Privacy-safe reasoning projection; audience profile and excluded candidates are omitted."
+    },
+    "items": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "object", "role", "roleLabel", "subQuestion", "whySelected", "relation", "labelSentences"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "$ref": "#/$defs/publicMuseumObject" },
+          "role": { "enum": ["opening", "context", "core_evidence", "contrast", "synthesis"] },
+          "roleLabel": { "type": "string" },
+          "subQuestion": { "type": "string" },
+          "whySelected": { "type": "string" },
+          "relation": { "type": "string" },
+          "labelSentences": { "type": "array", "items": { "type": "object" } }
+        }
+      }
+    },
+    "coverageLimits": { "type": "array", "items": { "type": "string" } },
+    "status": { "const": "published" },
+    "versions": { "type": "object" },
+    "validation": { "type": "object" },
+    "publicationReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reviewedAt"],
+      "properties": {
+        "status": { "const": "approved" },
+        "reviewedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "poster": {
+      "type": ["object", "null"],
+      "description": "Optional AI-generated atmospheric background metadata; never collection evidence."
+    },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "curatorialClaim": {
+      "type": "object",
+      "required": ["id", "text", "evidenceIds", "confidence"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "evidenceIds": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "confidence": { "enum": ["supported", "provisional", "uncertain"] }
+      }
+    },
+    "curatorialObjectDecision": {
+      "type": "object",
+      "required": ["itemId", "objectId", "role", "selectionRationale", "relation", "evidenceIds"],
+      "properties": {
+        "itemId": { "type": "string" },
+        "objectId": { "type": "string" },
+        "role": { "enum": ["opening", "context", "core_evidence", "contrast", "synthesis"] },
+        "selectionRationale": { "type": "string" },
+        "relation": { "type": "string" },
+        "evidenceIds": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "curatorialEthics": {
+      "type": "object",
+      "required": [
+        "provenanceStatus", "provenanceNotes", "culturalSensitivityStatus",
+        "culturalSensitivity", "communityReviewRequired", "communityReviewStatus",
+        "communityReviewNotes"
+      ],
+      "properties": {
+        "provenanceStatus": { "enum": ["not_reviewed", "unknown", "partial", "documented"] },
+        "provenanceNotes": { "type": "array", "items": { "type": "string" } },
+        "culturalSensitivityStatus": { "enum": ["not_reviewed", "unknown", "no_flags_after_review", "flags_present"] },
+        "culturalSensitivity": { "type": "array", "items": { "type": "string" } },
+        "communityReviewRequired": { "type": ["boolean", "null"] },
+        "communityReviewStatus": { "enum": ["not_assessed", "not_required", "required", "completed"] },
+        "communityReviewNotes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "interpretationPolicy": {
+      "type": "object",
+      "required": ["factPolicy", "inferencePolicy", "uncertaintyPolicy", "externalKnowledgeAllowed"],
+      "properties": {
+        "factPolicy": { "type": "string" },
+        "inferencePolicy": { "type": "string" },
+        "uncertaintyPolicy": { "type": "string" },
+        "externalKnowledgeAllowed": { "const": false }
+      }
+    },
+    "evaluationTarget": {
+      "type": "object",
+      "required": ["id", "statement", "method"],
+      "properties": {
+        "id": { "type": "string" },
+        "statement": { "type": "string" },
+        "method": { "enum": ["visitor_prompt", "comprehension_check", "expert_review"] }
+      }
+    },
+    "retrievalRecord": {
+      "type": "object",
+      "required": ["method", "version", "candidateCount", "selectedCount"],
+      "properties": {
+        "method": { "type": "string" },
+        "version": { "type": "string" },
+        "candidateCount": { "type": "integer", "minimum": 0 },
+        "selectedCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "publicCuratorialBrief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "status", "generatedAt", "visitorInquiry", "bigIdea",
+        "keyMessages", "criticalQuestions", "objects", "ethics",
+        "interpretationPolicy", "evaluationTargets", "retrieval"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "curatorial-brief/v1" },
+        "status": { "enum": ["deterministic", "model_refined"] },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "visitorInquiry": { "type": "string" },
+        "bigIdea": { "$ref": "#/$defs/curatorialClaim" },
+        "keyMessages": { "type": "array", "items": { "$ref": "#/$defs/curatorialClaim" } },
+        "criticalQuestions": { "type": "array", "items": { "type": "string" } },
+        "objects": { "type": "array", "items": { "$ref": "#/$defs/curatorialObjectDecision" } },
+        "ethics": { "$ref": "#/$defs/curatorialEthics" },
+        "interpretationPolicy": { "$ref": "#/$defs/interpretationPolicy" },
+        "evaluationTargets": { "type": "array", "items": { "$ref": "#/$defs/evaluationTarget" } },
+        "retrieval": { "$ref": "#/$defs/retrievalRecord" }
+      }
+    },
+    "publicEvidenceChunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "text", "sourceTitle", "sourceUrl", "sourceLocation",
+        "supports", "reviewStatus", "license", "rightsUri", "sourceKind"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "sourceTitle": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "sourceLocation": { "type": "string" },
+        "supports": { "type": "string" },
+        "reviewStatus": { "type": "string" },
+        "license": { "$ref": "#/$defs/nullableString" },
+        "rightsUri": { "$ref": "#/$defs/nullableString" },
+        "sourceKind": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "publicMuseumObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "accessionNumber", "title", "titleOriginal", "date", "maker",
+        "culture", "medium", "type", "imageUrl", "objectUrl", "rights",
+        "rightsUri", "imageLicense", "imageRightsUri", "metadataLicense",
+        "metadataRightsUri", "curatorialTextLicense", "curatorialTextRightsUri",
+        "altText", "evidence"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "accessionNumber": { "type": "string" },
+        "title": { "type": "string" },
+        "titleOriginal": { "$ref": "#/$defs/nullableString" },
+        "date": { "type": "string" },
+        "maker": { "$ref": "#/$defs/nullableString" },
+        "culture": { "$ref": "#/$defs/nullableString" },
+        "medium": { "type": "string" },
+        "type": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "objectUrl": { "type": "string" },
+        "rights": { "type": "string" },
+        "rightsUri": { "$ref": "#/$defs/nullableString" },
+        "imageLicense": { "$ref": "#/$defs/nullableString" },
+        "imageRightsUri": { "$ref": "#/$defs/nullableString" },
+        "metadataLicense": { "$ref": "#/$defs/nullableString" },
+        "metadataRightsUri": { "$ref": "#/$defs/nullableString" },
+        "curatorialTextLicense": { "$ref": "#/$defs/nullableString" },
+        "curatorialTextRightsUri": { "$ref": "#/$defs/nullableString" },
+        "altText": { "type": "string" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/publicEvidenceChunk" }
+        }
+      }
+    }
+  }
+}

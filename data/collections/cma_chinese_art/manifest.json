@@ -1,0 +1,78 @@
+{
+  "schema_version": "1.0",
+  "id": "cma-chinese-art-cc0-seed",
+  "name": "Cleveland Museum of Art Chinese Art CC0 Seed",
+  "institution": "Cleveland Museum of Art",
+  "version": "cma-chinese-art-cc0-20260806T044524Z",
+  "license": "CC0 1.0",
+  "licenseDetails": {
+    "metadata": "CC0 1.0",
+    "images": "CC0 1.0 for selected share_license_status=CC0 records",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "attribution_required": false,
+    "attribution_recommended": true
+  },
+  "sourceUrl": "https://openaccess-api.clevelandart.org/",
+  "questionCards": [
+    "中国山水作品为什么不能只被理解为对自然风景的写生记录？",
+    "画家反复仿效古代大师时，如何同时表达传承、选择与创新？",
+    "题跋、诗句与书法怎样改变一件绘画作品的观看顺序和意义？",
+    "礼器的形制、铭文和使用场景如何把社会或宗教秩序变成可见的形式？",
+    "材料、釉色和制作工艺怎样影响器物的用途、外观与意义？",
+    "佛教图像与器物如何通过材质、造型和用途进入中国宗教生活？"
+  ],
+  "collection_id": "cma-chinese-art-cc0-seed",
+  "collection_version": "cma-chinese-art-cc0-20260806T044524Z",
+  "generated_at": "2026-08-06T04:45:24Z",
+  "importer": {
+    "path": "scripts/import_cma_chinese_art.py",
+    "version": "1.0.0",
+    "requires_api_key": false
+  },
+  "counts": {
+    "objects": 60,
+    "themes": 2,
+    "question_cards": 6,
+    "regression_questions": 30,
+    "evidence_chunks": 240
+  },
+  "files": [
+    {
+      "path": "data/collections/cma_chinese_art/README.md",
+      "bytes": 1445,
+      "sha256": "bdb7ea5b86ace9ada142d107b1fe44f4b8ddd4c210a0f2fce2fed1e7c55ed4fb"
+    },
+    {
+      "path": "data/collections/cma_chinese_art/objects.json",
+      "bytes": 390563,
+      "sha256": "f9203807fe783c83fe6a630dd5e37586bd9c2c4ad9aa9d273513a059cbd2ff60"
+    },
+    {
+      "path": "data/collections/cma_chinese_art/collection.json",
+      "bytes": 2638,
+      "sha256": "5875732f323e387798c0905d40f1275aba4290def660ad53f9faad5f83652999"
+    },
+    {
+      "path": "data/collections/cma_chinese_art/question_cards.json",
+      "bytes": 6212,
+      "sha256": "e172232b3d32d3c3f201ef16574bfefd90b5fba9c628d62856c816dcba73e82a"
+    },
+    {
+      "path": "data/collections/cma_chinese_art/regression_questions.json",
+      "bytes": 11958,
+      "sha256": "f15b78c231c7486721c00f2137df1334782ff026f25214ddb86dd2bec4690c4c"
+    },
+    {
+      "path": "data/collections/cma_chinese_art/rights_audit.md",
+      "bytes": 3010,
+      "sha256": "70c5d0b40b89de942400fe4b260992306e7a764aa0c17ad806f323f681291e94"
+    },
+    {
+      "path": "data/collections/cma_chinese_art/raw/snapshots/20260806T044524Z/raw_manifest.json",
+      "bytes": 49549,
+      "sha256": "5f3bc36e2a9c8b10d000c662436c909802b84bfdb958f0b162c7331f020b5792"
+    }
+  ],
+  "raw_response_count": 66,
+  "raw_snapshot": "data/collections/cma_chinese_art/raw/snapshots/20260806T044524Z"
+}

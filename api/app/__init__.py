@@ -1,0 +1,2 @@
+"""Inquiry Curator API package."""
+

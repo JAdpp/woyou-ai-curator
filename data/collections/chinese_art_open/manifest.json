@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "2.0",
+  "importerVersion": "2.0.0",
+  "id": "chinese_art_open",
+  "name": "东亚艺术开放馆藏（三馆合并）",
+  "institution": "Cleveland Museum of Art · Art Institute of Chicago · The Metropolitan Museum of Art",
+  "version": "20260808-1817",
+  "generatedAt": "2026-08-08T06:35:44Z",
+  "objectCount": 1817,
+  "license": {
+    "images": "CC0 1.0 / Public Domain, institution-hosted originals only",
+    "metadata": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sourceUrl": "https://www.clevelandart.org/open-access",
+  "institutionDistribution": {
+    "The Metropolitan Museum of Art": 1046,
+    "Cleveland Museum of Art": 771
+  },
+  "evidenceDepthDistribution": {
+    "thin": 1070,
+    "full": 747
+  },
+  "evidenceDomains": [
+    {
+      "id": "landscape-brush",
+      "label": "山水与笔墨",
+      "description": "山水、花鸟与文人绘画，及其笔法、皴染与画面结构。",
+      "objectCount": 571,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "calligraphy-inscription",
+      "label": "书写、题跋与铭文",
+      "description": "书法作品、画上题跋、器物铭文与印章，及其与图像的关系。",
+      "objectCount": 105,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "ritual-bronze",
+      "label": "礼器与青铜",
+      "description": "商周礼器、祭祀用具与其铭文、纹饰及使用场景。",
+      "objectCount": 292,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "ceramics-glaze",
+      "label": "陶瓷与釉色",
+      "description": "陶瓷器形、釉色与烧造工艺，含青花、青瓷、白瓷与彩瓷。",
+      "objectCount": 503,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "buddhist-devotion",
+      "label": "佛教造像与信仰",
+      "description": "佛教、道教造像与法器，及其仪轨、供养与图像程式。",
+      "objectCount": 228,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "funerary-afterlife",
+      "label": "丧葬与来世观",
+      "description": "墓葬明器、俑像与随葬品所反映的死亡观念与身后世界想象。",
+      "objectCount": 74,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "court-daily-life",
+      "label": "宫廷、服饰与日常",
+      "description": "宫廷器用、家具、服饰纺织与日常生活用品所呈现的身份与礼制。",
+      "objectCount": 284,
+      "meetsMinimum": true,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "trade-exchange",
+      "label": "贸易与跨文化交流",
+      "description": "沿丝路与海路流动的器物、外销品与外来母题的本地转化。",
+      "objectCount": 27,
+      "meetsMinimum": false,
+      "note": "语料路由标签，不是访客端固定策展主题。"
+    }
+  ],
+  "snapshotIds": {
+    "met": "20260808T052143Z",
+    "cma": "20260807T171812Z",
+    "aic": "20260807T171759Z"
+  },
+  "boundaries": [
+    "覆盖域为语料路由标签，不是访客端固定策展主题。",
+    "evidenceDepth=thin 的对象不得承担核心证据策展角色。",
+    "机构原文直引保持原样，不翻译后冒充原文。"
+  ]
+}

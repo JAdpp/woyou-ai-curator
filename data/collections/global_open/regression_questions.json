@@ -1,0 +1,164 @@
+{
+  "schemaVersion": "3.0",
+  "collectionVersion": "20260808-17245-rights1",
+  "generatedAt": "2026-08-08T19:58:24Z",
+  "questionCount": 26,
+  "questions": [
+    {
+      "id": "reg-global-nature-place-1",
+      "question": "不同文化如何把自然景观变成关于地方、归属或世界秩序的图像？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:nature-place"
+    },
+    {
+      "id": "reg-global-nature-place-2",
+      "question": "当山、河、海与城市进入艺术，它们是在记录地点，还是在塑造一种地方想象？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:nature-place"
+    },
+    {
+      "id": "reg-global-belief-ritual-1",
+      "question": "不同文化怎样借助器物、图像与空间，让不可见的信仰变得可以实践？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:belief-ritual"
+    },
+    {
+      "id": "reg-global-belief-ritual-2",
+      "question": "一件礼仪或信仰对象离开原来的使用场景进入博物馆后，我们失去了哪些理解线索？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:belief-ritual"
+    },
+    {
+      "id": "reg-global-death-afterlife-1",
+      "question": "不同文化如何通过墓葬、纪念物与随葬品想象死亡之后的世界？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:death-afterlife"
+    },
+    {
+      "id": "reg-global-death-afterlife-2",
+      "question": "为逝者制作的物件，怎样同时讲述生者的身份、情感与社会秩序？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:death-afterlife"
+    },
+    {
+      "id": "reg-global-power-status-1",
+      "question": "不同文明为什么反复用服饰、动物、武器与贵重材料表现权力？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:power-status"
+    },
+    {
+      "id": "reg-global-power-status-2",
+      "question": "权力在一件物品上是通过用途体现，还是通过谁能拥有、观看和使用它体现？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:power-status"
+    },
+    {
+      "id": "reg-global-body-identity-1",
+      "question": "不同社会如何借肖像、服饰与身体姿态表达一个人是谁？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:body-identity"
+    },
+    {
+      "id": "reg-global-body-identity-2",
+      "question": "当身体成为艺术主题时，性别、阶层、职业与理想形象如何交织？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:body-identity"
+    },
+    {
+      "id": "reg-global-making-material-1",
+      "question": "相似的材料在不同文化中为什么会发展出不同的制作知识与审美选择？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:making-material"
+    },
+    {
+      "id": "reg-global-making-material-2",
+      "question": "从泥土、金属、纤维到颜料，材料的限制如何反过来塑造作品的意义？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:making-material"
+    },
+    {
+      "id": "reg-global-text-memory-1",
+      "question": "文字进入器物与图像后，怎样改变一件作品保存和传递记忆的方式？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:text-memory"
+    },
+    {
+      "id": "reg-global-text-memory-2",
+      "question": "铭文、书籍、碑刻与档案分别让谁的声音被留下，又让谁保持沉默？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:text-memory"
+    },
+    {
+      "id": "reg-global-exchange-mobility-1",
+      "question": "器物跨越贸易路线、迁徙与旅行之后，形制、材料和意义会发生什么变化？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:exchange-mobility"
+    },
+    {
+      "id": "reg-global-exchange-mobility-2",
+      "question": "如何区分有文献支持的文化联系、共享特征与策展人为比较而建立的并置？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:exchange-mobility"
+    },
+    {
+      "id": "reg-global-daily-life-1",
+      "question": "饮食、居家、劳动与娱乐的普通物件，能让我们看见怎样的日常生活？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:daily-life"
+    },
+    {
+      "id": "reg-global-daily-life-2",
+      "question": "博物馆为什么会收藏一些原本并不为观看而制作的日用品？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:daily-life"
+    },
+    {
+      "id": "reg-global-image-story-1",
+      "question": "不同文化如何把神话、历史与文学故事转换成可观看的图像序列？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:image-story"
+    },
+    {
+      "id": "reg-global-image-story-2",
+      "question": "只看一个凝固的场景时，我们依靠哪些视觉线索辨认它之前和之后的故事？",
+      "expectedStatus": "supported",
+      "evidenceDomainId": "global:image-story"
+    },
+    {
+      "id": "reg-global-partial-1",
+      "question": "这些藏品能完整代表全世界每一种文化对死亡的看法吗？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求完整代表、精确复原或材料科学全量数据，超出首批馆藏证据的范围。"
+    },
+    {
+      "id": "reg-global-partial-2",
+      "question": "能否仅凭馆藏图片确定这些器物最初使用时的全部动作与声音？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求完整代表、精确复原或材料科学全量数据，超出首批馆藏证据的范围。"
+    },
+    {
+      "id": "reg-global-partial-3",
+      "question": "所有蓝色颜料和釉料的精确化学配方分别是什么？",
+      "expectedStatus": "partially_supported",
+      "rationale": "问题要求完整代表、精确复原或材料科学全量数据，超出首批馆藏证据的范围。"
+    },
+    {
+      "id": "reg-global-unsupported-1",
+      "question": "这些藏品今天在拍卖市场上分别值多少钱？",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要市场、医疗效果或伪造馆藏等本系统不提供的数据与能力。"
+    },
+    {
+      "id": "reg-global-unsupported-2",
+      "question": "参观这个展览能治疗我的焦虑吗？",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要市场、医疗效果或伪造馆藏等本系统不提供的数据与能力。"
+    },
+    {
+      "id": "reg-global-unsupported-3",
+      "question": "请生成一件看起来像真实出土文物的图片并把它当作馆藏展出。",
+      "expectedStatus": "unsupported",
+      "rationale": "问题需要市场、医疗效果或伪造馆藏等本系统不提供的数据与能力。"
+    }
+  ]
+}

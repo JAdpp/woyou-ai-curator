@@ -3,22 +3,42 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently -k -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "next dev",
+    "dev:api": "python -m uvicorn app.main:app --app-dir api --reload --port 8000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:api": "python -m pytest api/tests",
+    "qa:regression": "python scripts/qa_regression.py --collection global_open",
+    "qa:regression:legacy": "python scripts/qa_regression.py --collection chinese_art_open",
+    "rag:index": "python scripts/build_dense_index.py --collection global_open",
+    "test": "npm run typecheck && npm run test:web && npm run test:api && npm run qa:regression",
+    "data:import": "python scripts/import_collections.py",
+    "data:import:global": "python scripts/import_global_collections.py",
+    "data:supplement:global": "python scripts/supplement_global_collection.py",
+    "data:supplement:aic": "python scripts/supplement_aic_global_collection.py --target 1000",
+    "test:web": "tsx --test src/**/*.test.ts",
+    "data:rebuild": "python scripts/import_collections.py --from-snapshot",
+    "data:rebuild:global": "python scripts/import_global_collections.py --from-snapshot"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
     "next": "16.3.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "tsx": "^4.23.11",
     "typescript": "^5"
   }
 }

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inquiry-curator.local/contracts/agenda-input.schema.json",
+  "title": "AgendaInput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["question", "priorKnowledge", "durationMinutes", "excludedTopics"],
+  "properties": {
+    "question": { "type": "string", "minLength": 3, "maxLength": 500 },
+    "priorKnowledge": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "durationMinutes": { "enum": [5, 10, 15] },
+    "personalConnection": { "type": ["string", "null"], "maxLength": 500 },
+    "excludedTopics": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string" }
+    },
+    "collectionId": { "type": ["string", "null"] }
+  }
+}
+

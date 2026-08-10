@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inquiry-curator.local/contracts/agenda-check.schema.json",
+  "title": "AgendaCheckResponse",
+  "type": "object",
+  "required": [
+    "status",
+    "canGenerate",
+    "exhibitionTheme",
+    "supportedAspects",
+    "coverageGaps",
+    "evidenceRoles",
+    "collectionVersion",
+    "recommendedQuestions",
+    "coverage"
+  ],
+  "properties": {
+    "status": {
+      "enum": ["supported", "partially_supported", "unsupported"]
+    },
+    "canGenerate": { "type": "boolean" },
+    "exhibitionTheme": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "A conservative, query-specific visitor-facing theme."
+    },
+    "answerablePart": { "type": ["string", "null"] },
+    "gaps": { "type": "array", "items": { "type": "string" } },
+    "supportedAspects": { "type": "array", "items": { "type": "string" } },
+    "coverageGaps": { "type": "array", "items": { "type": "string" } },
+    "evidenceRoles": { "type": "array", "items": { "type": "string" } },
+    "collectionVersion": { "type": "string" },
+    "recommendedQuestions": { "type": "array", "items": { "type": "string" } },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "collectionId",
+        "collectionName",
+        "eligibleObjectCount",
+        "matchedObjectCount",
+        "evidenceDomainIds",
+        "candidateObjectIds"
+      ],
+      "properties": {
+        "collectionId": { "type": "string" },
+        "collectionName": { "type": "string" },
+        "eligibleObjectCount": { "type": "integer", "minimum": 0 },
+        "matchedObjectCount": { "type": "integer", "minimum": 0 },
+        "evidenceDomainIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Internal corpus-routing labels; clients must not present these as exhibition themes."
+        },
+        "candidateObjectIds": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+2026-08-08T19:32:22Z	[images] validating 1080 AIC images serially (>=1s apart)
+2026-08-08T19:34:11Z	  image check 100/1080
+2026-08-08T19:36:00Z	  image check 200/1080
+2026-08-08T19:37:47Z	  image check 300/1080
+2026-08-08T19:39:34Z	  image check 400/1080
+2026-08-08T19:41:28Z	  image check 500/1080
+2026-08-08T19:43:18Z	  image check 600/1080
+2026-08-08T19:45:08Z	  image check 700/1080
+2026-08-08T19:46:56Z	  image check 800/1080
+2026-08-08T19:48:45Z	  image check 900/1080
+2026-08-08T19:50:40Z	  image check 1000/1080
+2026-08-08T19:52:16Z	  image check complete: 1050 ok, 30 unreachable
+2026-08-08T19:52:16Z	       30 unreachable from www.artic.edu
+2026-08-08T19:52:46Z	wrote AIC-supplemented global_open: 17245 objects (20260808-17245); institutions={'aic': 1000, 'cma': 15199, 'met': 1046}

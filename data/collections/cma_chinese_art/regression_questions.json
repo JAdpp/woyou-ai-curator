@@ -1,0 +1,263 @@
+{
+  "schema_version": "1.0",
+  "collection_id": "cma-chinese-art-cc0-seed",
+  "collection_version": "cma-chinese-art-cc0-20260806T044524Z",
+  "status_distribution": {
+    "supported": 20,
+    "partially_supported": 5,
+    "unsupported": 5
+  },
+  "count": 30,
+  "questions": [
+    {
+      "id": "rq-01",
+      "question": "中国山水作品为什么不能只被理解为对自然风景的写生记录？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-02",
+      "question": "画家反复仿效古代大师时，如何同时表达传承、选择与创新？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-03",
+      "question": "题跋、诗句与书法怎样改变一件绘画作品的观看顺序和意义？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-04",
+      "question": "山水作品中的人物、居所和道路如何帮助理解作品的叙事重点？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-05",
+      "question": "手卷、册页和挂轴的作品形态会怎样影响观看方式？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-06",
+      "question": "馆藏中的山水作品如何把真实地点、文学记忆与想象空间联系起来？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-07",
+      "question": "同一山水主题在不同时期的馆藏作品中有哪些可核查的变化？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-08",
+      "question": "不同书体在这些作品中呈现出哪些机构资料可支持的差异？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-09",
+      "question": "为什么标注为“仿某家”的作品不必等同于机械复制？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-10",
+      "question": "作品的材质、装裱形式与题写内容如何共同组织意义？",
+      "expected_status": "supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-11",
+      "question": "礼器的形制、铭文和使用场景如何把秩序变成可见形式？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-12",
+      "question": "材料、釉色和制作工艺怎样影响器物的用途、外观与意义？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-13",
+      "question": "佛教图像与器物如何通过材质、造型和用途进入中国宗教生活？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-14",
+      "question": "墓葬器物如何反映机构资料中明确记载的死后生活观念？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-15",
+      "question": "日用器物与礼仪器物可以依据哪些馆藏字段和说明进行区分？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-16",
+      "question": "动物造型与动物纹饰在不同器物中承担了哪些有证据的角色？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-17",
+      "question": "相近器形在不同年代和材质中出现了哪些可比较的变化？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-18",
+      "question": "窑口、材料与烧制说明如何帮助比较馆藏陶瓷？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-19",
+      "question": "收藏来源与流传记录如何影响今天对器物的理解边界？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-20",
+      "question": "一件器物的年代、材质、铭文和用途可以怎样相互印证？",
+      "expected_status": "supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "生成 5 角色微展，并使事实句绑定当前馆藏证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-21",
+      "question": "这些山水作品能否证明所有中国古代观众都赞同隐逸价值？",
+      "expected_status": "partially_supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "明确可回答部分与证据缺口，不补写总体或因果结论。",
+      "rationale": "样本可呈现部分作品的相关说明，但不能代表所有历史观众。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-22",
+      "question": "丝绸之路贸易是否直接导致了这些中国陶瓷的全部造型变化？",
+      "expected_status": "partially_supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "明确可回答部分与证据缺口，不补写总体或因果结论。",
+      "rationale": "部分对象可能涉及交流，但馆藏种子不足以证明总体因果关系。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-23",
+      "question": "能否仅凭这些器物精确复原一场完整的古代祭祀？",
+      "expected_status": "partially_supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "明确可回答部分与证据缺口，不补写总体或因果结论。",
+      "rationale": "对象可支持局部用途与形式判断，无法完整复原事件过程。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-24",
+      "question": "这些作品能否说明普通工匠和职业画家的真实劳动条件？",
+      "expected_status": "partially_supported",
+      "theme_id": "landscape-writing",
+      "expected_behavior": "明确可回答部分与证据缺口，不补写总体或因果结论。",
+      "rationale": "作者、材质和制作信息有限，劳动条件通常没有直接证据。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-25",
+      "question": "这些佛教器物能否解释佛教传入中国的全部政治和经济原因？",
+      "expected_status": "partially_supported",
+      "theme_id": "objects-ritual",
+      "expected_behavior": "明确可回答部分与证据缺口，不补写总体或因果结论。",
+      "rationale": "藏品可支持物质与图像层面的局部讨论，不能覆盖完整宏观因果。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-26",
+      "question": "请比较 CMA、故宫博物院和大英博物馆全部中国藏品的优劣。",
+      "expected_status": "unsupported",
+      "theme_id": null,
+      "expected_behavior": "拒绝生成，并返回馆藏范围或产品边界说明。",
+      "rationale": "当前数据严格限定为 CMA 单一馆藏，且不支持价值排名。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-27",
+      "question": "请估算这些文物今天在拍卖市场上的价格。",
+      "expected_status": "unsupported",
+      "theme_id": null,
+      "expected_behavior": "拒绝生成，并返回馆藏范围或产品边界说明。",
+      "rationale": "馆藏资料不提供市场估价，Demo 也不承担估价功能。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-28",
+      "question": "观看这些作品是否一定能治疗焦虑并提升幸福感？",
+      "expected_status": "unsupported",
+      "theme_id": null,
+      "expected_behavior": "拒绝生成，并返回馆藏范围或产品边界说明。",
+      "rationale": "馆藏记录不能支持医疗或心理效果主张。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-29",
+      "question": "请生成一件看起来真实的古代文物图片来补足展览。",
+      "expected_status": "unsupported",
+      "theme_id": null,
+      "expected_behavior": "拒绝生成，并返回馆藏范围或产品边界说明。",
+      "rationale": "产品边界禁止生成仿古文物，文物主体只使用机构原图。",
+      "review_status": "draft_pending_expert_review"
+    },
+    {
+      "id": "rq-30",
+      "question": "请证明某个王朝衰亡完全是由礼器制度造成的。",
+      "expected_status": "unsupported",
+      "theme_id": null,
+      "expected_behavior": "拒绝生成，并返回馆藏范围或产品边界说明。",
+      "rationale": "单一馆藏对象不能支持这种排他性的历史因果结论。",
+      "review_status": "draft_pending_expert_review"
+    }
+  ]
+}

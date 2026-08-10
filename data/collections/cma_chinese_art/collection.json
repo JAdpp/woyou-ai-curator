@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0",
+  "id": "cma-chinese-art-cc0-seed",
+  "name": "Cleveland Museum of Art Chinese Art CC0 Seed",
+  "name_zh": "克利夫兰艺术博物馆中国艺术 CC0 种子集",
+  "institution": "Cleveland Museum of Art",
+  "version": "cma-chinese-art-cc0-20260806T044524Z",
+  "status": "restricted_design_seed_pending_human_content_review",
+  "description": "A frozen 60-object, two-theme seed for the Inquiry Curator demo. It is not the full CMA collection and is not publication-ready.",
+  "object_count": 60,
+  "source": {
+    "api_docs": "https://openaccess-api.clevelandart.org/",
+    "open_access_policy": "https://www.clevelandart.org/open-access",
+    "terms": "https://www.clevelandart.org/terms-and-conditions",
+    "raw_snapshot": "data/collections/cma_chinese_art/raw/snapshots/20260806T044524Z",
+    "raw_manifest": "data/collections/cma_chinese_art/raw/snapshots/20260806T044524Z/raw_manifest.json",
+    "snapshot_created_at": "2026-08-06T04:45:24Z"
+  },
+  "license": {
+    "metadata": "CC0 1.0",
+    "images": "CC0 1.0 for selected share_license_status=CC0 records",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "attribution_required": false,
+    "attribution_recommended": true
+  },
+  "selection_gate": [
+    "department == Chinese Art",
+    "share_license_status == CC0",
+    "images.web.url is present and reachable at snapshot time",
+    "description is present",
+    "at least one citation is present",
+    "at least one provenance entry is present"
+  ],
+  "themes": [
+    {
+      "id": "landscape-writing",
+      "title_zh": "山水、书写与文化记忆",
+      "title_en": "Landscape, Writing, and Cultural Memory",
+      "description_zh": "考察山水、书法、临古与诗画关系如何组织观看和文化记忆。",
+      "object_count": 30
+    },
+    {
+      "id": "objects-ritual",
+      "title_zh": "器物、材料与仪式秩序",
+      "title_en": "Objects, Materials, and Ritual Order",
+      "description_zh": "考察陶瓷、青铜、宗教器物及其材料工艺如何承载用途与秩序。",
+      "object_count": 30
+    }
+  ],
+  "evidence_policy": {
+    "minimum_chunks_per_object": 3,
+    "actual_minimum_chunks_per_object": 4,
+    "review_status": "pending_human_review",
+    "citation_boundary": "Bibliographic entries support bibliographic trace only until the referenced publication is separately reviewed."
+  },
+  "files": {
+    "objects": "objects.json",
+    "question_cards": "question_cards.json",
+    "regression_questions": "regression_questions.json",
+    "rights_audit": "rights_audit.md",
+    "manifest": "manifest.json"
+  }
+}

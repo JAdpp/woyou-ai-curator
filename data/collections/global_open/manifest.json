@@ -1,0 +1,833 @@
+{
+  "schemaVersion": "3.0",
+  "importerVersion": "3.0.0",
+  "id": "global_open",
+  "name": "卧游·全球开放馆藏（首批）",
+  "institution": "Art Institute of Chicago · Cleveland Museum of Art · The Metropolitan Museum of Art",
+  "scope": "global",
+  "version": "20260808-17245-rights1",
+  "generatedAt": "2026-08-08T19:58:24Z",
+  "objectCount": 17245,
+  "objectsSha256": "8dc087e9d3a25ae075b9710d0ccecf93bff1e1f43341cb9305d1175c42f43cd7",
+  "servingReady": true,
+  "rightsSchemaVersion": "1.0",
+  "license": {
+    "images": "Per-object imageLicense / imageRightsUri; institution-hosted originals only",
+    "metadata": "Per-object metadataLicense / metadataRightsUri",
+    "curatorialText": "Per-object curatorialTextLicense and per-chunk evidence[].license / rightsUri",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "legacyLicenseUrlScope": "image_and_metadata_only"
+  },
+  "rightsByInstitution": [
+    {
+      "institutionId": "cma",
+      "objects": 15199,
+      "objectGate": "share_license_status=CC0 AND has_image=1",
+      "imageLicense": "CC0 1.0",
+      "imageRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "metadataLicense": "CC0 1.0",
+      "metadataRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "curatorialTextLicense": "CC0 1.0",
+      "curatorialTextRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sourceUrl": "https://www.clevelandart.org/open-access"
+    },
+    {
+      "institutionId": "met",
+      "objects": 1046,
+      "objectGate": "isPublicDomain=true AND imageValidation.ok=true",
+      "imageLicense": "CC0 1.0",
+      "imageRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "metadataLicense": "CC0 1.0",
+      "metadataRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "curatorialTextLicense": null,
+      "curatorialTextRightsUri": null,
+      "sourceUrl": "https://www.metmuseum.org/about-the-met/policies-and-documents/open-access"
+    },
+    {
+      "institutionId": "aic",
+      "objects": 1000,
+      "objectGate": "is_public_domain=true AND imageValidation.ok=true",
+      "imageLicense": "CC0 1.0",
+      "imageRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "metadataLicense": "CC0 1.0",
+      "metadataRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "curatorialTextLicense": "CC BY 4.0",
+      "curatorialTextRightsUri": "https://creativecommons.org/licenses/by/4.0/",
+      "curatorialTextField": "description",
+      "shortDescriptionLicense": "CC0 1.0",
+      "shortDescriptionRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sourceUrl": "https://api.artic.edu/docs/"
+    }
+  ],
+  "sourceUrl": "https://openaccess-api.clevelandart.org/",
+  "institutionDistribution": {
+    "Art Institute of Chicago": 1000,
+    "Cleveland Museum of Art": 15199,
+    "The Metropolitan Museum of Art": 1046
+  },
+  "evidenceDepthDistribution": {
+    "thin": 11119,
+    "full": 6126
+  },
+  "unroutedObjectCount": 517,
+  "unassignedCulturePackCount": 234,
+  "culturePackAssignmentRate": 0.9864,
+  "evidenceDomainRoutingRate": 0.97,
+  "imageValidation": {
+    "mode": "full_remote_check",
+    "validatedObjectCount": 17245
+  },
+  "snapshotIds": {
+    "cma": "20260808T170042Z",
+    "metSeedCollection": "chinese_art_open",
+    "cmaSupplement:Indian and Southeast Asian Art": "20260808T174303Z",
+    "aicGlobal:20260808T191739Z": "20260808T191739Z"
+  },
+  "sampling": {
+    "strategy": "CMA department water-fill + verified Met seed + AIC department/culture/material stratification",
+    "representativeOfWorldCollections": false,
+    "note": "Serving corpus balances discoverability; it is not a prevalence estimate.",
+    "aicSamplingVersion": "aic-global-strata-v1",
+    "aicTarget": 1000,
+    "aicRequiredArtworkIds": [
+      58075
+    ],
+    "aicSnapshotId": "20260808T191739Z"
+  },
+  "taxonomyVersion": "1.1.0",
+  "routingVersion": "1.1.0",
+  "culturePacks": [
+    {
+      "id": "east_asia",
+      "label": "东亚",
+      "description": "中国、日本、朝鲜半岛及相关文化语境。",
+      "objectCount": 3741,
+      "fullEvidenceCount": 969,
+      "meetsMinimum": true,
+      "aliases": [
+        "东亚",
+        "中国",
+        "日本",
+        "韩国",
+        "朝鲜",
+        "蒙古"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "south_asia",
+      "label": "南亚",
+      "description": "印度次大陆、斯里兰卡及喜马拉雅相关文化语境。",
+      "objectCount": 692,
+      "fullEvidenceCount": 122,
+      "meetsMinimum": true,
+      "aliases": [
+        "南亚",
+        "印度",
+        "巴基斯坦",
+        "斯里兰卡",
+        "尼泊尔",
+        "喜马拉雅"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "southeast_asia",
+      "label": "东南亚",
+      "description": "东南亚大陆与岛屿区域的文化语境。",
+      "objectCount": 1309,
+      "fullEvidenceCount": 319,
+      "meetsMinimum": true,
+      "aliases": [
+        "东南亚",
+        "泰国",
+        "柬埔寨",
+        "越南",
+        "缅甸",
+        "印度尼西亚",
+        "菲律宾"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "west_asia_north_africa",
+      "label": "西亚与北非",
+      "description": "西亚、北非及跨区域伊斯兰文化语境。",
+      "objectCount": 1571,
+      "fullEvidenceCount": 625,
+      "meetsMinimum": true,
+      "aliases": [
+        "西亚",
+        "中东",
+        "北非",
+        "伊斯兰",
+        "埃及",
+        "波斯",
+        "伊朗",
+        "美索不达米亚"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "europe",
+      "label": "欧洲",
+      "description": "欧洲及古典地中海相关文化语境。",
+      "objectCount": 6875,
+      "fullEvidenceCount": 2719,
+      "meetsMinimum": true,
+      "aliases": [
+        "欧洲",
+        "英国",
+        "法国",
+        "德国",
+        "意大利",
+        "荷兰",
+        "西班牙",
+        "希腊",
+        "罗马"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "africa",
+      "label": "非洲",
+      "description": "撒哈拉以南非洲及非洲离散社群相关文化语境。",
+      "objectCount": 480,
+      "fullEvidenceCount": 314,
+      "meetsMinimum": true,
+      "aliases": [
+        "非洲",
+        "约鲁巴",
+        "贝宁",
+        "刚果",
+        "埃塞俄比亚",
+        "西非",
+        "东非",
+        "南部非洲"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "americas",
+      "label": "美洲",
+      "description": "北美、中美、南美及美洲原住民相关文化语境。",
+      "objectCount": 2765,
+      "fullEvidenceCount": 1036,
+      "meetsMinimum": true,
+      "aliases": [
+        "美洲",
+        "北美",
+        "拉丁美洲",
+        "中美洲",
+        "南美",
+        "玛雅",
+        "阿兹特克",
+        "印加"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    },
+    {
+      "id": "oceania",
+      "label": "大洋洲",
+      "description": "太平洋岛屿、澳大利亚原住民与新西兰毛利文化语境。",
+      "objectCount": 103,
+      "fullEvidenceCount": 61,
+      "meetsMinimum": false,
+      "aliases": [
+        "大洋洲",
+        "太平洋岛屿",
+        "波利尼西亚",
+        "美拉尼西亚",
+        "毛利",
+        "澳大利亚原住民"
+      ],
+      "note": "语料覆盖分面，不是单一、排他的文化身份判断。"
+    }
+  ],
+  "evidenceDomains": [
+    {
+      "id": "global:nature-place",
+      "scope": "global",
+      "label": "自然与地方",
+      "description": "自然景观、动植物、建成环境与地方经验。",
+      "objectCount": 655,
+      "fullEvidenceCount": 275,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:belief-ritual",
+      "scope": "global",
+      "label": "信仰与仪式",
+      "description": "宗教信仰、礼仪实践、神圣空间与供奉对象。",
+      "objectCount": 740,
+      "fullEvidenceCount": 282,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:death-afterlife",
+      "scope": "global",
+      "label": "死亡与来世",
+      "description": "丧葬、纪念、祖先观念与身后世界想象。",
+      "objectCount": 437,
+      "fullEvidenceCount": 263,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:power-status",
+      "scope": "global",
+      "label": "权力与身份秩序",
+      "description": "王权、政治权威、社会等级、战争与身份标识。",
+      "objectCount": 1753,
+      "fullEvidenceCount": 545,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:body-identity",
+      "scope": "global",
+      "label": "身体与身份",
+      "description": "肖像、身体表现、服饰、性别与社会身份。",
+      "objectCount": 2312,
+      "fullEvidenceCount": 962,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:making-material",
+      "scope": "global",
+      "label": "材料与制作",
+      "description": "材料、技术、工艺流程与制作者知识。",
+      "objectCount": 12051,
+      "fullEvidenceCount": 4676,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:text-memory",
+      "scope": "global",
+      "label": "书写与记忆",
+      "description": "文字、铭文、书籍、档案与社会记忆。",
+      "objectCount": 2070,
+      "fullEvidenceCount": 991,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:exchange-mobility",
+      "scope": "global",
+      "label": "交流与流动",
+      "description": "贸易、迁徙、旅行、殖民接触与知识传播。",
+      "objectCount": 118,
+      "fullEvidenceCount": 47,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:daily-life",
+      "scope": "global",
+      "label": "日常生活",
+      "description": "居家、饮食、劳动、娱乐与普通人的物质生活。",
+      "objectCount": 1486,
+      "fullEvidenceCount": 476,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    },
+    {
+      "id": "global:image-story",
+      "scope": "global",
+      "label": "图像、观看与故事",
+      "description": "绘画、版画、摄影、雕塑及其神话、历史与视觉叙事。",
+      "objectCount": 6609,
+      "fullEvidenceCount": 2601,
+      "meetsMinimum": true,
+      "offerInInterview": true,
+      "note": "跨文化语料路由标签，不是访客端固定策展主题。"
+    }
+  ],
+  "conceptAliases": {
+    "东亚": [
+      "east asia",
+      "china",
+      "japan",
+      "korea"
+    ],
+    "中国": [
+      "china",
+      "chinese"
+    ],
+    "日本": [
+      "japan",
+      "japanese"
+    ],
+    "朝鲜": [
+      "korea",
+      "korean"
+    ],
+    "韩国": [
+      "korea",
+      "korean"
+    ],
+    "南亚": [
+      "south asia",
+      "india",
+      "pakistan",
+      "sri lanka",
+      "nepal"
+    ],
+    "印度": [
+      "india",
+      "indian"
+    ],
+    "东南亚": [
+      "southeast asia",
+      "thailand",
+      "cambodia",
+      "vietnam",
+      "indonesia"
+    ],
+    "西亚": [
+      "west asia",
+      "middle east",
+      "near east"
+    ],
+    "中东": [
+      "middle east",
+      "west asia",
+      "near east"
+    ],
+    "北非": [
+      "north africa",
+      "egypt",
+      "morocco",
+      "algeria",
+      "tunisia"
+    ],
+    "伊斯兰": [
+      "islamic",
+      "islamic art",
+      "muslim"
+    ],
+    "埃及": [
+      "egypt",
+      "egyptian"
+    ],
+    "波斯": [
+      "persia",
+      "persian",
+      "iran",
+      "iranian"
+    ],
+    "欧洲": [
+      "europe",
+      "european"
+    ],
+    "非洲": [
+      "africa",
+      "african",
+      "sub-saharan africa"
+    ],
+    "美洲": [
+      "americas",
+      "american",
+      "mesoamerica",
+      "andean"
+    ],
+    "大洋洲": [
+      "oceania",
+      "oceanic",
+      "pacific islands"
+    ],
+    "自然": [
+      "nature",
+      "natural world",
+      "environment"
+    ],
+    "山水": [
+      "landscape",
+      "mountain",
+      "river",
+      "seascape"
+    ],
+    "风景": [
+      "landscape",
+      "seascape",
+      "view"
+    ],
+    "环境": [
+      "environment",
+      "ecology",
+      "natural world"
+    ],
+    "地方": [
+      "place",
+      "region",
+      "geography"
+    ],
+    "动物": [
+      "animal",
+      "animals",
+      "lion",
+      "dragon",
+      "bird",
+      "horse"
+    ],
+    "植物": [
+      "plant",
+      "plants",
+      "botanical",
+      "flower",
+      "tree"
+    ],
+    "信仰": [
+      "belief",
+      "religious",
+      "devotional",
+      "worship"
+    ],
+    "宗教": [
+      "religion",
+      "religious",
+      "sacred",
+      "devotional"
+    ],
+    "仪式": [
+      "ritual",
+      "ceremonial",
+      "ceremony",
+      "offering"
+    ],
+    "祭祀": [
+      "ritual",
+      "sacrifice",
+      "altar",
+      "offering"
+    ],
+    "神": [
+      "deity",
+      "god",
+      "goddess",
+      "divine"
+    ],
+    "死亡": [
+      "death",
+      "funerary",
+      "mortuary",
+      "burial",
+      "afterlife"
+    ],
+    "丧葬": [
+      "funerary",
+      "mortuary",
+      "burial",
+      "tomb"
+    ],
+    "墓葬": [
+      "tomb",
+      "burial",
+      "grave",
+      "grave goods"
+    ],
+    "来世": [
+      "afterlife",
+      "underworld",
+      "funerary"
+    ],
+    "祖先": [
+      "ancestor",
+      "ancestral",
+      "ancestor shrine"
+    ],
+    "权力": [
+      "power",
+      "authority",
+      "royal",
+      "imperial",
+      "ruler"
+    ],
+    "王权": [
+      "kingship",
+      "royal",
+      "king",
+      "regalia",
+      "throne"
+    ],
+    "等级": [
+      "rank",
+      "hierarchy",
+      "status",
+      "social order"
+    ],
+    "战争": [
+      "war",
+      "battle",
+      "military",
+      "weapon",
+      "armor"
+    ],
+    "身体": [
+      "body",
+      "human figure",
+      "figure",
+      "nude"
+    ],
+    "肖像": [
+      "portrait",
+      "self-portrait",
+      "likeness"
+    ],
+    "身份": [
+      "identity",
+      "status",
+      "rank",
+      "social identity"
+    ],
+    "性别": [
+      "gender",
+      "woman",
+      "women",
+      "man",
+      "men"
+    ],
+    "服饰": [
+      "dress",
+      "costume",
+      "garment",
+      "robe",
+      "clothing"
+    ],
+    "面具": [
+      "mask",
+      "masquerade"
+    ],
+    "材料": [
+      "material",
+      "medium",
+      "made from"
+    ],
+    "工艺": [
+      "technique",
+      "craft",
+      "making",
+      "manufacture"
+    ],
+    "陶瓷": [
+      "ceramic",
+      "ceramics",
+      "porcelain",
+      "pottery",
+      "stoneware",
+      "earthenware"
+    ],
+    "青花": [
+      "blue-and-white",
+      "blue and white",
+      "cobalt",
+      "underglaze blue"
+    ],
+    "纺织": [
+      "textile",
+      "woven",
+      "weaving",
+      "embroidery"
+    ],
+    "金属": [
+      "metal",
+      "metalwork",
+      "bronze",
+      "silver",
+      "gold"
+    ],
+    "青铜": [
+      "bronze",
+      "bronze vessel",
+      "cast bronze"
+    ],
+    "玉": [
+      "jade",
+      "nephrite",
+      "jadeite"
+    ],
+    "玻璃": [
+      "glass",
+      "glassware"
+    ],
+    "木雕": [
+      "wood carving",
+      "carved wood",
+      "wooden sculpture"
+    ],
+    "摄影": [
+      "photograph",
+      "photography",
+      "photographic"
+    ],
+    "文字": [
+      "writing",
+      "written text",
+      "script",
+      "inscription"
+    ],
+    "书写": [
+      "writing",
+      "script",
+      "calligraphy",
+      "manuscript"
+    ],
+    "书法": [
+      "calligraphy",
+      "script",
+      "brush writing"
+    ],
+    "铭文": [
+      "inscription",
+      "inscribed",
+      "epigraph"
+    ],
+    "书籍": [
+      "book",
+      "manuscript",
+      "codex",
+      "printed book"
+    ],
+    "记忆": [
+      "memory",
+      "memorial",
+      "commemoration",
+      "archive"
+    ],
+    "档案": [
+      "archive",
+      "document",
+      "record",
+      "historical document"
+    ],
+    "交流": [
+      "exchange",
+      "transmission",
+      "cross-cultural",
+      "contact"
+    ],
+    "跨文化": [
+      "cross-cultural",
+      "intercultural",
+      "exchange",
+      "transmission"
+    ],
+    "贸易": [
+      "trade",
+      "merchant",
+      "export",
+      "imported"
+    ],
+    "迁徙": [
+      "migration",
+      "migrant",
+      "diaspora",
+      "movement"
+    ],
+    "旅行": [
+      "travel",
+      "journey",
+      "traveler",
+      "pilgrimage"
+    ],
+    "丝路": [
+      "silk road",
+      "caravan",
+      "central asia",
+      "trade route"
+    ],
+    "日常": [
+      "daily life",
+      "everyday",
+      "domestic",
+      "household"
+    ],
+    "家庭": [
+      "family",
+      "household",
+      "domestic"
+    ],
+    "饮食": [
+      "food",
+      "cooking",
+      "drinking",
+      "dining"
+    ],
+    "劳动": [
+      "work",
+      "labor",
+      "labour",
+      "occupation"
+    ],
+    "游戏": [
+      "game",
+      "play",
+      "toy",
+      "entertainment"
+    ],
+    "神话": [
+      "myth",
+      "mythology",
+      "mythological",
+      "legend"
+    ],
+    "故事": [
+      "story",
+      "narrative",
+      "episode",
+      "scene"
+    ],
+    "叙事": [
+      "narrative",
+      "story",
+      "visual narrative"
+    ],
+    "英雄": [
+      "hero",
+      "heroic",
+      "epic"
+    ],
+    "蓝色": [
+      "blue",
+      "cobalt",
+      "azure",
+      "indigo",
+      "ultramarine"
+    ],
+    "红色": [
+      "red",
+      "vermilion",
+      "crimson",
+      "scarlet"
+    ],
+    "金色": [
+      "gold",
+      "gilded",
+      "gilt",
+      "golden"
+    ]
+  },
+  "boundaries": [
+    "CulturePack 是语料覆盖分面，不是单一、排他的文化身份结论。",
+    "全局证据域用于检索与覆盖审计，不是访客端预设策展主题。",
+    "规则只读取机构元数据；未命中规则的合格对象应保留并标记为未路由。"
+  ],
+  "sourceUrls": {
+    "cma": "https://openaccess-api.clevelandart.org/",
+    "met": "https://collectionapi.metmuseum.org/public/collection/v1/",
+    "aic": "https://api.artic.edu/api/v1/artworks/search"
+  }
+}

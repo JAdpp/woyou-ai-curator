@@ -1,0 +1,694 @@
+/* 3D hall: canvas fills the viewport, all text sits in an HTML layer above it.
+   The overlay is pointer-events:none by default so it never blocks clicking an
+   artwork; individual cards and controls opt back in. */
+
+.hallRoot {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #14110d;
+  color: #f3efe6;
+  font-family: var(--font-hall, ui-serif, "Songti SC", "Noto Serif CJK SC", serif);
+}
+
+.canvas {
+  position: absolute !important;
+  inset: 0;
+  touch-action: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.overlay > * {
+  pointer-events: auto;
+}
+
+.eyebrow {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  margin-bottom: 0.5rem;
+}
+
+/* ------------------------------------------------------------- top bar */
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem clamp(0.85rem, 3vw, 1.75rem);
+  background: linear-gradient(to bottom, rgba(12, 10, 8, 0.75), transparent);
+}
+
+.topRight {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.audioControl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.audioStatus {
+  max-width: 16rem;
+  color: rgba(243, 239, 230, 0.78);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.audioStatus[data-state="fallback"],
+.audioStatus[data-state="error"] {
+  color: #f0c783;
+}
+
+.ghostButton,
+.accessibleLink {
+  background: rgba(20, 17, 13, 0.92);
+  border: 1px solid rgba(243, 239, 230, 0.22);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.32rem;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ghostButton:hover:not(:disabled),
+.accessibleLink:hover {
+  border-color: rgba(243, 239, 230, 0.5);
+}
+
+.ghostButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ghostButton:focus-visible,
+.accessibleLink:focus-visible,
+.modeToggle button:focus-visible {
+  outline: 2px solid #e8c98a;
+  outline-offset: 2px;
+}
+
+.modeToggle {
+  display: flex;
+  border: 1px solid rgba(243, 239, 230, 0.22);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(20, 17, 13, 0.92);
+}
+
+.modeToggle button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+}
+
+.modeActive {
+  background: rgba(243, 239, 230, 0.92);
+  color: #1a1712;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------- cards */
+
+.lobbyCard,
+.chapterCard,
+.epilogueCard {
+  box-sizing: border-box;
+  margin: auto clamp(0.85rem, 4vw, 3rem);
+  max-width: 34rem;
+  background: rgba(16, 13, 10, 0.96);
+  border: 1px solid rgba(243, 239, 230, 0.15);
+  border-radius: 0.45rem;
+  padding: clamp(1.1rem, 3vw, 1.8rem);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
+  animation: cardIn 0.4s ease;
+  max-height: calc(100dvh - 12rem);
+  overflow-y: auto;
+}
+
+.labelCard {
+  position: absolute;
+  right: clamp(0.85rem, 3vw, 2rem);
+  bottom: 5.2rem;
+  width: min(25rem, calc(100vw - 1.7rem));
+  min-width: min(17rem, calc(100vw - 1.7rem));
+  min-height: 11rem;
+  max-width: min(35rem, calc(100vw - 1rem));
+  max-height: min(62dvh, 38rem);
+  overflow: auto;
+  resize: both;
+  background: rgba(16, 13, 10, 0.97);
+  border: 1px solid rgba(243, 239, 230, 0.2);
+  border-radius: 0.42rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
+  padding: 0;
+  animation: cardIn 0.28s ease;
+  z-index: 3;
+}
+
+.labelCard[data-positioned="true"] {
+  right: auto;
+  bottom: auto;
+}
+
+.labelCard[data-collapsed="true"] {
+  width: min(21rem, calc(100vw - 1.7rem)) !important;
+  height: auto !important;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  overflow: hidden;
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.lobbyCard {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 52rem;
+}
+
+@media (min-width: 860px) {
+  .lobbyCard { grid-template-columns: 20rem 1fr; align-items: start; }
+}
+
+.posterFrame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(243, 239, 230, 0.2);
+}
+
+.lobbyPoster {
+  min-width: 0;
+  margin: 0;
+}
+
+.posterFrame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.posterFallbackCopy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  padding: 1rem;
+  color: #f7f1e7;
+  background: linear-gradient(90deg, rgba(12, 10, 8, 0.92) 0%, rgba(12, 10, 8, 0.62) 62%, rgba(12, 10, 8, 0.08) 100%);
+  pointer-events: none;
+}
+
+.posterFallbackCopy small {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+}
+
+.posterFallbackCopy strong {
+  max-width: 90%;
+  font-family: "Noto Serif SC", "Source Han Serif SC", SimSun, serif;
+  font-size: clamp(1rem, 3vw, 1.45rem);
+  line-height: 1.2;
+}
+
+.posterFallbackCopy span {
+  max-width: 84%;
+  font-size: 0.66rem;
+  line-height: 1.4;
+  opacity: 0.86;
+}
+
+.posterCaption {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.66rem;
+  line-height: 1.4;
+  color: rgba(243, 239, 230, 0.68);
+  text-align: center;
+}
+
+.lobbyCard h1 {
+  font-size: clamp(1.5rem, 4.4vw, 2.2rem);
+  line-height: 1.25;
+  margin: 0 0 0.5rem;
+}
+
+.subtitle {
+  font-size: 1rem;
+  opacity: 0.8;
+  margin: 0 0 0.9rem;
+}
+
+.thesis {
+  line-height: 1.75;
+  margin: 0 0 1.1rem;
+  opacity: 0.92;
+}
+
+.lobbyStats {
+  display: flex;
+  gap: 1.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.lobbyStats div { margin: 0; }
+.lobbyStats dt { font-size: 0.72rem; opacity: 0.6; margin-bottom: 0.2rem; }
+.lobbyStats dd { margin: 0; font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+
+.primaryAction {
+  background: #e8c98a;
+  color: #1a1712;
+  border: none;
+  border-radius: 0.34rem;
+  padding: 0.62rem 1.4rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primaryAction:hover { background: #f0d69f; }
+
+.chapterCard {
+  max-width: 30rem;
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.chapterCard h2 {
+  font-size: clamp(1.6rem, 5vw, 2.4rem);
+  margin: 0 0 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.chapterCard p { line-height: 1.8; opacity: 0.88; margin: 0; }
+
+/* -------------------------------------------------------------- labels */
+
+.labelWindowBar {
+  min-height: 2.45rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.55rem;
+  border-bottom: 1px solid rgba(243, 239, 230, 0.14);
+  background: #211d17;
+}
+
+.labelCard[data-collapsed="true"] .labelWindowBar {
+  border-bottom: 0;
+}
+
+.dragHandle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.2rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragHandle:active { cursor: grabbing; }
+.dragHandle span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labelWindowActions {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.labelWindowActions button {
+  min-width: 2rem;
+  height: 1.8rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(243, 239, 230, 0.24);
+  border-radius: 0.25rem;
+  background: #17130f;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.dragHandle:focus-visible,
+.labelWindowActions button:focus-visible {
+  outline: 2px solid #e8c98a;
+  outline-offset: 2px;
+}
+
+.labelContent {
+  padding: 0.95rem 1rem 1.05rem;
+}
+
+.labelHead {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.roleTag,
+.depthTag {
+  font-size: 0.7rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(243, 239, 230, 0.28);
+}
+
+.depthTag {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.labelCard h2 {
+  font-size: 1.35rem;
+  line-height: 1.35;
+  margin: 0 0 0.25rem;
+}
+
+.originalTitle { margin: 0 0 0.35rem; opacity: 0.75; font-size: 1rem; }
+.tombstone { margin: 0 0 1rem; font-size: 0.84rem; opacity: 0.65; line-height: 1.6; }
+
+.labelBody p {
+  position: relative;
+  line-height: 1.8;
+  margin: 0 0 0.85rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid rgba(243, 239, 230, 0.25);
+}
+
+/* Sentence provenance is carried by a text tag as well as the border colour,
+   so it does not depend on colour perception. */
+.labelBody p[data-type="institution_fact"] { border-left-color: #8fb996; }
+.labelBody p[data-type="system_inference"] { border-left-color: #e8c98a; }
+.labelBody p[data-type="uncertain"] { border-left-color: #d09a7a; border-left-style: dashed; }
+
+.sentenceType {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.68rem;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+.labelActions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.labelActions button,
+.labelActions a {
+  background: none;
+  border: 1px solid rgba(243, 239, 230, 0.28);
+  border-radius: 0.3rem;
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sourcePanel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(243, 239, 230, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.sourcePanel h3 { font-size: 0.74rem; opacity: 0.6; margin: 0 0 0.3rem; font-weight: 500; }
+.sourcePanel p { margin: 0 0 0.25rem; font-size: 0.86rem; line-height: 1.7; }
+.sourcePanel small { font-size: 0.7rem; opacity: 0.5; }
+.sourceRights {
+  margin-top: 0.5rem !important;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(243, 239, 230, 0.12);
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.68rem !important;
+  opacity: 0.72;
+}
+.sourceRights a,
+.fieldRights a { color: inherit; text-underline-offset: 0.16em; }
+.fieldRights {
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(243, 239, 230, 0.16);
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+}
+.fieldRights div { display: grid; grid-template-columns: 5rem 1fr; gap: 0.65rem; }
+.fieldRights dt { opacity: 0.55; }
+.fieldRights dd { margin: 0; opacity: 0.8; }
+
+/* ------------------------------------------------------------ epilogue */
+
+.epilogueCard { margin-left: auto; margin-right: auto; width: min(40rem, calc(100vw - 1.7rem)); max-width: 40rem; }
+.epilogueCard > h2 { margin: 0 0 0.8rem; font-size: 1.45rem; }
+.epilogueText { line-height: 1.85; margin: 0 0 1.2rem; font-size: 1.05rem; }
+
+.boundaryDetails { margin: 1.2rem 0; font-size: 0.84rem; }
+.boundaryDetails summary { cursor: pointer; opacity: 0.7; }
+.boundaryDetails ul { margin: 0.6rem 0 0; padding-left: 1.1rem; }
+.boundaryDetails li { line-height: 1.7; margin-bottom: 0.35rem; opacity: 0.88; }
+
+.epilogueActions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+.epilogueActions button:not(.primaryAction) {
+  background: none;
+  border: 1px solid rgba(243, 239, 230, 0.28);
+  border-radius: 0.34rem;
+  padding: 0.62rem 1.2rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------- bottom bar */
+
+.bottomBar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  margin-top: auto;
+  padding: 1rem clamp(0.85rem, 3vw, 1.75rem) 1.4rem;
+  background: linear-gradient(to top, rgba(12, 10, 8, 0.8), transparent);
+}
+
+.bottomBar > button {
+  background: rgba(20, 17, 13, 0.92);
+  border: 1px solid rgba(243, 239, 230, 0.24);
+  color: inherit;
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.32rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bottomBar > button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.stopTrack {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  justify-content: center;
+  scrollbar-width: none;
+}
+
+.stopTrack::-webkit-scrollbar { display: none; }
+
+.stopDot,
+.stopActive {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: rgba(243, 239, 230, 0.3);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.stopDot[data-kind="chapter"],
+.stopActive[data-kind="chapter"] { border-radius: 2px; width: 0.75rem; }
+
+.stopActive { background: #e8c98a; transform: scale(1.5); }
+.stopDot:hover { background: rgba(243, 239, 230, 0.65); }
+
+.stopDot:focus-visible,
+.stopActive:focus-visible { outline: 2px solid #e8c98a; outline-offset: 3px; }
+
+/* --------------------------------------------------------- free walk */
+
+.freeWalkPrompt {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  background: rgba(16, 13, 10, 0.88);
+  border: 1px solid rgba(243, 239, 230, 0.18);
+  border-radius: 0.42rem;
+  padding: 1rem 1.4rem;
+  z-index: 4;
+}
+
+.freeWalkPrompt { top: 50%; transform: translate(-50%, -50%); }
+.freeWalkPrompt p { margin: 0 0 0.3rem; font-size: 1rem; }
+.freeWalkPrompt small { opacity: 0.65; font-size: 0.8rem; }
+
+.joystickBase {
+  position: absolute;
+  left: 1.5rem;
+  bottom: 2rem;
+  width: 7.5rem;
+  height: 7.5rem;
+  border-radius: 999px;
+  background: rgba(243, 239, 230, 0.1);
+  border: 1px solid rgba(243, 239, 230, 0.25);
+  touch-action: none;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+}
+
+.joystickKnob {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  background: rgba(243, 239, 230, 0.55);
+  pointer-events: none;
+}
+
+.motionNote {
+  position: absolute;
+  bottom: 0.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  opacity: 0.45;
+  margin: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobbyCard, .chapterCard, .labelCard, .epilogueCard { animation: none; }
+  .stopDot, .stopActive { transition: none; }
+}
+
+@media (max-width: 640px) {
+  .lobbyCard, .chapterCard, .epilogueCard {
+    width: calc(100vw - 1.2rem);
+    max-width: calc(100vw - 1.2rem);
+    margin-left: 0.6rem;
+    margin-right: 0.6rem;
+    max-height: calc(100dvh - 14rem);
+  }
+  .labelCard {
+    right: 0.6rem;
+    bottom: 4.7rem;
+    width: calc(100vw - 1.2rem);
+    max-width: calc(100vw - 1.2rem);
+    max-height: 48dvh;
+    resize: vertical;
+  }
+  .topBar {
+    padding: 0.7rem 0.6rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .topRight {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 0.35rem;
+  }
+  .audioControl {
+    align-items: flex-start;
+    max-width: 100%;
+  }
+  .audioStatus {
+    max-width: min(16rem, calc(100vw - 1.2rem));
+    text-align: left;
+  }
+  .ghostButton,
+  .accessibleLink {
+    padding: 0.34rem 0.55rem;
+    font-size: 0.74rem;
+  }
+  .modeToggle button {
+    padding: 0.34rem 0.58rem;
+    font-size: 0.74rem;
+  }
+  .bottomBar {
+    gap: 0.35rem;
+    padding: 0.7rem 0.6rem 0.9rem;
+  }
+  .bottomBar > button {
+    padding: 0.42rem 0.55rem;
+    font-size: 0.75rem;
+  }
+  .lobbyStats { gap: 1.1rem; }
+}
