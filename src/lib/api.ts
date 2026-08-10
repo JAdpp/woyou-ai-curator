@@ -14,7 +14,17 @@ import type {
   EpilogueChatCitation,
 } from "./types";
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const _envApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+export const API_BASE_URL = _envApiBase
+  ? _envApiBase
+  : // With no explicit base, server-side rendering talks to the FastAPI backend
+    // directly on loopback while the browser uses a relative path so it rides the
+    // same nginx origin it was served from.  A single baked absolute URL cannot
+    // satisfy both, and an empty env value must fall through to this split rather
+    // than short-circuit to "".
+    typeof window === "undefined"
+    ? "http://127.0.0.1:9001"
+    : "";
 
 export type AudioGuideKind = "lobby" | "chapter" | "artwork" | "epilogue";
 
@@ -421,10 +431,27 @@ export function generateExhibitionPoster(exhibitionId: string, force = false) {
   return request<Exhibition>(`/api/exhibitions/${exhibitionId}/poster${query}`, { method: "POST" });
 }
 
+/**
+ * `crypto.randomUUID` is gated to secure contexts, so it is missing when the
+ * demo is served over plain HTTP from an IP address. `getRandomValues` has no
+ * such gate, so build the v4 ourselves rather than throwing out of `logEvent`.
+ */
+function randomSessionId(): string {
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40; // version 4
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80; // variant 10
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function logEvent(event: string, exhibitionId?: string, properties: Record<string, unknown> = {}) {
   let sessionId = "server-unavailable";
   if (typeof window !== "undefined") {
-    sessionId = window.sessionStorage.getItem("inquiry-curator-session") ?? crypto.randomUUID();
+    sessionId = window.sessionStorage.getItem("inquiry-curator-session") ?? randomSessionId();
     window.sessionStorage.setItem("inquiry-curator-session", sessionId);
   }
   return request<{ accepted: boolean }>("/api/events", {
