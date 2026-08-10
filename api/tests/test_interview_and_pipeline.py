@@ -22,7 +22,7 @@ class _Obj:
 # ---------------------------------------------------------------- interview
 
 
-def test_interview_completes_within_six_turns_and_yields_a_usable_profile(
+def test_interview_completes_within_seven_turns_and_yields_a_usable_profile(
     client: TestClient,
 ) -> None:
     started = client.post("/api/interview/start")
@@ -35,7 +35,7 @@ def test_interview_completes_within_six_turns_and_yields_a_usable_profile(
     turns = 0
     while not state["complete"]:
         turns += 1
-        assert turns <= 6, "the interview must never exceed six turns"
+        assert turns <= 7, "the interview must never exceed seven turns"
         question = state["nextQuestion"]
         assert question["options"], f"question {question['id']} offered no options"
         answered = client.post(

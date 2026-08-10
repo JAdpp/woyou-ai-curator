@@ -421,22 +421,39 @@
   position: relative;
   line-height: 1.8;
   margin: 0 0 0.85rem;
-  padding-left: 0.85rem;
-  border-left: 2px solid rgba(243, 239, 230, 0.25);
 }
 
-/* Sentence provenance is carried by a text tag as well as the border colour,
-   so it does not depend on colour perception. */
-.labelBody p[data-type="institution_fact"] { border-left-color: #8fb996; }
-.labelBody p[data-type="system_inference"] { border-left-color: #e8c98a; }
-.labelBody p[data-type="uncertain"] { border-left-color: #d09a7a; border-left-style: dashed; }
-
+/* Provenance stays colour-coded, but on the tag rather than as a stripe down
+   the paragraph's edge. The tag's words remain the accessible carrier, so the
+   distinction never depends on colour perception. */
 .sentenceType {
   display: inline-block;
   margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid rgba(243, 239, 230, 0.25);
+  border-radius: 999px;
   font-size: 0.68rem;
-  opacity: 0.55;
+  opacity: 0.75;
   white-space: nowrap;
+}
+
+.labelBody p[data-type="institution_fact"] .sentenceType {
+  color: #8fb996;
+  border-color: rgb(143 185 150 / 55%);
+  background: rgb(143 185 150 / 12%);
+}
+
+.labelBody p[data-type="system_inference"] .sentenceType {
+  color: #e8c98a;
+  border-color: rgb(232 201 138 / 55%);
+  background: rgb(232 201 138 / 12%);
+}
+
+.labelBody p[data-type="uncertain"] .sentenceType {
+  color: #d09a7a;
+  border-color: rgb(208 154 122 / 60%);
+  border-style: dashed;
+  background: rgb(208 154 122 / 12%);
 }
 
 .labelActions {

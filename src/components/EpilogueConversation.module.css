@@ -17,7 +17,6 @@
     ),
     var(--note-paper);
   border: 1px solid var(--note-rule);
-  border-left: 3px solid var(--note-accent);
   padding: 1.15rem 1.15rem 1.05rem 3.05rem;
   text-align: left;
 }
@@ -273,8 +272,10 @@
   gap: 0.8rem;
   align-items: center;
   margin-top: 0.8rem;
-  border-left: 2px solid #a45342;
-  padding: 0.45rem 0 0.45rem 0.65rem;
+  border: 1px solid rgb(164 83 66 / 45%);
+  border-radius: 10px;
+  background: rgb(164 83 66 / 8%);
+  padding: 0.45rem 0.65rem;
   color: var(--note-muted);
   font-size: 0.78rem;
 }

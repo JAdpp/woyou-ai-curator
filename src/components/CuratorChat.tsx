@@ -93,6 +93,12 @@ export function CuratorChat({
               <span className={styles.bubbleSpeaker}>你</span>
               {turn.skipped ? "（跳过）" : turn.answerLabel || turn.freeText || turn.answerValue}
             </div>
+            {turn.curatorReply && (
+              <div className={styles.curatorBubble}>
+                <span className={styles.bubbleSpeaker}>{CURATOR_NAME} · AI 策展人</span>
+                <p>{turn.curatorReply}</p>
+              </div>
+            )}
           </div>
         ))}
 

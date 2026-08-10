@@ -11,7 +11,9 @@ Question design follows the visitor typologies in 01b §3.1:
   * duration    — Véron & Levasseur (1983) circulation styles, via DURATION_PLAN
   * label budget— Serrell (1997) on actual visitor attention
 
-Hard ceiling of six turns, four of them required.
+Hard ceiling of seven turns, four of them required. The seventh exists because
+a broad opening topic and a sharp specific question are different things: the
+visitor is asked for both, and the specific one anchors retrieval when given.
 """
 
 from __future__ import annotations
@@ -83,7 +85,18 @@ EXCLUSION_CHOICES = (
     ("none", "没有，都可以"),
 )
 
-TOTAL_STEPS = 5
+NO_OPEN_QUESTION_VALUE = "__no_question__"
+
+# Shown when the model is unavailable. Deliberately about how one looks at
+# objects rather than about any particular subject, so they stay true whatever
+# the collection turns out to hold.
+GENERIC_OPEN_QUESTIONS = (
+    "这些东西当初是做给谁看的？",
+    "同一个主题，不同地方的人做法差在哪里？",
+    "哪一件最不像它那个年代该有的样子？",
+)
+
+TOTAL_STEPS = 6
 
 
 class InterviewService:
@@ -96,6 +109,10 @@ class InterviewService:
         self.collections = collections
 
     # -- helpers ---------------------------------------------------------
+
+    def available_domains(self, collection: LoadedCollection) -> list[tuple[str, str, str]]:
+        """Public alias: the curator's voice must speak only of real coverage."""
+        return self._available_domains(collection)
 
     def _available_domains(self, collection: LoadedCollection) -> list[tuple[str, str, str]]:
         """Domains with enough routed objects to sustain a visit, richest first."""
@@ -200,6 +217,39 @@ class InterviewService:
         )
 
     @staticmethod
+    def open_question_question(
+        topic: str, suggestions: tuple[str, ...] = ()
+    ) -> InterviewQuestion:
+        """Ask for the one thing the visitor most wants answered.
+
+        The suggestions are offered as clickable starting points rather than a
+        closed menu: the field is free text, and none of the options commits
+        the collection to anything, because each is a question, not a promise.
+        """
+        subject = f"“{topic}”" if topic else "这个主题"
+        offered = tuple(suggestions) or GENERIC_OPEN_QUESTIONS
+        options = [
+            InterviewOption(value=text, label=text) for text in offered[:3]
+        ]
+        options.append(
+            InterviewOption(
+                value=NO_OPEN_QUESTION_VALUE,
+                label="暂时没有，你来带路",
+                hint=f"由{CURATOR_NAME}决定这条线怎么走",
+            )
+        )
+        return InterviewQuestion(
+            id=InterviewQuestionId.OPEN_QUESTION,
+            prompt=f"关于{subject}，你有什么特别好奇、特别想弄懂的问题吗？",
+            options=options,
+            allow_free_text=True,
+            free_text_placeholder="也可以直接写下你自己的问题…",
+            skippable=True,
+            step=5,
+            total_steps=TOTAL_STEPS,
+        )
+
+    @staticmethod
     def _exclusions_question() -> InterviewQuestion:
         return InterviewQuestion(
             id=InterviewQuestionId.EXCLUSIONS,
@@ -210,7 +260,7 @@ class InterviewService:
             ],
             multi_select=True,
             skippable=True,
-            step=5,
+            step=6,
             total_steps=TOTAL_STEPS,
         )
 
@@ -358,6 +408,21 @@ class InterviewService:
             else:
                 turn.answer_label = "保持原来的问题"
 
+        elif question_id == InterviewQuestionId.OPEN_QUESTION:
+            # The suggested options carry their own text as the value, so a
+            # clicked suggestion and a typed question land in the same field.
+            chosen = free_text or (
+                answer.value
+                if answer.value and answer.value != NO_OPEN_QUESTION_VALUE
+                else ""
+            )
+            if answer.skipped or not chosen:
+                turn.skipped = answer.skipped
+                turn.answer_label = "跳过" if answer.skipped else "交给策展人决定"
+            else:
+                profile.open_question = chosen[:300]
+                turn.answer_label = chosen[:60]
+
         elif question_id == InterviewQuestionId.EXCLUSIONS:
             if answer.skipped or not answer.value or answer.value == SKIP_VALUE:
                 turn.skipped = True
@@ -391,6 +456,11 @@ class InterviewService:
             return self._prior_knowledge_question(state.profile.curiosity_label)
         if InterviewQuestionId.DURATION not in asked:
             return self._duration_question()
+        # Asked before the answerability gate so that the sharper question is
+        # what gets probed; negotiating over the broad topic while ignoring the
+        # visitor's actual question would check the wrong thing.
+        if InterviewQuestionId.OPEN_QUESTION not in asked:
+            return self.open_question_question(state.profile.curiosity_label)
         if InterviewQuestionId.NEGOTIATION not in asked:
             negotiation = self._negotiation_question(state, collection)
             if negotiation is not None:

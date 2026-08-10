@@ -23,6 +23,7 @@ export type InterviewQuestionId =
   | "prior_knowledge"
   | "duration"
   | "negotiation"
+  | "open_question"
   | "exclusions";
 
 export interface InterviewOption {
@@ -51,12 +52,15 @@ export interface InterviewTurn {
   freeText?: string | null;
   skipped: boolean;
   answeredAt: string;
+  /** What the curator said back before moving on. Absent if the model was unavailable. */
+  curatorReply?: string | null;
 }
 
 export interface VisitorProfile {
   curiosityDomainId?: string | null;
   curiosityLabel: string;
   freeFormQuestion?: string | null;
+  openQuestion?: string | null;
   motivation: VisitorMotivation;
   priorKnowledge: PriorKnowledge;
   durationMinutes: 5 | 10 | 15;

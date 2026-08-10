@@ -42,7 +42,8 @@
   margin-top: 22px;
   color: #743d31;
   background: #f5e1dc;
-  border-left: 4px solid #b44532;
+  border: 1px solid rgb(180 69 50 / 45%);
+  border-radius: 8px;
   font-size: 12px;
 }
 
@@ -125,7 +126,8 @@
   margin-bottom: 14px;
   color: #42545a;
   background: #dbeaea;
-  border-left: 4px solid #176b70;
+  border: 1px solid rgb(23 107 112 / 40%);
+  border-radius: 8px;
   font-size: 11px;
   line-height: 1.7;
 }
@@ -356,7 +358,8 @@
   margin-top: 14px;
   list-style: none;
   background: #fff6e8;
-  border-left: 3px solid #9b5f19;
+  border: 1px solid rgb(155 95 25 / 40%);
+  border-radius: 8px;
 }
 
 .warningList li {
@@ -381,7 +384,8 @@
   margin-top: 14px;
   color: #6f3f0d;
   background: #fff6e8;
-  border-left: 3px solid #9b5f19;
+  border: 1px solid rgb(155 95 25 / 40%);
+  border-radius: 8px;
   font-size: 10px;
   line-height: 1.6;
 }
@@ -434,7 +438,8 @@
   margin: 0 0 18px;
   color: #42545a;
   background: #dbeaea;
-  border-left: 3px solid #176b70;
+  border: 1px solid rgb(23 107 112 / 40%);
+  border-radius: 8px;
   font-size: 10px;
   line-height: 1.65;
 }
@@ -643,12 +648,14 @@
 
 .ethicsReview dl > div[data-review-needed="true"] {
   background: #fff6e8;
-  border-left: 3px solid #9b5f19;
+  border: 1px solid rgb(155 95 25 / 40%);
+  border-radius: 8px;
 }
 
 .ethicsReview dl > div[data-review-needed="manual"] {
   background: #edf3f0;
-  border-left: 3px solid #176b70;
+  border: 1px solid rgb(23 107 112 / 40%);
+  border-radius: 8px;
 }
 
 .ethicsReview dt { color: #526963; }
@@ -693,7 +700,8 @@
   margin-top: 14px;
   color: #42545a;
   background: #f5e1dc;
-  border-left: 3px solid #b44532;
+  border: 1px solid rgb(180 69 50 / 45%);
+  border-radius: 8px;
   font-size: 11px;
   line-height: 1.65;
 }
@@ -715,7 +723,8 @@
   margin-top: 14px;
   color: #42545a;
   background: #edf3f0;
-  border-left: 3px solid #176b70;
+  border: 1px solid rgb(23 107 112 / 40%);
+  border-radius: 8px;
   cursor: pointer;
   font-size: 10px;
   line-height: 1.6;
@@ -782,7 +791,8 @@
   margin-top: 42px;
   color: #42545a;
   background: #dbeaea;
-  border-left: 4px solid #176b70;
+  border: 1px solid rgb(23 107 112 / 40%);
+  border-radius: 8px;
   font-size: 11px;
   line-height: 1.7;
 }

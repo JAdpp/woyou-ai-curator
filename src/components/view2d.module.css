@@ -257,9 +257,10 @@
 .briefDisclosure {
   max-width: 44rem;
   margin: 0 0 1.7rem;
-  padding-left: 0.9rem;
+  padding: 0.8rem 1rem;
   color: var(--muted);
-  border-left: 2px solid var(--accent);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
   font-size: 0.82rem;
   line-height: 1.75;
 }
@@ -509,22 +510,40 @@
 .label p {
   line-height: 1.85;
   margin: 0 0 0.9rem;
-  padding-left: 0.9rem;
-  border-left: 2px solid var(--hairline);
 }
 
-/* Provenance is signalled by a text tag as well as the border, so it never
-   relies on colour alone. */
-.label p[data-type="institution_fact"] { border-left-color: #6f8f74; }
-.label p[data-type="system_inference"] { border-left-color: var(--accent); }
-.label p[data-type="uncertain"] { border-left-color: #b57a58; border-left-style: dashed; }
-
+/* Where a sentence came from is the point of this label, so it stays
+   colour-coded — but on the provenance tag itself rather than as a stripe down
+   the paragraph's edge. The tag's words remain the accessible carrier, so the
+   distinction never rests on colour perception alone. */
 .sentenceType {
   display: inline-block;
   margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
   font-size: 0.68rem;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.label p[data-type="institution_fact"] .sentenceType {
+  color: #4f7357;
+  border-color: #6f8f74;
+  background: rgb(111 143 116 / 10%);
+}
+
+.label p[data-type="system_inference"] .sentenceType {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.label p[data-type="uncertain"] .sentenceType {
+  color: #9a5f3f;
+  border-color: #b57a58;
+  border-style: dashed;
+  background: rgb(181 122 88 / 10%);
 }
 
 .why { margin: 0 0 1rem; font-size: 0.9rem; }
@@ -624,8 +643,10 @@
 .versions p { font-size: 0.8rem; line-height: 1.7; color: var(--muted); margin: 0; }
 .versions .generationFallback {
   margin: 0 0 1.1rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--accent);
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--ink);
 }
 

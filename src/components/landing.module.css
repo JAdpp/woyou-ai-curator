@@ -301,8 +301,10 @@
 .caseQuestion,
 .caseArgument {
   max-width: 39rem;
-  padding-left: 1rem;
-  border-left: 3px solid var(--accent);
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .caseQuestion > span,
@@ -560,7 +562,7 @@
 .browserSheet > span:nth-of-type(3) { width: 58%; }
 
 .labelDemo { display: grid; align-content: center; gap: 0.9rem; }
-.labelDemo p { margin: 0; padding-left: 0.9rem; border-left: 2px solid var(--accent); font-size: 0.82rem; line-height: 1.7; }
+.labelDemo p { margin: 0; padding: 0.6rem 0.8rem; border: 1px solid var(--hairline); border-radius: 10px; font-size: 0.82rem; line-height: 1.7; }
 .labelDemo p:nth-child(2) { border-color: var(--verdigris); }
 .labelDemo p span { display: block; margin-bottom: 0.25rem; color: #60716b; font-size: 0.65rem; letter-spacing: 0.12em; }
 .labelDemo dl { display: flex; flex-wrap: wrap; gap: 0.7rem 2rem; margin: 0.6rem 0 0; border-top: 1px solid #bdcac3; padding-top: 0.8rem; }
@@ -645,8 +647,9 @@
 .methodBoundary {
   max-width: 48rem;
   margin: 1.4rem 0 0;
-  padding-left: 0.9rem;
-  border-left: 2px solid var(--accent);
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
   color: var(--muted);
   font: 0.76rem/1.8 ui-sans-serif, system-ui, sans-serif;
 }
@@ -753,8 +756,9 @@
   line-height: 2;
   color: var(--muted);
   max-width: 42rem;
-  padding-left: 0.9rem;
-  border-left: 2px solid var(--accent);
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
 }
 
 .how ol {

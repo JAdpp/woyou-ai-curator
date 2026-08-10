@@ -411,6 +411,9 @@ class VisitorProfile(ApiModel):
     curiosity_domain_id: str | None = None
     curiosity_label: str = ""
     free_form_question: str | None = Field(default=None, max_length=500)
+    # The one thing the visitor most wants answered, asked separately from the
+    # opening topic so a broad theme and a sharp question can coexist.
+    open_question: str | None = Field(default=None, max_length=300)
     motivation: VisitorMotivation = VisitorMotivation.EXPLORER
     prior_knowledge: Literal["none", "some", "familiar"] = "none"
     duration_minutes: Literal[5, 10, 15] = 10
@@ -438,8 +441,18 @@ class VisitorProfile(ApiModel):
         return self.plan[3]
 
     def to_agenda(self, collection_id: str | None = None) -> "AgendaInput":
-        """Bridge to the existing retrieval and answerability path."""
-        question = (self.free_form_question or self.curiosity_label or "这些藏品之间有什么关系").strip()
+        """Bridge to the existing retrieval and answerability path.
+
+        A specific open question outranks the opening topic: it is the sharper
+        statement of what the visitor came to find out, and it is what the
+        retrieval should be anchored on.
+        """
+        question = (
+            self.open_question
+            or self.free_form_question
+            or self.curiosity_label
+            or "这些藏品之间有什么关系"
+        ).strip()
         return AgendaInput(
             question=question,
             prior_knowledge=self.prior_knowledge,
@@ -1118,6 +1131,7 @@ class InterviewQuestionId(str, Enum):
     PRIOR_KNOWLEDGE = "prior_knowledge"
     DURATION = "duration"
     NEGOTIATION = "negotiation"
+    OPEN_QUESTION = "open_question"
     EXCLUSIONS = "exclusions"
 
 
@@ -1148,6 +1162,9 @@ class InterviewTurn(ApiModel):
     free_text: str | None = None
     skipped: bool = False
     answered_at: datetime = Field(default_factory=utc_now)
+    # What the curator said back before moving on. Absent when the model was
+    # unavailable and the deterministic path had nothing worth adding.
+    curator_reply: str | None = Field(default=None, max_length=300)
 
 
 class InterviewAnswer(ApiModel):

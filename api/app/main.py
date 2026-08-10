@@ -40,6 +40,7 @@ from .config import Settings
 from .epilogue_chat import EpilogueChatReferenceError, EpilogueChatService
 from .generator import ExhibitionGenerator
 from .images import ImageCache, ImageFetchError
+from . import interview_voice
 from .interview import MIN_DOMAIN_OBJECTS, InterviewService, domain_choices_for
 from .jobs import JobStore
 from .models import (
@@ -60,6 +61,7 @@ from .models import (
     GenerateFromProfileRequest,
     GenerationJob,
     InterviewAnswer,
+    InterviewQuestionId,
     InterviewState,
     ItemsPatchRequest,
     LOCKED_STATUSES,
@@ -631,13 +633,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return state
 
     @app.post("/api/interview/{interview_id}/answer", response_model=InterviewState)
-    def answer_interview(interview_id: str, answer: InterviewAnswer) -> InterviewState:
+    async def answer_interview(interview_id: str, answer: InterviewAnswer) -> InterviewState:
         state = interview_sessions.get(interview_id)
         if state is None:
             raise HTTPException(status_code=404, detail="Interview session not found.")
+        before = len(state.transcript)
         updated = interviews.answer(state, answer)
+        # A stale answer is ignored by the state machine and leaves the
+        # transcript untouched; there is nothing to speak to in that case.
+        if len(updated.transcript) > before:
+            await _voice_over_interview(updated)
         interview_sessions[interview_id] = updated
         return updated
+
+    async def _voice_over_interview(state: InterviewState) -> None:
+        """Attach the curator's spoken reply, and ground the next options in it.
+
+        Purely additive: the state machine has already decided the sequence, so
+        a provider failure leaves a working interview with one less sentence.
+        """
+        turn = state.transcript[-1]
+        next_question = state.next_question
+        wants_suggestions = (
+            next_question is not None
+            and next_question.id is InterviewQuestionId.OPEN_QUESTION
+        )
+        collection = collections.get(state.collection_id)
+        voice = await interview_voice.compose(
+            generator.provider,
+            question_id=turn.question_id,
+            answer_label=turn.answer_label,
+            free_text=turn.free_text,
+            skipped=turn.skipped,
+            topic=state.profile.curiosity_label,
+            available_domains=interviews.available_domains(collection),
+            want_suggestions=wants_suggestions,
+        )
+        turn.curator_reply = voice.reply
+        if wants_suggestions and voice.suggestions and next_question is not None:
+            state.next_question = InterviewService.open_question_question(
+                state.profile.curiosity_label, voice.suggestions
+            )
 
     # ------------------------------------------------------------------
     # Curation pipeline
