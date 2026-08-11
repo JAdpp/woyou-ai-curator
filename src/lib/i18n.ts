@@ -113,6 +113,283 @@ const COPY = {
     notStarted: line("策展没有启动，请重试。", "The curation didn't start. Please try again."),
     defaultFailed: line("没能启动默认策展，请重试。", "Couldn't start the default curation. Please try again."),
   },
+  landing: {
+    epigraph: line("澄怀观道，卧以游之。", "Clear the mind to see the way; travel it lying down."),
+    epigraphCite: line("— 宗炳《画山水序》，五世纪", "— Zong Bing, Preface on Landscape Painting, 5th c."),
+    heroTitle: line(
+      "把你的好奇，变成一座只为你搭的展厅。",
+      "Turn your curiosity into a room built for you alone.",
+    ),
+    heroBody: line(
+      "“AI 策展人彦远”会从涵盖全球多种文化的开放馆藏中检索、比较，并为你组织主题、章节与导览。",
+      "Yanyuan, the AI curator, searches and compares across open collections spanning many cultures, then organises a theme, its chapters and a route through them for you.",
+    ),
+    heroCta: line("和“AI 策展人彦远”聊聊", "Talk to Yanyuan, the AI curator"),
+    corpusLive: line(
+      "当前接入 {objects} 件开放馆藏，来自 {museums} 家博物馆；涵盖全球多种文化，许可逐字段记录。",
+      "Currently {objects} open collection objects from {museums} museums, spanning many cultures, with rights recorded field by field.",
+    ),
+    corpusLoading: line("正在读取当前冻结馆藏。", "Reading the current frozen collection."),
+    corpusOffline: line("馆藏数据暂未连接。", "The collection data is not connected."),
+
+    blueCaseTitle: line(
+      "相似的蓝，为什么会出现在中国瓷瓶、越南盘与伊朗陶器上？",
+      "Why does a similar blue turn up on a Chinese vase, a Vietnamese plate and an Iranian dish?",
+    ),
+    blueCaseLead: line(
+      "这个案例使用三件真实开放馆藏，展示“彦远”如何从访客问题提出可核查的策展命题。",
+      "Three real open-collection objects, showing how Yanyuan turns a visitor's question into a checkable curatorial proposition.",
+    ),
+    visitorQuestion: line("访客的问题", "The visitor's question"),
+    blueCaseQuestion: line(
+      "“我只知道青花瓷。蓝色是不是从中国传到世界各地的？”",
+      "“All I know is Chinese blue-and-white. Did the blue spread from China to everywhere else?”",
+    ),
+    blueCaseNote: line(
+      "系统先保留疑问，不把访客的猜测直接当成结论。",
+      "The system holds the question open rather than treating the guess as a finding.",
+    ),
+    blueCaseEvidenceLabel: line("蓝色案例中的三件馆藏证据", "Three collection objects in the blue case"),
+    caseJudgement: line("案例中的策展判断", "The curatorial judgement"),
+    blueCaseJudgement: line(
+      "相似的蓝色并不自动证明一条单向传播路线。把色彩与材料著录、胎釉、器形和年代放在一起，才能追问技术如何被不同地区重新制作和使用。",
+      "A similar blue does not by itself prove a one-way route of transmission. Only by putting the colour and material records, the body and glaze, the form and the dating side by side can you ask how a technique was remade and reused in different places.",
+    ),
+    blueCaseFooter: line(
+      "卡片中的题名、年代与材料来自三家博物馆的原始著录；联系与解释另行标记。",
+      "Titles, dates and materials on these cards come from the three museums' own records; connections and readings are marked separately.",
+    ),
+
+    catCaseTitle: line(
+      "同样是猫，为什么会走进安第斯陶碗、埃及青铜像与荷兰寓言画？",
+      "Why does the cat turn up in an Andean bowl, an Egyptian bronze and a Dutch fable painting?",
+    ),
+    catCaseLead: line(
+      "这个案例来自此前生成的“猫咪的千面形象”展览：共享一个动物主题，不等于共享一种象征意义。",
+      "From an exhibition generated earlier, “The Many Faces of the Cat”: sharing an animal does not mean sharing a symbolism.",
+    ),
+    catCaseQuestion: line(
+      "“各个文化里都有猫，它们是不是都代表神秘和好运？”",
+      "“Cats appear in every culture — do they all stand for mystery and good luck?”",
+    ),
+    catCaseNote: line(
+      "系统先检索“猫”本身，再比较器物用途、材料、时代与馆方说明。",
+      "The system retrieves the cat itself first, then compares each object's use, material, period and institutional description.",
+    ),
+    catCaseEvidenceLabel: line("猫主题案例中的三件馆藏证据", "Three collection objects in the cat case"),
+    catCaseJudgement: line(
+      "不能用一个“猫的象征意义”覆盖不同文化。猫进入容器装饰、小型金属像与寓言画的方式各不相同；比较应从这些可见差异和机构记录开始。",
+      "No single “meaning of the cat” covers these cultures. A cat enters vessel ornament, a small bronze figure and a moral fable in quite different ways; the comparison should start from those visible differences and from the institutional record.",
+    ),
+    catCaseFooter: line(
+      "三件展品的图片、基础元数据与馆方说明均按 CMA 的 CC0 开放记录使用。",
+      "Images, core metadata and institutional descriptions for all three are used under the Cleveland Museum of Art's CC0 open records.",
+    ),
+    swapForMine: line("换成我的好奇", "Use my own curiosity"),
+
+    featureTitle: line("AI策展人如何把问题变成展览", "How the AI curator turns a question into an exhibition"),
+    featureLead: line(
+      "“彦远”先了解访客，再检索和比较馆藏、安排展线，并为每件展品保留机构来源与字段许可。",
+      "Yanyuan gets to know the visitor first, then searches and compares the collection, lays out a route, and keeps each object's institutional source and per-field licence attached.",
+    ),
+    featureInterviewKicker: line("访谈", "Interview"),
+    featureInterviewTitle: line("先弄清你想怎么看", "First, how you want to look"),
+    featureInterviewBody: line(
+      "兴趣、参观倾向、熟悉程度、可用时间与不想看到的内容都会改变展品数量、解释深度和导览节奏；陌生题目会给出可选方向，也可直接跳过整段访谈。",
+      "Your interest, the kind of visit you want, how familiar you are, how long you have and what you would rather avoid all change the number of objects, the depth of explanation and the pace of the route. Unfamiliar subjects come with suggested directions, and the whole interview can be skipped.",
+    ),
+    featureInterviewDiagram: line(
+      "访谈示意：AI 策展人“彦远”询问哪一种好奇最接近今天想看的，访客回答想知道一种颜色怎样穿过不同文化，并选择第一次接触、约十分钟和不同地区。",
+      "Interview diagram: Yanyuan asks which curiosity comes closest to today's; the visitor answers that they want to know how one colour travelled across cultures, and picks first-time, about ten minutes, and different regions.",
+    ),
+    featureInterviewAsk: line("哪一种好奇最接近你今天想看的？", "Which curiosity is closest to what you want today?"),
+    featureInterviewReply: line("我想知道一种颜色怎样穿过不同文化。", "I want to know how one colour travelled across cultures."),
+    chipFirstTime: line("第一次接触", "First time"),
+    chipTenMinutes: line("约 10 分钟", "About 10 min"),
+    chipRegions: line("想看不同地区", "Different regions"),
+
+    featureSelectKicker: line("选择与编排", "Selection and sequencing"),
+    featureSelectTitle: line("主题按你的问题形成", "The theme forms around your question"),
+    featureSelectBody: line(
+      "“彦远”会从{scope}馆藏中检索、比较、排除，再形成主题、章节和展品角色。",
+      "Yanyuan searches, compares and rules out across {scope} of the collection, then forms the theme, the chapters and each object's role.",
+    ),
+    featureSelectScopeCount: line("当前 {n} 件", "the current {n} objects"),
+    featureSelectScopeUnknown: line("当前可用", "what is currently available"),
+    featureSelectDiagram: line(
+      "策展进度示意：依次理解问题、寻找证据、组织展线，并搭建采用连续动线的展厅。",
+      "Curation diagram: understand the question, find evidence, organise the route, then build a hall with one continuous path.",
+    ),
+    stepUnderstand: line("理解问题", "Understand the question"),
+    stepUnderstandDetail: line("已提取颜色、流动、跨文化", "Extracted: colour, movement, cross-cultural"),
+    stepEvidence: line("寻找证据", "Find evidence"),
+    stepEvidenceDetail: line("比较年代、材料与产地", "Comparing dates, materials and places of origin"),
+    stepRoute: line("组织展线", "Organise the route"),
+    stepRouteDetail: line("保留一件反例或限制", "Keeping one counter-example or limit"),
+    stepBuild: line("搭建展厅", "Build the hall"),
+    stepBuildDetail: line(
+      "用连续动线连接章节、导览与主题海报",
+      "One continuous path linking chapters, narration and the theme poster",
+    ),
+
+    featureVisitKicker: line("参观方式", "Ways to visit"),
+    featureVisitTitle: line("展品被放进一条空间叙事", "The objects sit in a spatial narrative"),
+    featureVisitBody: line(
+      "可开启千问 AI 合成的“彦远”专业讲述，并用镜头逐站推进；想停下来时可以随时切换自由行走，也可直接打开完整 2D 网页版。",
+      "You can turn on Yanyuan's studio narration, synthesised by Qwen, and let the camera move stop by stop; switch to walking freely whenever you want to linger, or open the full 2D web version instead.",
+    ),
+    featureVisitDiagram: line(
+      "同一展览的两种参观方式：左侧为带真实馆藏图像和连续动线的 3D 导览，右侧为包含题名、展品图、展签与来源的 2D 网页版。",
+      "Two ways through the same exhibition: on the left a 3D guided route with real collection images and one continuous path, on the right a 2D web version with title, images, labels and sources.",
+    ),
+    mode3d: line("3D 导览", "3D route"),
+    mode2d: line("2D 网页版", "2D web version"),
+    modeSampleTitle: line("相似的蓝", "A similar blue"),
+
+    featureSourceKicker: line("来源与许可", "Source and licence"),
+    featureSourceTitle: line("每件展品都保留来源", "Every object keeps its source"),
+    featureSourceBody: line(
+      "机构原文、系统转述与策展推断分开显示。题名、年代、材料、权利声明和机构对象页随展品保留，便于核对。",
+      "Institutional wording, system paraphrase and curatorial inference are shown apart from one another. Title, date, material, rights statement and the institution's own object page stay with the object so they can be checked.",
+    ),
+    featureSourceDiagram: line(
+      "展签来源面板示意：机构著录与策展解释分开显示，来源为芝加哥艺术博物馆；所示材质字段使用 CC0 1.0，馆方作品说明使用 CC BY 4.0。",
+      "Label source panel: institutional record and curatorial reading shown separately, source the Art Institute of Chicago; the material field under CC0 1.0, the institution's description under CC BY 4.0.",
+    ),
+    institutionalRecord: line("机构著录", "Institutional record"),
+    curatorialReading: line("策展解释", "Curatorial reading"),
+    featureSourceReadingSample: line(
+      "这件器物提供了另一种蓝白装饰的材料路径。",
+      "This object offers another material route to blue-and-white decoration.",
+    ),
+    source: line("来源", "Source"),
+    fieldLicence: line("字段许可", "Field licence"),
+
+    methodKicker: line("AI 技术 × 策展方法", "AI technique × curatorial method"),
+    methodTitle: line("AI 技术，服务于可检查的策展判断", "AI in service of a curatorial judgement you can check"),
+    methodLead: line(
+      "“彦远”不是先写故事、再寻找插图。它先从馆方著录与证据片段中召回候选，再把命题、分论点、对象角色和材料边界写进版本化策展简报。",
+      "Yanyuan does not write a story first and then look for pictures. It recalls candidates from institutional records and evidence excerpts, then writes the proposition, the sub-arguments, each object's role and the limits of the material into a versioned curatorial brief.",
+    ),
+    method01: line("混合 RAG", "Hybrid RAG"),
+    method01Body: line(
+      "字段检索与多语向量检索经 RRF 融合，再按证据片段和文化差异重排；主体硬门控减少答非所问。",
+      "Field search and multilingual vector search are fused with RRF, then re-ranked on evidence excerpts and cultural difference; a hard subject gate cuts down on answers to a question nobody asked.",
+    ),
+    method02Body: line(
+      "每场展览记录 Big Idea、关键问题、对象角色、入选与排除理由；来源史和文化敏感性未审状态不会被伪装成“已通过”。",
+      "Every exhibition records its big idea, critical questions, object roles, and the reasons for inclusion and exclusion. An unreviewed provenance or cultural-sensitivity status is never dressed up as “cleared”.",
+    ),
+    method03: line("证据约束写作", "Evidence-bound writing"),
+    method03Body: line(
+      "馆方事实、AI 策展解释与不确定说法分层；核心判断绑定同一对象的证据，证据较薄的对象不承担核心证据角色。",
+      "Institutional fact, curatorial reading and uncertain claim are kept in separate layers. A core judgement is bound to evidence from the same object, and thinly evidenced objects never carry a core evidential role.",
+    ),
+    method04: line("多模态呈现", "Multimodal presentation"),
+    method04Body: line(
+      "Qwen Image 3 优先生成主题主视觉，中文由排版器精确合成；千问 TTS 提供专业声线导览，服务不可用时明确回退设备语音。同一展览结构同时进入 3D 与 2D 网页版。",
+      "Qwen Image 3 generates the key visual, with any Chinese set precisely by a typesetter rather than the model; Qwen TTS supplies the studio voice, falling back visibly to the device voice when unavailable. The same exhibition structure drives both the 3D hall and the 2D web version.",
+    ),
+    methodBoundary: line(
+      "可追溯不等于专业审阅。卧游仍是内部研究 Demo；来源史、文化敏感性与相关社群审阅状态会如实保留。",
+      "Traceable is not the same as professionally reviewed. Woyou is an internal research demo; provenance, cultural sensitivity and community-review status are reported as they actually stand.",
+    ),
+
+    collectionLive: line(
+      "当前接入 {objects} 件开放馆藏，来自 {museums} 家博物馆。",
+      "Currently {objects} open collection objects from {museums} museums.",
+    ),
+    collectionLiveSub: line(
+      "语料涵盖全球多种文化；可按地区、年代、媒材和主题线索浏览，或直接向“彦远”提问。",
+      "The corpus spans many cultures. Browse by region, period, medium or theme, or simply put a question to Yanyuan.",
+    ),
+    collectionLoading: line("开放馆藏目录正在载入。", "The open collection catalogue is loading."),
+    collectionLoadingSub: line(
+      "实际件数、来源机构与可探索线索会在连接后出现。",
+      "Object counts, holding institutions and the threads you can follow appear once it connects.",
+    ),
+    collectionOffline: line("馆藏目录暂时未连接。", "The collection catalogue is not connected."),
+    collectionOfflineSub: line(
+      "请确认本地 API 已启动；馆藏恢复后才能生成展览。",
+      "Check that the API is running; an exhibition can only be generated once the collection is back.",
+    ),
+    collectionLoadingNote: line(
+      "正在读取当前冻结馆藏，缩略图与实际件数稍后出现。",
+      "Reading the current frozen collection; thumbnails and counts follow shortly.",
+    ),
+    collectionOfflineNote: line(
+      "馆藏接口暂未连接。启动本地 API 后刷新本页，再开始访谈。",
+      "The collection endpoint is not connected. Start the API, refresh this page, then begin the interview.",
+    ),
+    collectionEmpty: line(
+      "当前冻结馆藏没有可用于展览的对象，请先检查馆藏配置。",
+      "The frozen collection holds no objects usable for an exhibition; check the collection configuration first.",
+    ),
+    mainTypes: line("主要门类：", "Main categories: "),
+    typeWithCount: line("{label}（{count}）", "{label} ({count})"),
+    collectionNote: line(
+      "这里展示当前馆藏覆盖的主题线索。“彦远”会根据你的问题重新确定主题和章节；材料不足时会说明缺口，并推荐当前馆藏可支持的相邻方向。",
+      "These are the threads the current collection covers. Yanyuan settles the theme and chapters against your question; where the material runs short it says so, and suggests a neighbouring direction the collection can actually support.",
+    ),
+
+    howTitle: line("怎么使用", "How to use it"),
+    howTalkTitle: line("聊几句", "Say a few words"),
+    howTalkBody: line(
+      "“彦远”会问你的兴趣、熟悉程度、参观时长和回避内容；也可以整段跳过。问题选项会根据当前馆藏动态调整。",
+      "Yanyuan asks about your interest, familiarity, how long you have and what to avoid — or skip the whole thing. The options adjust to what the collection currently holds.",
+    ),
+    howWatchTitle: line("看它策展", "Watch it curate"),
+    howWatchBody: line(
+      "页面会显示检索数量、入选展品、章节安排和展签生成状态。",
+      "The page shows how many objects were searched, which were selected, how the chapters fell out, and the state of each label.",
+    ),
+    howEnterTitle: line("走进去", "Walk in"),
+    howEnterBody: line(
+      "可按导览逐站参观，也可切换到自由行走。每件展品都可查看博物馆原始记录。",
+      "Follow the route stop by stop, or switch to walking freely. Every object opens onto the museum's own record.",
+    ),
+
+    boundaryTitle: line("馆藏、AI 与数据边界", "Collection, AI, and data limits"),
+    boundaryObjectsTitle: line("展品来自博物馆开放馆藏", "The objects come from open museum collections"),
+    boundaryObjectsBody: line(
+      "展览只从下方来源机构中选取经逐件权利筛选的 CC0 / Public Domain 公开馆藏图像。不生成、不改画任何文物。",
+      "Exhibitions draw only on CC0 / Public Domain collection images from the institutions listed below, screened for rights object by object. No artefact is ever generated or repainted.",
+    ),
+    boundaryTextTitle: line("策展文本由 AI 生成", "The curatorial text is AI-generated"),
+    boundaryTextBody: line(
+      "机构原文直接引用并标明出处，系统推断另作标记，每件都能点开核对。",
+      "Institutional wording is quoted with its source; system inference is marked as such; both can be opened and checked on every object.",
+    ),
+    boundaryHallTitle: line("展厅与入口海报由 AI 生成", "The hall and entrance poster are AI-generated"),
+    boundaryHallBody: line(
+      "空间、灯光与配色按你的访谈结果生成；图像模型生成主题主视觉，中文标题由系统精确排版。生图失败时改用馆藏图像与同一排版模板，不影响展览。",
+      "Space, lighting and colour follow from your interview. An image model makes the key visual, while any Chinese title is set precisely by the system rather than drawn. If generation fails, collection images and the same layout take over without affecting the exhibition.",
+    ),
+    boundaryDemoTitle: line("这是研究型 Demo", "This is a research demo"),
+    boundaryDemoBody: line(
+      "系统会用随机会话标识记录必要的参观事件，用于内部汇总；统计导出不包含原始会话 ID、访谈答案或排除项。结果不构成学习成效证明，也不替代专业策展。",
+      "Visit events are recorded against a random session identifier for internal aggregation; the statistics export contains no raw session IDs, interview answers or exclusions. Nothing here evidences learning outcomes, and none of it replaces professional curation.",
+    ),
+
+    creditsTitle: line("馆藏来源与致谢", "Collections and credits"),
+    creditsBody: line(
+      "本版使用 CMA、The Met 与 AIC 的开放馆藏。卧游保存机构著录、对象页与逐字段许可，并仅将明确开放的图片用于展览。",
+      "This build uses the open collections of the Cleveland Museum of Art, The Metropolitan Museum of Art and the Art Institute of Chicago. Woyou keeps each institutional record, object page and per-field licence, and shows only images that are explicitly open.",
+    ),
+    creditsLinkLabel: line(
+      "查看 {museum} 的开放获取说明（新窗口）",
+      "Open-access policy for {museum} (new window)",
+    ),
+    licencePerObject: line("许可逐件记录", "Licence recorded per object"),
+    creditsDisclaimer: line(
+      "机构标识当前仅用于内部研究演示中的数据来源致谢；相关商标归各机构所有，不属于馆藏开放许可，也不表示这些机构对卧游提供赞助或背书。公开发布前应按各机构品牌条款另行确认许可，或改用纯文字来源铭牌。",
+      "Institutional marks appear here solely to credit data sources in an internal research demo. The trademarks belong to those institutions, fall outside the open-collection licences, and imply no sponsorship or endorsement of Woyou. Before any public release, clear them under each institution's brand terms or switch to a text-only source credit.",
+    ),
+    footerNames: line(
+      "名出宗炳「卧以游之」；“AI 策展人彦远”名出张彦远《历代名画记》",
+      "“Woyou” after Zong Bing's “travel it lying down”; Yanyuan after Zhang Yanyuan's Record of Famous Painters of Successive Dynasties",
+    ),
+  },
   hall: {
     posterAlt: line("AI 生成的展览海报", "AI-generated exhibition poster"),
     posterFallbackAlt: line("{title}，馆藏公开图像回退", "{title}, open collection image fallback"),
@@ -393,6 +670,7 @@ export function copy(language: Language) {
     header: resolve(COPY.header),
     chat: resolve(COPY.chat),
     pipeline: resolve(COPY.pipeline),
+    landing: resolve(COPY.landing),
     hall: resolve(COPY.hall),
     puzzle: resolve(COPY.puzzle),
     epilogue: resolve(COPY.epilogue),
