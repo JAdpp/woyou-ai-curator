@@ -240,7 +240,11 @@ export function Landing({ onStart }: { onStart: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Domain labels and hints are written by the backend in the requested
+    // language, so a switch has to refetch. Without this the section kept the
+    // language of the first render — which is always the default, since the
+    // stored preference only arrives in a layout effect.
+  }, [language]);
 
   const objectCount = highlights?.objectCount ?? null;
   const institutions = highlights?.institutions ?? [];
@@ -729,8 +733,11 @@ export function Landing({ onStart }: { onStart: () => void }) {
                       <small>{museum.name}</small>
                       {summary && (
                         <small>
-                          {summary.objectCount.toLocaleString()} 件 · 图片
-                          {summary.imageLicenses.join(" / ") || t.licencePerObject}
+                          {fill(t.creditsObjectLine, {
+                            count: summary.objectCount.toLocaleString(),
+                            licence:
+                              summary.imageLicenses.join(" / ") || t.licencePerObject,
+                          })}
                         </small>
                       )}
                     </span>

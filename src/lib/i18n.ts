@@ -399,6 +399,7 @@ const COPY = {
       "Open-access policy for {museum} (new window)",
     ),
     licencePerObject: line("许可逐件记录", "Licence recorded per object"),
+    creditsObjectLine: line("{count} 件 · 图片{licence}", "{count} objects · images {licence}"),
     creditsDisclaimer: line(
       "机构标识当前仅用于内部研究演示中的数据来源致谢；相关商标归各机构所有，不属于馆藏开放许可，也不表示这些机构对卧游提供赞助或背书。公开发布前应按各机构品牌条款另行确认许可，或改用纯文字来源铭牌。",
       "Institutional marks appear here solely to credit data sources in an internal research demo. The trademarks belong to those institutions, fall outside the open-collection licences, and imply no sponsorship or endorsement of Woyou. Before any public release, clear them under each institution's brand terms or switch to a text-only source credit.",
