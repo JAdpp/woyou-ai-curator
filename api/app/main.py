@@ -654,9 +654,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         turn = state.transcript[-1]
         next_question = state.next_question
+        # `==`, not `is`: ApiModel sets use_enum_values, so this id is a plain
+        # string that compares equal to the member but is not identical to it.
         wants_suggestions = (
             next_question is not None
-            and next_question.id is InterviewQuestionId.OPEN_QUESTION
+            and next_question.id == InterviewQuestionId.OPEN_QUESTION
         )
         collection = collections.get(state.collection_id)
         voice = await interview_voice.compose(

@@ -111,7 +111,7 @@ def _clean_suggestions(value: object) -> tuple[str, ...]:
 async def compose(
     provider: JsonProvider | None,
     *,
-    question_id: InterviewQuestionId,
+    question_id: InterviewQuestionId | str,
     answer_label: str | None,
     free_text: str | None,
     skipped: bool,
@@ -131,8 +131,12 @@ async def compose(
     if skipped and not want_suggestions:
         return InterviewVoice()
 
+    # ApiModel sets use_enum_values, so a question id read back off a model is a
+    # plain string rather than the enum member.
+    asked = question_id.value if isinstance(question_id, InterviewQuestionId) else str(question_id)
+
     payload = {
-        "answeredQuestion": question_id.value,
+        "answeredQuestion": asked,
         "visitorChoice": _sanitise_visitor_text(answer_label),
         "visitorText": _sanitise_visitor_text(free_text),
         "visitorSkipped": skipped,
@@ -149,7 +153,7 @@ async def compose(
     except Exception as exc:  # noqa: BLE001 - the interview must never break on this
         logger.info(
             "curator interview voice unavailable question=%s error=%s",
-            question_id.value,
+            asked,
             type(exc).__name__,
         )
         return InterviewVoice()
