@@ -917,3 +917,13 @@
   .logoList a:hover { background: #dfe6e1; }
   .logoList small { color: #53625d; }
 }
+
+/* The call to action and the 中/EN switch sit on one row. The landing page has
+   no site header, so this is the only place a reader can change language before
+   the interview starts. */
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  align-items: center;
+}
