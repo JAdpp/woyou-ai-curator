@@ -6,7 +6,7 @@ import type { CollectionHighlights } from "@/lib/types";
 import { PRODUCT_NAME, PRODUCT_NAME_LATIN } from "@/lib/brand";
 import { fill, type Language } from "@/lib/i18n";
 import { useLanguage } from "@/lib/useLanguage";
-import { LanguageToggle } from "./LanguageToggle";
+import { SiteHeader } from "./SiteHeader";
 import styles from "./landing.module.css";
 
 const CC0_URL = "https://creativecommons.org/publicdomain/zero/1.0/";
@@ -217,7 +217,7 @@ function CaseEvidenceLine({
  * degrades to a plain gradient if the API is not up.
  */
 export function Landing({ onStart }: { onStart: () => void }) {
-  const { language, setLanguage, t: copy } = useLanguage();
+  const { language, t: copy } = useLanguage();
   const t = copy.landing;
   const [highlights, setHighlights] = useState<CollectionHighlights | null>(null);
   const [collectionStatus, setCollectionStatus] = useState<"loading" | "ready" | "error">(
@@ -274,6 +274,8 @@ export function Landing({ onStart }: { onStart: () => void }) {
         </div>
         <div className={styles.wallVeil} aria-hidden="true" />
 
+        <SiteHeader tone="onDark" compact internalLabel={false} />
+
         <div className={styles.heroInner}>
           <p className={styles.epigraph}>
             <span>{t.epigraph}</span>
@@ -291,17 +293,10 @@ export function Landing({ onStart }: { onStart: () => void }) {
             {t.heroBody}
           </p>
 
-          <div className={styles.heroActions}>
-            <button type="button" className={styles.cta} onClick={onStart}>
-              {t.heroCta}
-              <span aria-hidden="true">→</span>
-            </button>
-            <LanguageToggle
-              language={language}
-              onChange={setLanguage}
-              label={copy.header.languageGroup}
-            />
-          </div>
+          <button type="button" className={styles.cta} onClick={onStart}>
+            {t.heroCta}
+            <span aria-hidden="true">→</span>
+          </button>
 
           <p className={styles.microcopy}>
             {t.microcopy}

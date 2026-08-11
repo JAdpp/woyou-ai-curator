@@ -6,7 +6,22 @@ import { useLanguage } from "@/lib/useLanguage";
 import { LanguageToggle } from "./LanguageToggle";
 import styles from "./siteHeader.module.css";
 
-export function SiteHeader({ compact = false }: { compact?: boolean }) {
+/**
+ * Site navigation.
+ *
+ * `tone="onDark"` is for the landing hero, which is a full-height wall of
+ * collection images: the bar sits over it rather than above it, so the wall
+ * still opens the page at full bleed.
+ */
+export function SiteHeader({
+  compact = false,
+  tone = "paper",
+  internalLabel = true,
+}: {
+  compact?: boolean;
+  tone?: "paper" | "onDark";
+  internalLabel?: boolean;
+}) {
   const { language, setLanguage, t } = useLanguage();
   // The wordmark keeps both scripts either way; only which one leads changes,
   // because 卧游 is the product's name, not a string to be translated.
@@ -14,7 +29,15 @@ export function SiteHeader({ compact = false }: { compact?: boolean }) {
   const trail = language === "en" ? PRODUCT_NAME : PRODUCT_NAME_LATIN;
 
   return (
-    <header className={`${styles.header} ${compact ? styles.headerCompact : ""}`}>
+    <header
+      className={[
+        styles.header,
+        compact ? styles.headerCompact : "",
+        tone === "onDark" ? styles.headerOnDark : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <Link className={styles.brand} href="/" aria-label={`${lead} ${t.header.home}`}>
         <span className={styles.brandSeal} aria-hidden="true">卧</span>
         <span>
@@ -25,7 +48,9 @@ export function SiteHeader({ compact = false }: { compact?: boolean }) {
       <nav className={styles.nav} aria-label={t.header.nav}>
         <Link href="/#how-it-works">{t.header.howItWorks}</Link>
         <Link href="/#sources">{t.header.sources}</Link>
-        <span className={styles.internalLabel}>{t.header.internalTool}</span>
+        {internalLabel && (
+          <span className={styles.internalLabel}>{t.header.internalTool}</span>
+        )}
         <LanguageToggle
           language={language}
           onChange={setLanguage}

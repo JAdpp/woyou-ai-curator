@@ -14,6 +14,45 @@
   min-height: 72px;
 }
 
+/* Over the landing hero's image wall. It sits inside the hero rather than
+   above it, so the wall still reaches the top of the viewport. */
+.headerOnDark {
+  width: min(1240px, calc(100% - 2.4rem));
+  border-bottom-color: rgba(244, 240, 230, 0.16);
+  color: rgba(244, 240, 230, 0.86);
+}
+
+.headerOnDark .brandSeal {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.headerOnDark .brand strong {
+  color: #edf1ec;
+}
+
+.headerOnDark .brand small,
+.headerOnDark .nav {
+  color: rgba(244, 240, 230, 0.66);
+}
+
+.headerOnDark .nav a:hover {
+  color: #edf1ec;
+  border-bottom-color: rgba(237, 241, 236, 0.7);
+}
+
+.headerOnDark .languageSwitch {
+  border-color: rgba(244, 240, 230, 0.34);
+}
+
+.headerOnDark .languageSwitch button {
+  color: rgba(244, 240, 230, 0.76);
+}
+
+.headerOnDark .languageSwitch button[aria-pressed="true"] {
+  color: #0c1717;
+  background: #edf1ec;
+}
+
 .brand {
   display: inline-flex;
   gap: 11px;
