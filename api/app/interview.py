@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
+from . import i18n
 from .collections import CollectionRepository, LoadedCollection
 from .models import (
     AnswerabilityStatus,
@@ -61,9 +62,25 @@ DOMAIN_CHOICES: dict[str, tuple[str, str]] = {
 }
 
 
-def domain_choices_for(collection: LoadedCollection) -> dict[str, tuple[str, str]]:
-    """Prefer the frozen collection manifest over application hard-coding."""
-    return collection.evidence_domain_choices or DOMAIN_CHOICES
+def domain_choices_for(
+    collection: LoadedCollection, language: str = "zh"
+) -> dict[str, tuple[str, str]]:
+    """Prefer the frozen collection manifest over application hard-coding.
+
+    The manifest's wording is Chinese and it carries a content hash, so English
+    labels are keyed by the same domain id in ``i18n`` rather than written back
+    into frozen data. A domain the English table does not know keeps its
+    manifest label, which is better than dropping it from the interview.
+    """
+    zh_choices = collection.evidence_domain_choices or DOMAIN_CHOICES
+    if language != "en":
+        return zh_choices
+    return {
+        domain_id: i18n.DOMAIN_LABELS_EN.get(
+            domain_id, (label, i18n.DEFAULT_DOMAIN_HINT_EN)
+        )
+        for domain_id, (label, _hint) in zh_choices.items()
+    }
 
 # Zhang Yanyuan (c. 815–877) wrote the first comprehensive history of Chinese
 # painting; naming the agent after him is a small nod to the first person who
@@ -110,11 +127,15 @@ class InterviewService:
 
     # -- helpers ---------------------------------------------------------
 
-    def available_domains(self, collection: LoadedCollection) -> list[tuple[str, str, str]]:
+    def available_domains(
+        self, collection: LoadedCollection, language: str = "zh"
+    ) -> list[tuple[str, str, str]]:
         """Public alias: the curator's voice must speak only of real coverage."""
-        return self._available_domains(collection)
+        return self._available_domains(collection, language)
 
-    def _available_domains(self, collection: LoadedCollection) -> list[tuple[str, str, str]]:
+    def _available_domains(
+        self, collection: LoadedCollection, language: str = "zh"
+    ) -> list[tuple[str, str, str]]:
         """Domains with enough routed objects to sustain a visit, richest first."""
         counts: dict[str, int] = {}
         for obj in collection.objects:
@@ -123,94 +144,137 @@ class InterviewService:
             for domain_id in obj.routing_domain_ids:
                 counts[domain_id] = counts.get(domain_id, 0) + 1
         available: list[tuple[str, str, str]] = []
-        choices = domain_choices_for(collection)
+        choices = domain_choices_for(collection, language)
         for domain_id, count in sorted(counts.items(), key=lambda pair: -pair[1]):
             if count < MIN_DOMAIN_OBJECTS or domain_id not in choices:
                 continue
             label, hint = choices[domain_id]
-            available.append((domain_id, label, f"{hint} · {count} 件"))
+            unit = f"{count:,} objects" if language == "en" else f"{count} 件"
+            available.append((domain_id, label, f"{hint} · {unit}"))
         return available
 
-    def _curiosity_question(self, collection: LoadedCollection) -> InterviewQuestion:
+    def _curiosity_question(
+        self, collection: LoadedCollection, language: str = "zh"
+    ) -> InterviewQuestion:
+        curator = i18n.CURATOR_NAME_EN if language == "en" else CURATOR_NAME
         options = [
             InterviewOption(value=domain_id, label=label, hint=hint)
-            for domain_id, label, hint in self._available_domains(collection)
+            for domain_id, label, hint in self._available_domains(collection, language)
         ]
         options.append(
             InterviewOption(
                 value=UNSURE_VALUE,
-                label="我还不确定，你推荐",
-                hint=f"由{CURATOR_NAME}替你挑一条线索",
+                label=i18n.pick(language, "我还不确定，你推荐", "I'm not sure — you choose"),
+                hint=i18n.pick(
+                    language,
+                    f"由{curator}替你挑一条线索",
+                    f"{curator} picks a thread for you",
+                ),
             )
         )
         return InterviewQuestion(
             id=InterviewQuestionId.CURIOSITY,
-            prompt=(
+            prompt=i18n.pick(
+                language,
                 f"我是{CURATOR_NAME}，这次的 AI 策展人。先问你几个问题，"
-                "然后为你单独搭一座展厅。\n这一次，你最想看点什么？"
+                "然后为你单独搭一座展厅。\n这一次，你最想看点什么？",
+                f"I'm {i18n.CURATOR_NAME_EN}, the AI curator here. A few questions "
+                "first, then I'll build you a room of your own.\n"
+                "What would you most like to look at this time?",
             ),
             options=options,
             allow_free_text=True,
-            free_text_placeholder="或者直接告诉我你想弄懂什么…",
+            free_text_placeholder=i18n.pick(
+                language,
+                "或者直接告诉我你想弄懂什么…",
+                "Or just tell me what you want to understand…",
+            ),
             step=1,
             total_steps=TOTAL_STEPS,
         )
 
     @staticmethod
-    def _motivation_question() -> InterviewQuestion:
+    def _motivation_question(language: str = "zh") -> InterviewQuestion:
+        hints_zh = {
+            "explorer": "会给你更完整的论证和对照材料",
+            "recharger": "展签更短，视觉和节奏优先",
+            "facilitator": "语言更口语，多一些可以聊的问题",
+            "professional": "保留术语、年代与材质细节",
+        }
         return InterviewQuestion(
             id=InterviewQuestionId.MOTIVATION,
-            prompt="你这次来，主要是想——",
+            prompt=i18n.pick(language, "你这次来，主要是想——", "What brings you here today?"),
             options=[
                 InterviewOption(
-                    value=VisitorMotivation.EXPLORER.value,
-                    label=MOTIVATION_LABELS[VisitorMotivation.EXPLORER.value],
-                    hint="会给你更完整的论证和对照材料",
-                ),
-                InterviewOption(
-                    value=VisitorMotivation.RECHARGER.value,
-                    label=MOTIVATION_LABELS[VisitorMotivation.RECHARGER.value],
-                    hint="展签更短，视觉和节奏优先",
-                ),
-                InterviewOption(
-                    value=VisitorMotivation.FACILITATOR.value,
-                    label=MOTIVATION_LABELS[VisitorMotivation.FACILITATOR.value],
-                    hint="语言更口语，多一些可以聊的问题",
-                ),
-                InterviewOption(
-                    value=VisitorMotivation.PROFESSIONAL.value,
-                    label=MOTIVATION_LABELS[VisitorMotivation.PROFESSIONAL.value],
-                    hint="保留术语、年代与材质细节",
-                ),
+                    value=motivation.value,
+                    label=i18n.pick(
+                        language,
+                        MOTIVATION_LABELS[motivation.value],
+                        i18n.MOTIVATION_LABELS_EN[motivation.value],
+                    ),
+                    hint=i18n.pick(
+                        language,
+                        hints_zh[motivation.value],
+                        i18n.MOTIVATION_HINTS_EN[motivation.value],
+                    ),
+                )
+                for motivation in (
+                    VisitorMotivation.EXPLORER,
+                    VisitorMotivation.RECHARGER,
+                    VisitorMotivation.FACILITATOR,
+                    VisitorMotivation.PROFESSIONAL,
+                )
             ],
             step=2,
             total_steps=TOTAL_STEPS,
         )
 
     @staticmethod
-    def _prior_knowledge_question(topic: str) -> InterviewQuestion:
-        subject = f"“{topic}”" if topic else "这个主题"
-        return InterviewQuestion(
-            id=InterviewQuestionId.PRIOR_KNOWLEDGE,
-            prompt=f"对{subject}，你现在了解多少？",
-            options=[
+    def _prior_knowledge_question(topic: str, language: str = "zh") -> InterviewQuestion:
+        if language == "en":
+            subject = f"“{topic}”" if topic else "this subject"
+            prompt = f"How much do you already know about {subject}?"
+            options = [
+                InterviewOption(value=value, label=label, hint=hint)
+                for value, (label, hint) in i18n.PRIOR_KNOWLEDGE_EN.items()
+            ]
+        else:
+            subject = f"“{topic}”" if topic else "这个主题"
+            prompt = f"对{subject}，你现在了解多少？"
+            options = [
                 InterviewOption(value="none", label="第一次接触", hint="从最基本的看法讲起"),
                 InterviewOption(value="some", label="略知一二", hint="跳过常识，直接进主线"),
                 InterviewOption(value="familiar", label="比较熟悉", hint="多给细节、异例与争议"),
-            ],
+            ]
+        return InterviewQuestion(
+            id=InterviewQuestionId.PRIOR_KNOWLEDGE,
+            prompt=prompt,
+            options=options,
             step=3,
             total_steps=TOTAL_STEPS,
         )
 
     @staticmethod
-    def _duration_question() -> InterviewQuestion:
+    def _duration_question(language: str = "zh") -> InterviewQuestion:
+        hints_zh = {
+            "5": "5 件展品 · 2 个叙事区段",
+            "10": "8 件展品 · 3 个叙事区段",
+            "15": "12 件展品 · 4 个叙事区段",
+        }
         return InterviewQuestion(
             id=InterviewQuestionId.DURATION,
-            prompt="你打算待多久？我按这个来安排展线的长短和节奏。",
+            prompt=i18n.pick(
+                language,
+                "你打算待多久？我按这个来安排展线的长短和节奏。",
+                "How long do you have? I'll set the length and pace of the route to match.",
+            ),
             options=[
-                InterviewOption(value="5", label="5 分钟", hint="5 件展品 · 2 个叙事区段"),
-                InterviewOption(value="10", label="10 分钟", hint="8 件展品 · 3 个叙事区段"),
-                InterviewOption(value="15", label="15 分钟", hint="12 件展品 · 4 个叙事区段"),
+                InterviewOption(
+                    value=minutes,
+                    label=i18n.pick(language, f"{minutes} 分钟", f"{minutes} minutes"),
+                    hint=i18n.pick(language, hints_zh[minutes], i18n.DURATION_HINTS_EN[minutes]),
+                )
+                for minutes in ("5", "10", "15")
             ],
             step=4,
             total_steps=TOTAL_STEPS,
@@ -218,7 +282,7 @@ class InterviewService:
 
     @staticmethod
     def open_question_question(
-        topic: str, suggestions: tuple[str, ...] = ()
+        topic: str, suggestions: tuple[str, ...] = (), language: str = "zh"
     ) -> InterviewQuestion:
         """Ask for the one thing the visitor most wants answered.
 
@@ -226,36 +290,58 @@ class InterviewService:
         closed menu: the field is free text, and none of the options commits
         the collection to anything, because each is a question, not a promise.
         """
-        subject = f"“{topic}”" if topic else "这个主题"
-        offered = tuple(suggestions) or GENERIC_OPEN_QUESTIONS
+        if language == "en":
+            subject = f"“{topic}”" if topic else "this subject"
+            prompt = f"Is there anything about {subject} you're especially curious about?"
+            offered = tuple(suggestions) or i18n.GENERIC_OPEN_QUESTIONS_EN
+        else:
+            subject = f"“{topic}”" if topic else "这个主题"
+            prompt = f"关于{subject}，你有什么特别好奇、特别想弄懂的问题吗？"
+            offered = tuple(suggestions) or GENERIC_OPEN_QUESTIONS
+        curator = i18n.CURATOR_NAME_EN if language == "en" else CURATOR_NAME
         options = [
             InterviewOption(value=text, label=text) for text in offered[:3]
         ]
         options.append(
             InterviewOption(
                 value=NO_OPEN_QUESTION_VALUE,
-                label="暂时没有，你来带路",
-                hint=f"由{CURATOR_NAME}决定这条线怎么走",
+                label=i18n.pick(language, "暂时没有，你来带路", "Nothing yet — you lead"),
+                hint=i18n.pick(
+                    language,
+                    f"由{curator}决定这条线怎么走",
+                    f"{curator} decides where the route goes",
+                ),
             )
         )
         return InterviewQuestion(
             id=InterviewQuestionId.OPEN_QUESTION,
-            prompt=f"关于{subject}，你有什么特别好奇、特别想弄懂的问题吗？",
+            prompt=prompt,
             options=options,
             allow_free_text=True,
-            free_text_placeholder="也可以直接写下你自己的问题…",
+            free_text_placeholder=i18n.pick(
+                language,
+                "也可以直接写下你自己的问题…",
+                "Or write your own question…",
+            ),
             skippable=True,
             step=5,
             total_steps=TOTAL_STEPS,
         )
 
     @staticmethod
-    def _exclusions_question() -> InterviewQuestion:
+    def _exclusions_question(language: str = "zh") -> InterviewQuestion:
         return InterviewQuestion(
             id=InterviewQuestionId.EXCLUSIONS,
-            prompt="最后一个：有什么是你不太想看到的？",
+            prompt=i18n.pick(
+                language,
+                "最后一个：有什么是你不太想看到的？",
+                "Last one: is there anything you'd rather not be shown?",
+            ),
             options=[
-                InterviewOption(value=value, label=label)
+                InterviewOption(
+                    value=value,
+                    label=i18n.pick(language, label, i18n.EXCLUSION_LABELS_EN[value]),
+                )
                 for value, label in EXCLUSION_CHOICES
             ],
             multi_select=True,
@@ -273,9 +359,12 @@ class InterviewService:
         never hits a dead end. Returns ``None`` when the corpus can answer the
         question as asked.
         """
-        question_text = (state.profile.free_form_question or "").strip()
+        question_text = (
+            state.profile.open_question or state.profile.free_form_question or ""
+        ).strip()
         if not question_text:
             return None
+        language = state.profile.language
 
         from .generator import ExhibitionGenerator  # local import avoids a cycle
 
@@ -287,28 +376,49 @@ class InterviewService:
         if check.status == AnswerabilityStatus.SUPPORTED.value:
             return None
 
-        available = self._available_domains(collection)[:3]
+        available = self._available_domains(collection, language)[:3]
         if not available:
             return None
-        covered = "、".join(label for _id, label, _hint in available[:2])
-        state.negotiation_note = (
-            f"关于“{question_text}”，我们手上的馆藏能讲清的部分集中在{covered}；"
-            "完全按你原来的问法来，材料会不够扎实。"
-        )
-        options = [
-            InterviewOption(value=domain_id, label=f"从「{label}」进去", hint=hint)
-            for domain_id, label, hint in available
-        ]
-        options.append(
-            InterviewOption(
-                value=FREE_TEXT_VALUE,
-                label="还是按我原来的问题来",
-                hint="材料会更薄，展签会明确标出缺口",
+        if language == "en":
+            covered = " and ".join(label for _id, label, _hint in available[:2])
+            state.negotiation_note = (
+                f"On “{question_text}”, what this collection can actually speak to "
+                f"clusters around {covered}. Taken exactly as you put it, the "
+                "material would be too thin to stand on."
             )
-        )
+            options = [
+                InterviewOption(value=domain_id, label=f"Go in through “{label}”", hint=hint)
+                for domain_id, label, hint in available
+            ]
+            options.append(
+                InterviewOption(
+                    value=FREE_TEXT_VALUE,
+                    label="Keep my question as it is",
+                    hint="Thinner material; the labels will name the gap",
+                )
+            )
+            prompt = f"{state.negotiation_note}\nWhich way would you like to go?"
+        else:
+            covered = "、".join(label for _id, label, _hint in available[:2])
+            state.negotiation_note = (
+                f"关于“{question_text}”，我们手上的馆藏能讲清的部分集中在{covered}；"
+                "完全按你原来的问法来，材料会不够扎实。"
+            )
+            options = [
+                InterviewOption(value=domain_id, label=f"从「{label}」进去", hint=hint)
+                for domain_id, label, hint in available
+            ]
+            options.append(
+                InterviewOption(
+                    value=FREE_TEXT_VALUE,
+                    label="还是按我原来的问题来",
+                    hint="材料会更薄，展签会明确标出缺口",
+                )
+            )
+            prompt = f"{state.negotiation_note}\n你想怎么走？"
         return InterviewQuestion(
             id=InterviewQuestionId.NEGOTIATION,
-            prompt=f"{state.negotiation_note}\n你想怎么走？",
+            prompt=prompt,
             options=options,
             step=4,
             total_steps=TOTAL_STEPS,
@@ -316,10 +426,15 @@ class InterviewService:
 
     # -- public API ------------------------------------------------------
 
-    def start(self, collection_id: str | None = None) -> InterviewState:
+    def start(
+        self, collection_id: str | None = None, language: str = "zh"
+    ) -> InterviewState:
         collection = self.collections.get(collection_id)
         state = InterviewState(id=str(uuid4()), collection_id=collection.id)
-        state.next_question = self._curiosity_question(collection)
+        # The language is chosen before the first question and rides on the
+        # profile from here on, so it reaches the exhibition record unchanged.
+        state.profile.language = "en" if language == "en" else "zh"
+        state.next_question = self._curiosity_question(collection, state.profile.language)
         return state
 
     def answer(self, state: InterviewState, answer: InterviewAnswer) -> InterviewState:
@@ -354,6 +469,7 @@ class InterviewService:
         profile = state.profile
         question_id = answer.question_id
         free_text = (answer.free_text or "").strip()
+        language = profile.language
 
         if question_id == InterviewQuestionId.CURIOSITY:
             if free_text:
@@ -361,52 +477,64 @@ class InterviewService:
                 matched = self._match_domain(free_text, collection)
                 if matched:
                     profile.curiosity_domain_id = matched
-                    profile.curiosity_label = domain_choices_for(collection)[matched][0]
+                    profile.curiosity_label = domain_choices_for(collection, language)[matched][0]
                 turn.answer_label = free_text[:60]
             elif answer.value and answer.value != UNSURE_VALUE:
                 profile.curiosity_domain_id = answer.value
-                profile.curiosity_label = domain_choices_for(collection).get(
+                profile.curiosity_label = domain_choices_for(collection, language).get(
                     answer.value, (answer.value, "")
                 )[0]
                 turn.answer_label = profile.curiosity_label
             else:
                 # "Recommend something" -> take the richest routable domain.
-                available = self._available_domains(collection)
+                available = self._available_domains(collection, language)
                 if available:
                     profile.curiosity_domain_id = available[0][0]
                     profile.curiosity_label = available[0][1]
-                turn.answer_label = "由策展人推荐"
+                turn.answer_label = i18n.pick(language, "由策展人推荐", "Curator's pick")
 
         elif question_id == InterviewQuestionId.MOTIVATION:
             if answer.value in {item.value for item in VisitorMotivation}:
                 profile.motivation = VisitorMotivation(answer.value)
-                turn.answer_label = MOTIVATION_LABELS[answer.value]
+                turn.answer_label = i18n.pick(
+                    language,
+                    MOTIVATION_LABELS[answer.value],
+                    i18n.MOTIVATION_LABELS_EN[answer.value],
+                )
 
         elif question_id == InterviewQuestionId.PRIOR_KNOWLEDGE:
             if answer.value in {"none", "some", "familiar"}:
                 profile.prior_knowledge = answer.value
-                turn.answer_label = {
-                    "none": "第一次接触",
-                    "some": "略知一二",
-                    "familiar": "比较熟悉",
-                }[answer.value]
+                turn.answer_label = i18n.pick(
+                    language,
+                    {"none": "第一次接触", "some": "略知一二", "familiar": "比较熟悉"}[answer.value],
+                    i18n.PRIOR_KNOWLEDGE_EN[answer.value][0],
+                )
 
         elif question_id == InterviewQuestionId.DURATION:
             if answer.value in {"5", "10", "15"}:
                 profile.duration_minutes = int(answer.value)  # type: ignore[assignment]
-                turn.answer_label = f"{answer.value} 分钟"
+                turn.answer_label = i18n.pick(
+                    language, f"{answer.value} 分钟", f"{answer.value} minutes"
+                )
 
         elif question_id == InterviewQuestionId.NEGOTIATION:
             if answer.value and answer.value != FREE_TEXT_VALUE:
                 profile.curiosity_domain_id = answer.value
-                profile.curiosity_label = domain_choices_for(collection).get(
+                profile.curiosity_label = domain_choices_for(collection, language).get(
                     answer.value, (answer.value, "")
                 )[0]
                 # The visitor accepted a narrower route, so the original
                 # free-form wording is kept only as context, not as the query.
-                turn.answer_label = f"从「{profile.curiosity_label}」进去"
+                turn.answer_label = i18n.pick(
+                    language,
+                    f"从「{profile.curiosity_label}」进去",
+                    f"Through “{profile.curiosity_label}”",
+                )
             else:
-                turn.answer_label = "保持原来的问题"
+                turn.answer_label = i18n.pick(
+                    language, "保持原来的问题", "Keep the original question"
+                )
 
         elif question_id == InterviewQuestionId.OPEN_QUESTION:
             # The suggested options carry their own text as the value, so a
@@ -418,7 +546,11 @@ class InterviewService:
             )
             if answer.skipped or not chosen:
                 turn.skipped = answer.skipped
-                turn.answer_label = "跳过" if answer.skipped else "交给策展人决定"
+                turn.answer_label = (
+                    i18n.pick(language, "跳过", "Skipped")
+                    if answer.skipped
+                    else i18n.pick(language, "交给策展人决定", "Curator decides")
+                )
             else:
                 profile.open_question = chosen[:300]
                 turn.answer_label = chosen[:60]
@@ -426,21 +558,30 @@ class InterviewService:
         elif question_id == InterviewQuestionId.EXCLUSIONS:
             if answer.skipped or not answer.value or answer.value == SKIP_VALUE:
                 turn.skipped = True
-                turn.answer_label = "跳过"
+                turn.answer_label = i18n.pick(language, "跳过", "Skipped")
             else:
-                labels = dict(EXCLUSION_CHOICES)
+                labels = (
+                    i18n.EXCLUSION_LABELS_EN
+                    if language == "en"
+                    else dict(EXCLUSION_CHOICES)
+                )
                 chosen = [
                     value.strip()
                     for value in answer.value.split(",")
                     if value.strip() and value.strip() != "none"
                 ]
-                profile.excluded_topics = [
-                    {"religion": "宗教", "funerary": "墓葬", "war": "战争"}.get(value, value)
-                    for value in chosen
-                ]
-                turn.answer_label = (
-                    "、".join(labels.get(value, value) for value in chosen) or "没有"
+                topic_words = (
+                    {"religion": "religion", "funerary": "burial", "war": "war"}
+                    if language == "en"
+                    else {"religion": "宗教", "funerary": "墓葬", "war": "战争"}
                 )
+                profile.excluded_topics = [
+                    topic_words.get(value, value) for value in chosen
+                ]
+                joiner = ", " if language == "en" else "、"
+                turn.answer_label = joiner.join(
+                    labels.get(value, value) for value in chosen
+                ) or i18n.pick(language, "没有", "Nothing")
             if free_text:
                 profile.excluded_topics.extend(
                     part.strip() for part in re.split(r"[，,、]", free_text) if part.strip()
@@ -450,23 +591,24 @@ class InterviewService:
         self, state: InterviewState, collection: LoadedCollection
     ) -> InterviewQuestion | None:
         asked = {turn.question_id for turn in state.transcript}
+        language = state.profile.language
         if InterviewQuestionId.MOTIVATION not in asked:
-            return self._motivation_question()
+            return self._motivation_question(language)
         if InterviewQuestionId.PRIOR_KNOWLEDGE not in asked:
-            return self._prior_knowledge_question(state.profile.curiosity_label)
+            return self._prior_knowledge_question(state.profile.curiosity_label, language)
         if InterviewQuestionId.DURATION not in asked:
-            return self._duration_question()
+            return self._duration_question(language)
         # Asked before the answerability gate so that the sharper question is
         # what gets probed; negotiating over the broad topic while ignoring the
         # visitor's actual question would check the wrong thing.
         if InterviewQuestionId.OPEN_QUESTION not in asked:
-            return self.open_question_question(state.profile.curiosity_label)
+            return self.open_question_question(state.profile.curiosity_label, language=language)
         if InterviewQuestionId.NEGOTIATION not in asked:
             negotiation = self._negotiation_question(state, collection)
             if negotiation is not None:
                 return negotiation
         if InterviewQuestionId.EXCLUSIONS not in asked:
-            return self._exclusions_question()
+            return self._exclusions_question(language)
         return None
 
     def _match_domain(self, text: str, collection: LoadedCollection) -> str | None:

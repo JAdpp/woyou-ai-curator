@@ -410,3 +410,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Progress pill and the 中/EN switch share the right-hand end of the chat
+   header. The switch is repeated here rather than only in the site header
+   because the interview renders without one. */
+.chatHeaderMeta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-shrink: 0;
+}

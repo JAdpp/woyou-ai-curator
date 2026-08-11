@@ -694,16 +694,77 @@ MAX_FRAME_EVIDENCE_CHUNKS_PER_OBJECT = 2
 MAX_FRAME_EVIDENCE_CHARS = 280
 
 
-def frame_prompt() -> str:
-    return FRAME_PROMPT
+FRAME_PROMPT_EN = """You are a digital curator composing a small virtual exhibition for one specific visitor.
+The exhibition is read in English; **write everything in English**.
+
+Hard constraints:
+1. Use only the evidence excerpts supplied with each object. Never add a name, date, causal claim or value judgement that the material does not carry.
+2. The order and role of the objects are already fixed. Do not reorder, add or drop any.
+3. The number of chapters must equal the input chapterCount exactly.
+4. bigIdea, every keyMessage, and every object's selectionRationale/relation must cite evidenceIds. Ids may only be copied verbatim from the supplied evidence — never invented, altered, or borrowed from a different object.
+5. Where the evidence supports only a local observation, set confidence to provisional or uncertain. Never write visual resemblance up into cross-cultural causation or shared symbolism.
+6. Chapter lead-ins and the epilogue may only restate the bigIdea and keyMessages. They must not introduce a new factual claim.
+
+Write the structured curatorialBrief first, then the exhibition frame from it. Do not write labels. Output a single JSON object:
+{
+  "title": exhibition title, 4-10 words, a title rather than a question,
+  "subtitle": subtitle, 8-16 words,
+  "curatorialBrief": {
+    "bigIdea": {"text": one arguable curatorial proposition in a sentence, "evidenceIds": [...], "confidence": "supported|provisional|uncertain"},
+    "keyMessages": [{"text": a supporting sub-argument, "evidenceIds": [...], "confidence": "supported|provisional|uncertain"}],
+    "criticalQuestions": [2-4 critical questions],
+    "objects": [{"objectId": input objectId, "role": input role, "selectionRationale": why this object is here, "relation": its concrete relation to the objects before and after, "evidenceIds": [...]}],
+    "evaluationTargets": [{"statement": a concrete target a visitor could recognise or a specialist could review, "method": "visitor_prompt|comprehension_check|expert_review"}]
+  },
+  "chapters": [{"title": chapter title, 2-5 words, "leadIn": chapter lead-in, 25-55 words}],
+  "epilogue": {"text": closing remark, 2-3 sentences, "openQuestions": [2-3 questions that remain open]},
+  "spaceDesign": {"wallColor": "#rrggbb", "floorColor": "#rrggbb", "accentColor": "#rrggbb"}
+}"""
+
+LABELS_PROMPT_TEMPLATE_EN = """You are writing wall labels for a virtual exhibition read in English. **Write everything in English.**
+
+Hard constraints:
+1. Use only the evidence attached to each object. Never add a name, date, causal claim or value judgement the material does not carry.
+2. Never rewrite institutional text. Every sentence you write is typed system_inference; type anything you are unsure of as uncertain.
+3. evidenceIds may only reference evidence ids belonging to that same object.
+4. Output one record for every object supplied, returning objectId verbatim.
+5. Connective sentences must follow the supplied curatorialBrief — its bigIdea, keyMessages and objectDecision. Do not start a competing argument.
+
+displayTitle: use the institution's own catalogue title as supplied. Do not translate it, invent a poetic title, or append a gloss — the cataloguing institution's wording is part of the record.
+
+Labels: write 3 labelSentences per object that read together as one real wall label:
+  1) Description — what the viewer is looking at right now: form, material, the specific features of the image or ornament;
+  2) Context — the period, use or tradition it comes from, and why it looks the way it does;
+  3) Connection — what it does in this chapter, and how it stands in relation to the other objects here.
+Each sentence LABEL_MIN-LABEL_MAX words: concrete, restrained, no lyrical filler. If the material does not say it, do not write it.
+Do not annotate sentences with "(inferred)" or "(per the record)" — the type field already carries that.
+
+Output a single JSON object:
+{"items": [{"objectId": ..., "displayTitle": the institution's catalogue title,
+  "labelSentences": [{"text": ..., "type": "system_inference", "evidenceIds": [...]}]}]}"""
 
 
-def labels_prompt(label_max: int) -> str:
+def frame_prompt(language: str = "zh") -> str:
+    return FRAME_PROMPT_EN if language == "en" else FRAME_PROMPT
+
+
+def labels_prompt(label_max: int, language: str = "zh") -> str:
     """Prompt with the visitor's per-sentence budget substituted in.
 
     Uses a placeholder token rather than ``str.format`` because the prompt
     contains a literal JSON skeleton full of braces.
+
+    The budget is expressed in characters for Chinese and words for English:
+    the stored number is a Chinese character count, and English needs roughly
+    half as many words to say the same thing.
     """
+    if language == "en":
+        word_max = max(12, round(label_max / 2))
+        return (
+            LABELS_PROMPT_TEMPLATE_EN
+            .replace("LABEL_MIN", str(max(8, round(word_max * 0.55))))
+            .replace("LABEL_MAX", str(word_max))
+        )
     return LABELS_PROMPT_TEMPLATE.replace("LABEL_MAX", str(label_max))
 
 

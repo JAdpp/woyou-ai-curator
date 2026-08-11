@@ -5,6 +5,7 @@ import {
   PRODUCT_NAME,
   PRODUCT_NAME_LATIN,
 } from "@/lib/brand";
+import { DEFAULT_LANGUAGE, LANGUAGE_BOOT_SCRIPT } from "@/lib/i18n";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
+    // The document renders in the default language and the boot script below
+    // corrects it during HTML parsing, before first paint. suppressHydration-
+    // Warning tells React to accept the DOM the script produced rather than
+    // treating the difference as an error.
+    <html lang="zh-CN" data-lang={DEFAULT_LANGUAGE} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: LANGUAGE_BOOT_SCRIPT }} />
+      </head>
       <body>{children}</body>
     </html>
   );

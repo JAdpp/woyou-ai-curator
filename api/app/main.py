@@ -619,8 +619,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ------------------------------------------------------------------
 
     @app.post("/api/interview/start", response_model=InterviewState)
-    def start_interview(collection_id: str | None = None) -> InterviewState:
-        state = interviews.start(collection_id)
+    def start_interview(
+        collection_id: str | None = None, language: str = "zh"
+    ) -> InterviewState:
+        state = interviews.start(collection_id, language)
         interview_sessions[state.id] = state
         _event(store, EventName.AGENDA_SUBMITTED, interviewId=state.id, phase="started")
         return state
@@ -661,6 +663,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and next_question.id == InterviewQuestionId.OPEN_QUESTION
         )
         collection = collections.get(state.collection_id)
+        language = state.profile.language
         voice = await interview_voice.compose(
             generator.provider,
             question_id=turn.question_id,
@@ -668,13 +671,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             free_text=turn.free_text,
             skipped=turn.skipped,
             topic=state.profile.curiosity_label,
-            available_domains=interviews.available_domains(collection),
+            available_domains=interviews.available_domains(collection, language),
             want_suggestions=wants_suggestions,
+            language=language,
         )
         turn.curator_reply = voice.reply
         if wants_suggestions and voice.suggestions and next_question is not None:
             state.next_question = InterviewService.open_question_question(
-                state.profile.curiosity_label, voice.suggestions
+                state.profile.curiosity_label, voice.suggestions, language
             )
 
     # ------------------------------------------------------------------

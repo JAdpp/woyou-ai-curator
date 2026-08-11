@@ -234,6 +234,13 @@ class ObjectSummary(ApiModel):
         )
 
 
+# The language an exhibition is written in. It is fixed when the exhibition is
+# generated, not when it is read: labels and curatorial prose are produced once
+# and stored, so a reader who switches language later gets a translated
+# interface around prose that stays in the language it was written in.
+SiteLanguage = Literal["zh", "en"]
+
+
 class AgendaInput(ApiModel):
     question: str = Field(min_length=3, max_length=500)
     prior_knowledge: str = Field(min_length=1, max_length=40)
@@ -241,6 +248,7 @@ class AgendaInput(ApiModel):
     personal_connection: str | None = Field(default=None, max_length=500)
     excluded_topics: list[str] = Field(default_factory=list, max_length=20)
     collection_id: str | None = None
+    language: SiteLanguage = "zh"
 
     @field_validator("question", "prior_knowledge")
     @classmethod
@@ -419,6 +427,7 @@ class VisitorProfile(ApiModel):
     duration_minutes: Literal[5, 10, 15] = 10
     excluded_topics: list[str] = Field(default_factory=list, max_length=20)
     companion: str | None = None
+    language: SiteLanguage = "zh"
 
     @property
     def plan(self) -> tuple[int, int, str, int]:
@@ -447,11 +456,16 @@ class VisitorProfile(ApiModel):
         statement of what the visitor came to find out, and it is what the
         retrieval should be anchored on.
         """
+        fallback = (
+            "How do these objects relate to one another"
+            if self.language == "en"
+            else "这些藏品之间有什么关系"
+        )
         question = (
             self.open_question
             or self.free_form_question
             or self.curiosity_label
-            or "这些藏品之间有什么关系"
+            or fallback
         ).strip()
         return AgendaInput(
             question=question,
@@ -459,6 +473,7 @@ class VisitorProfile(ApiModel):
             duration_minutes=self.duration_minutes,
             excluded_topics=self.excluded_topics,
             collection_id=collection_id,
+            language=self.language,
         )
 
 

@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { answerInterview, startInterview } from "@/lib/api";
 import type { InterviewAnswerInput, InterviewState } from "@/lib/types";
-import { CURATOR_NAME, CURATOR_TITLE } from "@/lib/brand";
+import { fill } from "@/lib/i18n";
+import { useLanguage } from "@/lib/useLanguage";
+import { LanguageToggle } from "./LanguageToggle";
 import styles from "./chat.module.css";
 
 /**
@@ -21,6 +23,8 @@ export function CuratorChat({
   onComplete: (state: InterviewState) => void;
   onSkip: () => void;
 }) {
+  const { language, setLanguage, t } = useLanguage();
+  const curatorLine = `${t.brand.curatorName} · ${t.brand.curatorRole}`;
   const [state, setState] = useState<InterviewState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,11 +37,15 @@ export function CuratorChat({
     // React 19 strict mode double-invokes effects; one session is enough.
     if (startedRef.current) return;
     startedRef.current = true;
-    startInterview()
+    startInterview(language)
       .then(setState)
       .catch((startError) =>
-        setError(startError instanceof Error ? startError.message : `${CURATOR_NAME}没能接上话，请刷新重试。`),
+        setError(startError instanceof Error ? startError.message : t.chat.startFailed),
       );
+    // Started once, in whatever language was active then. The profile carries
+    // that language onward, so switching later changes the interface but not
+    // the interview already under way.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -58,7 +66,7 @@ export function CuratorChat({
       setMultiSelected([]);
       if (next.complete) onComplete(next);
     } catch (answerError) {
-      setError(answerError instanceof Error ? answerError.message : "这一步没有记录下来，请重试。");
+      setError(answerError instanceof Error ? answerError.message : t.chat.errorGeneric);
     } finally {
       setBusy(false);
     }
@@ -67,35 +75,45 @@ export function CuratorChat({
   const question = state?.nextQuestion ?? null;
 
   return (
-    <section className={styles.chatShell} aria-label={`与${CURATOR_TITLE}对话`}>
+    <section className={styles.chatShell} aria-label={t.chat.ariaLabel}>
       <header className={styles.chatHeader}>
         <div>
-          <p className={styles.curatorIdentity}>{CURATOR_NAME} · AI 策展人</p>
-          <h2>先说说你想了解什么</h2>
+          <p className={styles.curatorIdentity}>{curatorLine}</p>
+          <h2>{t.chat.heading}</h2>
         </div>
-        {question && (
-          <span className={styles.progressPill} aria-label={`第 ${question.step} 步，共 ${question.totalSteps} 步`}>
-            {question.step} / {question.totalSteps}
-          </span>
-        )}
+        <div className={styles.chatHeaderMeta}>
+          {question && (
+            <span
+              className={styles.progressPill}
+              aria-label={fill(t.chat.stepOf, { step: question.step, total: question.totalSteps })}
+            >
+              {question.step} / {question.totalSteps}
+            </span>
+          )}
+          <LanguageToggle
+            language={language}
+            onChange={setLanguage}
+            label={t.header.languageGroup}
+          />
+        </div>
       </header>
 
       <div className={styles.thread} ref={threadRef} role="log" aria-live="polite">
         {state?.transcript.map((turn) => (
           <div key={`${turn.questionId}-${turn.answeredAt}`}>
             <div className={styles.curatorBubble}>
-              <span className={styles.bubbleSpeaker}>{CURATOR_NAME} · AI 策展人</span>
+              <span className={styles.bubbleSpeaker}>{curatorLine}</span>
               {turn.prompt.split("\n").map((line, index) => (
                 <p key={index}>{line}</p>
               ))}
             </div>
             <div className={styles.visitorBubble}>
-              <span className={styles.bubbleSpeaker}>你</span>
-              {turn.skipped ? "（跳过）" : turn.answerLabel || turn.freeText || turn.answerValue}
+              <span className={styles.bubbleSpeaker}>{t.chat.you}</span>
+              {turn.skipped ? t.chat.skipped : turn.answerLabel || turn.freeText || turn.answerValue}
             </div>
             {turn.curatorReply && (
               <div className={styles.curatorBubble}>
-                <span className={styles.bubbleSpeaker}>{CURATOR_NAME} · AI 策展人</span>
+                <span className={styles.bubbleSpeaker}>{curatorLine}</span>
                 <p>{turn.curatorReply}</p>
               </div>
             )}
@@ -104,7 +122,7 @@ export function CuratorChat({
 
         {question && (
           <div className={styles.curatorBubble}>
-            <span className={styles.bubbleSpeaker}>{CURATOR_NAME} · AI 策展人</span>
+            <span className={styles.bubbleSpeaker}>{curatorLine}</span>
             {question.prompt.split("\n").map((line, index) => (
               <p key={index}>{line}</p>
             ))}
@@ -113,15 +131,15 @@ export function CuratorChat({
 
         {!state && !error && (
           <div className={styles.curatorBubble}>
-            <span className={styles.bubbleSpeaker}>{CURATOR_NAME} · AI 策展人</span>
-            <p>正在接通…</p>
+            <span className={styles.bubbleSpeaker}>{curatorLine}</span>
+            <p>{t.chat.connecting}</p>
           </div>
         )}
       </div>
 
       {question && (
         <div className={styles.answerArea}>
-          <div className={styles.optionGrid} role="group" aria-label="可选回答">
+          <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
             {question.options.map((option) => {
               const selected = multiSelected.includes(option.value);
               return (
@@ -157,7 +175,9 @@ export function CuratorChat({
               disabled={busy}
               onClick={() => void send({ questionId: question.id, value: multiSelected.join(",") })}
             >
-              {multiSelected.length > 0 ? `确认 ${multiSelected.length} 项` : "都可以"}
+              {multiSelected.length > 0
+                ? fill(t.chat.confirmCount, { n: multiSelected.length })
+                : t.chat.confirmNone}
             </button>
           )}
 
@@ -173,13 +193,13 @@ export function CuratorChat({
               <input
                 value={freeText}
                 onChange={(event) => setFreeText(event.target.value)}
-                placeholder={question.freeTextPlaceholder ?? "直接说说你想弄懂什么…"}
+                placeholder={question.freeTextPlaceholder ?? t.chat.freeTextPlaceholder}
                 maxLength={200}
                 disabled={busy}
-                aria-label="自由输入"
+                aria-label={t.chat.freeTextLabel}
               />
               <button type="submit" disabled={busy || !freeText.trim()}>
-                发送
+                {t.chat.send}
               </button>
             </form>
           )}
@@ -191,11 +211,11 @@ export function CuratorChat({
                 disabled={busy}
                 onClick={() => void send({ questionId: question.id, skipped: true })}
               >
-                跳过这题
+                {t.chat.skipQuestion}
               </button>
             )}
             <button type="button" onClick={onSkip} disabled={busy}>
-              跳过访谈，用默认设置
+              {t.chat.skipInterview}
             </button>
           </div>
         </div>
@@ -203,16 +223,14 @@ export function CuratorChat({
 
       {error && (
         <div className={styles.chatError} role="alert">
-          <strong>这一步没有记录下来</strong>
+          <strong>{t.chat.errorTitle}</strong>
           <p>{error}</p>
         </div>
       )}
 
       <div className={styles.privacyNote}>
-        <strong>关于这次对话</strong>
-        <p>
-          访谈内容只用于这次策展。启用云模型时，你输入的文字会发送给已配置的模型服务；请不要填写个人敏感信息。
-        </p>
+        <strong>{t.chat.privacyTitle}</strong>
+        <p>{t.chat.privacyBody}</p>
       </div>
     </section>
   );

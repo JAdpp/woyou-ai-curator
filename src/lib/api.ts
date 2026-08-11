@@ -283,8 +283,13 @@ export function getCollectionHighlights(limit = 24) {
   return request<CollectionHighlights>(`/api/collection/highlights?limit=${limit}`);
 }
 
-export function startInterview(collectionId?: string) {
-  const query = collectionId ? `?collectionId=${encodeURIComponent(collectionId)}` : "";
+/** `language` is fixed for the whole interview and rides on the profile from
+ *  there into the exhibition record, so the labels are written in it too. */
+export function startInterview(language?: "zh" | "en", collectionId?: string) {
+  const params = new URLSearchParams();
+  if (collectionId) params.set("collectionId", collectionId);
+  if (language) params.set("language", language);
+  const query = params.size > 0 ? `?${params}` : "";
   return request<InterviewState>(`/api/interview/start${query}`, { method: "POST" });
 }
 

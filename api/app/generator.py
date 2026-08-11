@@ -473,7 +473,7 @@ class ExhibitionGenerator:
             )
             try:
                 frame = await self._generate_model_json(
-                    curation.frame_prompt(),
+                    curation.frame_prompt(exhibition.agenda.language),
                     curation.frame_payload(
                         plan,
                         exhibition.items,
@@ -558,7 +558,7 @@ class ExhibitionGenerator:
         the rest of the exhibition is unaffected.
         """
         by_id = {item.id: item for item in exhibition.items}
-        prompt = curation.labels_prompt(profile.label_max_chars)
+        prompt = curation.labels_prompt(profile.label_max_chars, profile.language)
 
         async def write(chapter) -> bool:
             items = [by_id[item_id] for item_id in chapter.item_ids if item_id in by_id]

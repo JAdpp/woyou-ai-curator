@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { followJob, startCuration } from "@/lib/api";
 import type { GenerationJob } from "@/lib/types";
-import { CURATOR_TITLE } from "@/lib/brand";
+import { useLanguage } from "@/lib/useLanguage";
 import { CollectionPuzzle } from "./CollectionPuzzle";
 import styles from "./chat.module.css";
 
@@ -31,6 +31,7 @@ export function CurationPipeline({
   onComplete: (exhibitionId: string) => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useLanguage();
   const [job, setJob] = useState<GenerationJob | null>(null);
   // React's development double-invoke must not start two jobs — that would be
   // two model calls per visitor. The request is cached by interview id and the
@@ -56,13 +57,13 @@ export function CurationPipeline({
           if (update.status === "completed" && update.exhibitionId) {
             onComplete(update.exhibitionId);
           } else if (update.status === "failed") {
-            onError(update.error || "策展没有完成，请重试。");
+            onError(update.error || t.pipeline.failed);
           }
         });
       })
       .catch((startError) => {
         if (cancelled) return;
-        onError(startError instanceof Error ? startError.message : "策展没有启动，请重试。");
+        onError(startError instanceof Error ? startError.message : t.pipeline.notStarted);
       });
 
     return () => {
@@ -74,12 +75,14 @@ export function CurationPipeline({
   const steps = job?.steps ?? [];
 
   return (
-    <section className={styles.pipelineShell} aria-label="策展生成进度">
+    <section className={styles.pipelineShell} aria-label={t.pipeline.ariaLabel}>
       <div className={styles.pipelineLayout}>
         <div className={styles.pipelineProcess} aria-live="polite" aria-busy={job?.status !== "completed"}>
           <header>
-            <h2>{CURATOR_TITLE}正在为你的问题策展</h2>
-            <p className={styles.pipelineStage}>{job?.stage || "正在启动…"}</p>
+            <h2>{t.pipeline.heading}</h2>
+            {/* The stage text comes from the job and is written by the server in
+                the language the interview ran in, so it is not translated here. */}
+            <p className={styles.pipelineStage}>{job?.stage || t.pipeline.starting}</p>
           </header>
 
           <ol className={styles.stepList}>

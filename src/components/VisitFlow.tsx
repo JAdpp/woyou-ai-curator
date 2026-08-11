@@ -6,6 +6,7 @@ import { CuratorChat } from "./CuratorChat";
 import { CurationPipeline } from "./CurationPipeline";
 import { Landing } from "./Landing";
 import type { InterviewState } from "@/lib/types";
+import { useLanguage } from "@/lib/useLanguage";
 import styles from "./chat.module.css";
 
 type Stage = "landing" | "interview" | "curating";
@@ -17,6 +18,7 @@ type Stage = "landing" | "interview" | "curating";
  * share the hall without replaying the interview.
  */
 export function VisitFlow() {
+  const { language, t } = useLanguage();
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("landing");
   const [interviewId, setInterviewId] = useState<string | null>(null);
@@ -69,11 +71,11 @@ export function VisitFlow() {
           void (async () => {
             const { startInterview } = await import("@/lib/api");
             try {
-              const state = await startInterview();
+              const state = await startInterview(language);
               setInterviewId(state.id);
               setStage("curating");
             } catch {
-              setError("没能启动默认策展，请重试。");
+              setError(t.pipeline.defaultFailed);
             }
           })();
         }}
