@@ -11,23 +11,29 @@ import {
 } from "react";
 import type { Exhibition, ExhibitionItem, LabelSentence } from "@/lib/types";
 import { logEvent, resolveApiAssetUrl, resolveObjectImageUrl } from "@/lib/api";
+import { fill } from "@/lib/i18n";
+import { useLanguage } from "@/lib/useLanguage";
 import { getImageLicenseLabel, getLegacyRightsLabel } from "@/lib/rights";
 import { EpilogueConversation } from "../EpilogueConversation";
 import type { HallLayout, TourStop } from "./layout";
 import { useAudioGuide } from "./useAudioGuide";
 import styles from "./hall.module.css";
 
-const TYPE_LABELS: Record<LabelSentence["type"], string> = {
-  institution_fact: "机构记录",
-  system_inference: "系统推断",
-  uncertain: "仍不确定",
-};
+type HallCopy = ReturnType<typeof useLanguage>["t"]["hall"];
+type ViewCopy = ReturnType<typeof useLanguage>["t"]["view"];
 
-const SOURCE_KIND_LABELS: Record<string, string> = {
-  institution_metadata: "机构元数据",
-  institution_curatorial_text: "机构说明",
-  institution_provenance: "机构来源记录",
-};
+function typeLabel(type: LabelSentence["type"], v: ViewCopy): string {
+  if (type === "institution_fact") return v.sentenceInstitutionFact;
+  if (type === "uncertain") return v.sentenceUncertain;
+  return v.sentenceSystemInference;
+}
+
+function sourceKindLabel(kind: string, v: ViewCopy): string {
+  if (kind === "institution_metadata") return v.sourceMetadata;
+  if (kind === "institution_curatorial_text") return v.sourceCuratorialText;
+  if (kind === "institution_provenance") return v.sourceProvenance;
+  return "";
+}
 
 type PanelPosition = { x: number; y: number };
 type PanelSize = { width: number; height: number };
@@ -51,6 +57,8 @@ function clampPanelPosition(
 }
 
 function LobbyPoster({ exhibition }: { exhibition: Exhibition }) {
+  const { t: copy } = useLanguage();
+  const t = copy.hall;
   const generatedUrl = exhibition.poster?.backgroundUrl
     ? resolveApiAssetUrl(exhibition.poster.backgroundUrl)
     : null;
@@ -76,8 +84,8 @@ function LobbyPoster({ exhibition }: { exhibition: Exhibition }) {
           src={imageUrl}
           alt={
             isGenerated
-              ? exhibition.poster?.altText ?? "AI 生成的展览海报"
-              : `${fallbackObject?.title ?? exhibition.title}，馆藏公开图像回退`
+              ? exhibition.poster?.altText ?? t.posterAlt
+              : fill(t.posterFallbackAlt, { title: fallbackObject?.title ?? exhibition.title })
           }
           onError={() => {
             if (source === "generated" && fallbackObject) setSource("collection");
@@ -114,6 +122,9 @@ function ArtworkLabel({
   item: ExhibitionItem;
   exhibitionId: string;
 }) {
+  const { t: copy } = useLanguage();
+  const t = copy.hall;
+  const v = copy.view;
   const [sourceOpen, setSourceOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [position, setPosition] = useState<PanelPosition | null>(null);
@@ -233,7 +244,7 @@ function ArtworkLabel({
       style={panelStyle}
       data-positioned={position ? "true" : "false"}
       data-collapsed={collapsed ? "true" : "false"}
-      aria-label={`展签：${item.displayTitle || item.object.title}`}
+      aria-label={fill(t.labelOf, { title: item.displayTitle || item.object.title })}
     >
       <div className={styles.labelWindowBar}>
         <button
@@ -244,26 +255,26 @@ function ArtworkLabel({
           onPointerUp={stopDrag}
           onPointerCancel={stopDrag}
           onKeyDown={moveWithKeyboard}
-          aria-label="移动展签；可拖动，或使用方向键微调，按 Shift 加速"
-          title="拖动展签；方向键也可以移动"
+          aria-label={t.moveLabelAria}
+          title={t.moveLabelTitle}
         >
           <span aria-hidden="true">⠿</span>
-          <span>{collapsed ? item.displayTitle || item.object.title : "移动展签"}</span>
+          <span>{collapsed ? item.displayTitle || item.object.title : t.moveLabel}</span>
         </button>
         <div className={styles.labelWindowActions}>
           {!collapsed && (
             <>
-              <button type="button" onClick={() => adjustSize(-48)} aria-label="缩小展签">−</button>
-              <button type="button" onClick={() => adjustSize(48)} aria-label="放大展签">＋</button>
+              <button type="button" onClick={() => adjustSize(-48)} aria-label={t.shrink}>−</button>
+              <button type="button" onClick={() => adjustSize(48)} aria-label={t.enlarge}>＋</button>
             </>
           )}
           <button
             type="button"
             onClick={() => setCollapsed((value) => !value)}
             aria-expanded={!collapsed}
-            aria-label={collapsed ? "展开展签" : "收起展签"}
+            aria-label={collapsed ? t.expandLabel : t.collapseLabel}
           >
-            {collapsed ? "展开" : "收起"}
+            {collapsed ? t.expand : t.collapse}
           </button>
         </div>
       </div>
@@ -273,8 +284,8 @@ function ArtworkLabel({
       <div className={styles.labelHead}>
         <span className={styles.roleTag}>{item.roleLabel}</span>
         {item.object.evidenceDepth === "thin" && (
-          <span className={styles.depthTag} title="该机构未提供策展说明字段，展签只使用著录信息">
-            仅著录信息
+          <span className={styles.depthTag} title={t.depthTagTitle}>
+            {t.depthTag}
           </span>
         )}
       </div>
@@ -291,7 +302,7 @@ function ArtworkLabel({
         {item.labelSentences.map((sentence) => (
           <p key={sentence.id} data-type={sentence.type}>
             {sentence.text}
-            <span className={styles.sentenceType}>{TYPE_LABELS[sentence.type]}</span>
+            <span className={styles.sentenceType}>{typeLabel(sentence.type, v)}</span>
           </p>
         ))}
       </div>
@@ -305,7 +316,7 @@ function ArtworkLabel({
           }}
           aria-expanded={sourceOpen}
         >
-          {sourceOpen ? "收起来源" : "来源"}
+          {sourceOpen ? t.hideSources : t.sources}
         </button>
         <a
           href={item.object.objectUrl}
@@ -326,7 +337,7 @@ function ArtworkLabel({
               <small>{chunk.sourceTitle}</small>
               {(chunk.license || chunk.sourceKind) && (
                 <p className={styles.sourceRights}>
-                  <span>{SOURCE_KIND_LABELS[chunk.sourceKind || ""] || chunk.sourceKind || "字段来源"}</span>
+                  <span>{sourceKindLabel(chunk.sourceKind || "", v) || chunk.sourceKind || t.fieldSource}</span>
                   {chunk.license && chunk.rightsUri ? (
                     <a href={chunk.rightsUri} target="_blank" rel="noreferrer">{chunk.license} ↗</a>
                   ) : (
@@ -389,6 +400,8 @@ export function HallOverlay({
   onEnterFree: () => void;
   onExit: () => void;
 }) {
+  const { t: copy } = useLanguage();
+  const t = copy.hall;
   const itemsById = useMemo(
     () => new Map(exhibition.items.map((item) => [item.id, item])),
     [exhibition.items],
@@ -458,21 +471,21 @@ export function HallOverlay({
     audio.status === "playing" ||
     (audio.status === "fallback" && audio.fallbackSpeaking);
   const audioButtonLabel = mode === "free"
-    ? "⏸ 自由行走时暂停"
+    ? t.pausedFreeWalk
     : !cameraArrived
-      ? "⏸ 镜头移动时暂停"
+      ? t.pausedCamera
     : audio.status === "preparing"
-      ? "⏳ AI 讲述准备中"
+      ? t.guidePreparing
       : audio.status === "playing"
-        ? "🔊 彦远讲述中"
+        ? t.guideSpeaking
         : audio.status === "fallback" && audio.fallbackSpeaking
-          ? "🔊 设备语音讲述中"
+          ? t.deviceSpeaking
           : audio.status === "error"
-            ? "↻ 重试专业讲述"
-            : "🎙 彦远专业讲述（AI 合成）";
+            ? t.retryGuide
+            : t.playGuide;
   const audioStatusMessage = audio.message ?? (
     audio.status === "preparing"
-      ? "千问 AI 正在准备专业播音导览…"
+      ? t.guidePreparingLong
       : audio.status === "playing"
         ? "千问 AI 合成 · 专业播音声线"
         : null
@@ -482,11 +495,11 @@ export function HallOverlay({
       {/* ------------------------------------------------------- top bar */}
       <header className={styles.topBar}>
         <button type="button" className={styles.ghostButton} onClick={onExit}>
-          ← 离开展厅
+          {t.leaveHall}
         </button>
         <div className={styles.topRight}>
           <a className={styles.accessibleLink} href={`/exhibitions/${exhibition.id}?view=text`}>
-            无障碍版本
+            {t.accessibleVersion}
           </a>
           <div className={styles.audioControl}>
             <button
@@ -498,11 +511,11 @@ export function HallOverlay({
               disabled={!audio.supported || mode === "free" || !cameraArrived}
               title={
                 !audio.supported
-                  ? "当前浏览器不支持音频播放"
+                  ? t.noAudio
                   : mode === "free"
-                    ? "切回导览模式后继续播放"
+                    ? t.resumeInGuided
                     : !cameraArrived
-                      ? "镜头到站后可以播放专业讲述"
+                      ? t.playOnArrival
                     : "千问 TTS AI 合成 · 专业播音声线"
               }
             >
@@ -519,14 +532,14 @@ export function HallOverlay({
               </span>
             )}
           </div>
-          <div className={styles.modeToggle} role="group" aria-label="参观方式">
+          <div className={styles.modeToggle} role="group" aria-label={t.modeGroup}>
             <button
               type="button"
               aria-pressed={mode === "guided"}
               onClick={onEnterGuided}
               className={mode === "guided" ? styles.modeActive : undefined}
             >
-              导览
+              {t.guided}
             </button>
             <button
               type="button"
@@ -534,7 +547,7 @@ export function HallOverlay({
               onClick={onEnterFree}
               className={mode === "free" ? styles.modeActive : undefined}
             >
-              自由行走
+              {t.freeWalk}
             </button>
           </div>
         </div>
@@ -550,26 +563,26 @@ export function HallOverlay({
                 exhibition={exhibition}
               />
               <div>
-                <span className={styles.eyebrow}>AI 策展人彦远为你策展</span>
+                <span className={styles.eyebrow}>{t.curatedBy}</span>
                 <h1>{exhibition.title}</h1>
                 {exhibition.subtitle && <p className={styles.subtitle}>{exhibition.subtitle}</p>}
                 <p className={styles.thesis}>{exhibition.curatorialThesis}</p>
                 <dl className={styles.lobbyStats}>
                   <div>
-                    <dt>叙事区段</dt>
+                    <dt>{t.segments}</dt>
                     <dd>{exhibition.chapters.length}</dd>
                   </div>
                   <div>
-                    <dt>展品</dt>
+                    <dt>{t.objects}</dt>
                     <dd>{exhibition.items.length}</dd>
                   </div>
                   <div>
-                    <dt>预计</dt>
-                    <dd>{exhibition.visitorProfile?.durationMinutes ?? 10} 分钟</dd>
+                    <dt>{t.estimated}</dt>
+                    <dd>{fill(t.minutes, { n: exhibition.visitorProfile?.durationMinutes ?? 10 })}</dd>
                   </div>
                 </dl>
                 <button type="button" className={styles.primaryAction} onClick={() => onGoTo(1)}>
-                  开始参观 →
+                  {t.startVisit}
                 </button>
               </div>
             </section>
@@ -578,7 +591,7 @@ export function HallOverlay({
           {stop.kind === "chapter" && chapter && (
             <section className={styles.chapterCard}>
               <span className={styles.eyebrow}>
-                第 {chapter.order + 1} 部分 / 共 {exhibition.chapters.length}
+                {fill(t.chapterOf, { n: chapter.order + 1, total: exhibition.chapters.length })}
               </span>
               <h2>{chapter.title}</h2>
               <p>{chapter.leadIn}</p>
@@ -593,8 +606,8 @@ export function HallOverlay({
 
           {stop.kind === "epilogue" && (
             <section className={styles.epilogueCard}>
-              <span className={styles.eyebrow}>结语</span>
-              <h2>AI 策展人彦远的结语</h2>
+              <span className={styles.eyebrow}>{t.epilogueEyebrow}</span>
+              <h2>{t.epilogueTitle}</h2>
               <p className={styles.epilogueText}>{exhibition.epilogue.text}</p>
               <EpilogueConversation
                 exhibitionId={exhibition.id}
@@ -602,7 +615,7 @@ export function HallOverlay({
                 context="hall"
               />
               <details className={styles.boundaryDetails}>
-                <summary>这场展览的材料边界</summary>
+                <summary>{t.materialLimits}</summary>
                 <ul>
                   {exhibition.epilogue.materialBoundary.map((limit) => (
                     <li key={limit}>{limit}</li>
@@ -611,10 +624,10 @@ export function HallOverlay({
               </details>
               <div className={styles.epilogueActions}>
                 <button type="button" onClick={() => onGoTo(0)}>
-                  从头再看
+                  {t.replay}
                 </button>
                 <button type="button" className={styles.primaryAction} onClick={onExit}>
-                  结束参观
+                  {t.endVisit}
                 </button>
               </div>
             </section>
@@ -624,16 +637,16 @@ export function HallOverlay({
 
       {mode === "free" && !pointerLocked && (
         <div className={styles.freeWalkPrompt}>
-          <p>点击画面开始自由行走</p>
-          <small>桌面用 WASD 或方向键，触屏用左下角摇杆；随时可以切回导览</small>
+          <p>{t.clickToWalk}</p>
+          <small>{t.walkHint}</small>
         </div>
       )}
 
       {/* ------------------------------------------------------ bottom bar */}
       {mode === "guided" && (
-        <nav className={styles.bottomBar} aria-label="参观进度">
+        <nav className={styles.bottomBar} aria-label={t.progressNav}>
           <button type="button" onClick={() => onGoTo(stopIndex - 1)} disabled={atStart}>
-            ← 上一处
+            {t.previous}
           </button>
           <ol className={styles.stopTrack}>
             {layout.stops.map((candidate, index) => (
@@ -650,13 +663,13 @@ export function HallOverlay({
             ))}
           </ol>
           <button type="button" onClick={() => onGoTo(stopIndex + 1)} disabled={atEnd}>
-            下一处 →
+            {t.next}
           </button>
         </nav>
       )}
 
       {reduceMotion && mode === "guided" && (
-        <p className={styles.motionNote}>已按系统设置关闭镜头飞行动画。</p>
+        <p className={styles.motionNote}>{t.motionNote}</p>
       )}
     </div>
   );
