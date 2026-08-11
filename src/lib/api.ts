@@ -13,6 +13,7 @@ import type {
   EpilogueChatResponse,
   EpilogueChatCitation,
 } from "./types";
+import { readStoredLanguage } from "./i18n";
 
 const _envApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 export const API_BASE_URL = _envApiBase
@@ -91,11 +92,23 @@ function formatValidationIssue(value: unknown): string | null {
   return location ? `${location}: ${message}` : message;
 }
 
+/* This module is not a component, so it reads the stored language directly
+   rather than through the hook. Same key, same source of truth. */
+function sep(): string {
+  return readStoredLanguage() === "en" ? "; " : "；";
+}
+
+function unreadableReply(): string {
+  return readStoredLanguage() === "en"
+    ? "Yanyuan did not return a readable reply"
+    : "彦远暂时没有返回可读的回应";
+}
+
 function formatDetail(detail: unknown): string | null {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
     const messages = detail.map(formatValidationIssue).filter((message): message is string => Boolean(message));
-    return messages.length > 0 ? messages.join("；") : null;
+    return messages.length > 0 ? messages.join(sep()) : null;
   }
   if (!isRecord(detail)) return null;
 
@@ -103,7 +116,13 @@ function formatDetail(detail: unknown): string | null {
   if (typeof detail.message === "string") parts.push(detail.message);
   if (Array.isArray(detail.blockingIssues)) {
     const blocking = detail.blockingIssues.filter((issue): issue is string => typeof issue === "string");
-    if (blocking.length > 0) parts.push(`阻断项：${blocking.join("；")}`);
+    if (blocking.length > 0) {
+      parts.push(
+        readStoredLanguage() === "en"
+          ? `Blocking: ${blocking.join(sep())}`
+          : `阻断项：${blocking.join(sep())}`,
+      );
+    }
   }
   return parts.length > 0 ? parts.join(" ") : null;
 }
@@ -118,7 +137,9 @@ function apiErrorMessage(payload: unknown, status: number): string {
       if (nested) return nested;
     }
   }
-  return `请求失败（${status}）`;
+  return readStoredLanguage() === "en"
+    ? `Request failed (${status})`
+    : `请求失败（${status}）`;
 }
 
 class ApiError extends Error {
@@ -163,13 +184,13 @@ function normalizeCitation(value: unknown): EpilogueChatCitation | null {
  */
 export function normalizeEpilogueChatResponse(payload: unknown): EpilogueChatResponse {
   if (!isRecord(payload)) {
-    throw new ApiError("彦远暂时没有返回可读的回应", 502);
+    throw new ApiError(unreadableReply(), 502);
   }
   const messageCandidates = [payload.message, payload.answer, payload.reply, payload.assistantMessage];
   const message = messageCandidates.find(
     (candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0,
   )?.trim();
-  if (!message) throw new ApiError("彦远暂时没有返回可读的回应", 502);
+  if (!message) throw new ApiError(unreadableReply(), 502);
 
   const citations = Array.isArray(payload.citations)
     ? payload.citations.map(normalizeCitation).filter((citation): citation is EpilogueChatCitation => citation !== null)
@@ -212,7 +233,12 @@ async function requestAudioGuideBlob(url: string, signal?: AbortSignal) {
 
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.startsWith("audio/")) {
-    throw new ApiError("语音服务返回了无法播放的内容", 502);
+    throw new ApiError(
+      readStoredLanguage() === "en"
+        ? "The speech service returned something that cannot be played"
+        : "语音服务返回了无法播放的内容",
+      502,
+    );
   }
   return response.blob();
 }

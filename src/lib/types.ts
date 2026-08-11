@@ -61,6 +61,8 @@ export interface VisitorProfile {
   curiosityLabel: string;
   freeFormQuestion?: string | null;
   openQuestion?: string | null;
+  /** The language the exhibition was curated and written in. */
+  language?: "zh" | "en";
   motivation: VisitorMotivation;
   priorKnowledge: PriorKnowledge;
   durationMinutes: 5 | 10 | 15;
@@ -202,6 +204,8 @@ export interface AgendaInput {
   durationMinutes: 5 | 10 | 15;
   personalConnection?: string;
   excludedTopics: string[];
+  /** The language this exhibition was written in, fixed at generation time. */
+  language?: "zh" | "en";
 }
 
 export interface AnswerabilityResult {

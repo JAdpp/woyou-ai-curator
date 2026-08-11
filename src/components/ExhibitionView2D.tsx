@@ -11,7 +11,8 @@ import type {
   LabelSentence,
 } from "@/lib/types";
 import { logEvent, resolveApiAssetUrl, resolveObjectImageUrl } from "@/lib/api";
-import { CURATOR_TITLE } from "@/lib/brand";
+import { fill } from "@/lib/i18n";
+import { useLanguage } from "@/lib/useLanguage";
 import {
   buildCuratorialEvidenceIndex,
   CURATORIAL_CONFIDENCE_LABELS,
@@ -28,17 +29,20 @@ import { getImageLicenseLabel, getLegacyRightsLabel } from "@/lib/rights";
 import { EpilogueConversation } from "./EpilogueConversation";
 import styles from "./view2d.module.css";
 
-const TYPE_LABELS: Record<LabelSentence["type"], string> = {
-  institution_fact: "机构记录",
-  system_inference: "系统推断",
-  uncertain: "仍不确定",
-};
+type ViewCopy = ReturnType<typeof useLanguage>["t"]["view"];
 
-const SOURCE_KIND_LABELS: Record<string, string> = {
-  institution_metadata: "机构元数据",
-  institution_curatorial_text: "机构说明",
-  institution_provenance: "机构来源记录",
-};
+function typeLabel(type: LabelSentence["type"], t: ViewCopy): string {
+  if (type === "institution_fact") return t.sentenceInstitutionFact;
+  if (type === "uncertain") return t.sentenceUncertain;
+  return t.sentenceSystemInference;
+}
+
+function sourceKindLabel(kind: string, t: ViewCopy): string {
+  if (kind === "institution_metadata") return t.sourceMetadata;
+  if (kind === "institution_curatorial_text") return t.sourceCuratorialText;
+  if (kind === "institution_provenance") return t.sourceProvenance;
+  return "";
+}
 
 type CuratorialEvidenceIndex = Record<string, CuratorialEvidenceReference>;
 
@@ -49,23 +53,25 @@ function EvidenceLinks({
   evidenceIds: string[];
   evidenceIndex: CuratorialEvidenceIndex;
 }) {
+  const { t: copy } = useLanguage();
+  const t = copy.view;
   const references = evidenceIds
     .map((id) => evidenceIndex[id])
     .filter((reference): reference is CuratorialEvidenceReference => Boolean(reference));
   const unresolvedCount = evidenceIds.length - references.length;
 
   if (references.length === 0) {
-    return <span className={styles.noEvidence}>尚未绑定可定位的馆藏记录</span>;
+    return <span className={styles.noEvidence}>{t.noEvidence}</span>;
   }
 
   return (
-    <span className={styles.evidenceLinks} aria-label="关联的馆藏记录">
+    <span className={styles.evidenceLinks} aria-label={t.linkedRecords}>
       {references.map((reference, index) => (
         <a key={reference.id} href={`#item-${reference.itemId}`}>
           {String(index + 1).padStart(2, "0")} · {reference.objectTitle} · {reference.sourceLocation}
         </a>
       ))}
-      {unresolvedCount > 0 && <span>{unresolvedCount} 条记录暂无法定位</span>}
+      {unresolvedCount > 0 && <span>{fill(t.unresolvedRecords, { n: unresolvedCount })}</span>}
     </span>
   );
 }
@@ -77,11 +83,12 @@ function BriefClaim({
   claim: CuratorialBriefClaim;
   evidenceIndex: CuratorialEvidenceIndex;
 }) {
+  const { language } = useLanguage();
   return (
     <article className={styles.briefClaim} data-confidence={claim.confidence}>
       <div>
         <p>{claim.text}</p>
-        <span>{CURATORIAL_CONFIDENCE_LABELS[claim.confidence]}</span>
+        <span>{CURATORIAL_CONFIDENCE_LABELS[claim.confidence][language]}</span>
       </div>
       <EvidenceLinks evidenceIds={claim.evidenceIds} evidenceIndex={evidenceIndex} />
     </article>
@@ -89,12 +96,14 @@ function BriefClaim({
 }
 
 function CuratorialBriefPanel({ exhibition }: { exhibition: Exhibition }) {
+  const { language, t: copy } = useLanguage();
+  const t = copy.view;
   const brief = exhibition.curatorialBrief;
   if (!brief) return null;
 
   const evidenceIndex = buildCuratorialEvidenceIndex(exhibition.items);
-  const provenanceLabel = PROVENANCE_STATUS_LABELS[brief.ethics.provenanceStatus];
-  const ethicsMessages = unresolvedEthicsMessages(brief).filter(
+  const provenanceLabel = PROVENANCE_STATUS_LABELS[brief.ethics.provenanceStatus][language];
+  const ethicsMessages = unresolvedEthicsMessages(brief, language).filter(
     (message) => message !== provenanceLabel,
   );
   const excludedCandidates = brief.excludedCandidates;
@@ -103,18 +112,18 @@ function CuratorialBriefPanel({ exhibition }: { exhibition: Exhibition }) {
     <section className={styles.briefSection} aria-labelledby="curatorial-brief-title">
       <details className={styles.briefDetails}>
         <summary>
-          <span className={styles.briefSummaryLabel} id="curatorial-brief-title">策展依据</span>
+          <span className={styles.briefSummaryLabel} id="curatorial-brief-title">{t.briefLabel}</span>
           <strong>{brief.bigIdea.text}</strong>
-          <span className={styles.briefSummaryAction}>查看论证、选物与边界</span>
+          <span className={styles.briefSummaryAction}>{t.briefAction}</span>
         </summary>
 
         <div className={styles.briefBody}>
           <p className={styles.briefDisclosure}>
-            以下是彦远根据本展馆藏记录形成的策展判断，不是来源机构原话。引用表示可以返回相关记录核对，不代表该判断已经由机构或专家确认。
+            {t.briefDisclosure}
           </p>
 
           <section className={styles.briefArgument} aria-labelledby="brief-argument-title">
-            <h3 id="brief-argument-title">论证线索</h3>
+            <h3 id="brief-argument-title">{t.briefArgument}</h3>
             <BriefClaim claim={brief.bigIdea} evidenceIndex={evidenceIndex} />
             {brief.keyMessages.map((claim) => (
               <BriefClaim key={claim.id} claim={claim} evidenceIndex={evidenceIndex} />
@@ -123,24 +132,24 @@ function CuratorialBriefPanel({ exhibition }: { exhibition: Exhibition }) {
 
           <div className={styles.briefColumns}>
             <section>
-              <h3>选物边界</h3>
+              <h3>{t.briefSelection}</h3>
               <p>
-                本展记录了 <strong>{brief.objects.length}</strong> 件入选判断
+                {fill(t.briefSelectionCount, { n: brief.objects.length })}
                 {excludedCandidates
-                  ? <>；另有 <strong>{excludedCandidates.length}</strong> 件候选未进入最终动线。</>
-                  : "。公开版本不包含访客画像与排除候选记录。"}
+                  ? fill(t.briefExcludedSuffix, { n: excludedCandidates.length })
+                  : t.briefNoExcluded}
               </p>
               {excludedCandidates && excludedCandidates.length > 0 && (
                 <ul>
                   {excludedCandidates.slice(0, 2).map((candidate) => (
-                    <li key={candidate.objectId}>{candidate.title}：{candidate.reason}</li>
+                    <li key={candidate.objectId}>{candidate.title}: {candidate.reason}</li>
                   ))}
                 </ul>
               )}
             </section>
 
             <section className={styles.briefEthics}>
-              <h3>来源与伦理状态</h3>
+              <h3>{t.briefEthics}</h3>
               <p className={styles.reviewPending}>
                 {provenanceLabel}
               </p>
@@ -153,7 +162,7 @@ function CuratorialBriefPanel({ exhibition }: { exhibition: Exhibition }) {
 
           {brief.criticalQuestions.length > 0 && (
             <section className={styles.briefQuestions}>
-              <h3>这份策展仍留下的问题</h3>
+              <h3>{t.briefOpen}</h3>
               <ul>
                 {brief.criticalQuestions.map((question) => <li key={question}>{question}</li>)}
               </ul>
@@ -161,9 +170,13 @@ function CuratorialBriefPanel({ exhibition }: { exhibition: Exhibition }) {
           )}
 
           <p className={styles.briefVersion}>
-            {brief.schemaVersion} · {brief.status === "model_refined" ? "模型整理，规则校验" : "规则生成"} ·
-            检索 {brief.retrieval.method} {brief.retrieval.selectedCount}/{brief.retrieval.candidateCount} ·
-            外部知识{brief.interpretationPolicy.externalKnowledgeAllowed ? "允许" : "未使用"}
+            {brief.schemaVersion} ·{" "}
+            {brief.status === "model_refined" ? t.briefModelRefined : t.briefRuleGenerated} ·{" "}
+            {t.briefRetrieval} {brief.retrieval.method} {brief.retrieval.selectedCount}/{brief.retrieval.candidateCount} ·{" "}
+            {t.briefExternalKnowledge}{" "}
+            {brief.interpretationPolicy.externalKnowledgeAllowed
+              ? t.briefExternalAllowed
+              : t.briefExternalUnused}
           </p>
         </div>
       </details>
@@ -192,6 +205,8 @@ function ItemBlock({
   decision?: CuratorialObjectDecision;
   evidenceIndex: CuratorialEvidenceIndex;
 }) {
+  const { t: copy } = useLanguage();
+  const t = copy.view;
   const [sourceOpen, setSourceOpen] = useState(false);
   const imageLicenseLabel = getImageLicenseLabel(item.object);
   const legacyRightsLabel = getLegacyRightsLabel(item.object);
@@ -210,14 +225,14 @@ function ItemBlock({
           unoptimized
         />
         <p className={styles.credit}>
-          <span>图片：{imageLicenseLabel}</span>
+          <span>{t.image}: {imageLicenseLabel}</span>
           <a
             href={item.object.objectUrl}
             target="_blank"
             rel="noreferrer"
             onClick={() => logEvent("institution_page_opened", exhibitionId, { itemId: item.id })}
           >
-            {item.object.institution || "机构页"} ↗
+            {item.object.institution || t.institutionPage} ↗
           </a>
         </p>
       </div>
@@ -227,7 +242,7 @@ function ItemBlock({
           <span className={styles.roleTag}>{item.roleLabel}</span>
           <span className={styles.itemNumber}>{String(index + 1).padStart(2, "0")}</span>
           {item.object.evidenceDepth === "thin" && (
-            <span className={styles.depthTag}>仅著录信息</span>
+            <span className={styles.depthTag}>{t.tombstoneOnly}</span>
           )}
         </p>
         <h3>{item.displayTitle || item.object.titleOriginal || item.object.title}</h3>
@@ -240,7 +255,7 @@ function ItemBlock({
           {item.labelSentences.map((sentence) => (
             <p key={sentence.id} data-type={sentence.type}>
               {sentence.text}
-              <span className={styles.sentenceType}>{TYPE_LABELS[sentence.type]}</span>
+              <span className={styles.sentenceType}>{typeLabel(sentence.type, t)}</span>
             </p>
           ))}
         </div>
@@ -252,11 +267,11 @@ function ItemBlock({
           }
         >
           <summary>
-            为什么选它？
-            <span className={styles.systemJudgement}>系统策展判断</span>
+            {t.whySelected}
+            <span className={styles.systemJudgement}>{t.systemJudgement}</span>
           </summary>
           <p>{decision?.selectionRationale || item.whySelected}</p>
-          <p className={styles.relation}>与前后展品的关系：{decision?.relation || item.relation}</p>
+          <p className={styles.relation}>{t.relationPrefix}{decision?.relation || item.relation}</p>
           {decision && (
             <EvidenceLinks evidenceIds={decision.evidenceIds} evidenceIndex={evidenceIndex} />
           )}
@@ -271,7 +286,7 @@ function ItemBlock({
             if (!sourceOpen) logEvent("source_opened", exhibitionId, { itemId: item.id });
           }}
         >
-          {sourceOpen ? "收起来源" : `来源（${item.object.evidence.length} 条）`}
+          {sourceOpen ? t.collapseSources : fill(t.expandSources, { n: item.object.evidence.length })}
         </button>
 
         {sourceOpen && (
@@ -283,7 +298,7 @@ function ItemBlock({
                 <small>{chunk.sourceTitle}</small>
                 {(chunk.license || chunk.sourceKind) && (
                   <p className={styles.sourceRights}>
-                    <span>{SOURCE_KIND_LABELS[chunk.sourceKind || ""] || chunk.sourceKind || "字段来源"}</span>
+                    <span>{sourceKindLabel(chunk.sourceKind || "", t) || chunk.sourceKind || t.sourceFieldFallback}</span>
                     {chunk.license && chunk.rightsUri ? (
                       <a href={chunk.rightsUri} target="_blank" rel="noreferrer">{chunk.license} ↗</a>
                     ) : (
@@ -294,13 +309,13 @@ function ItemBlock({
               </div>
             ))}
             <dl className={styles.fieldRights}>
-              <div><dt>图片</dt><dd>{item.object.imageLicense && item.object.imageRightsUri ? <a href={item.object.imageRightsUri} target="_blank" rel="noreferrer">{imageLicenseLabel} ↗</a> : imageLicenseLabel}</dd></div>
-              <div><dt>基础元数据</dt><dd>{item.object.metadataRightsUri ? <a href={item.object.metadataRightsUri} target="_blank" rel="noreferrer">{item.object.metadataLicense} ↗</a> : item.object.metadataLicense || "逐字段见机构记录"}</dd></div>
+              <div><dt>{t.image}</dt><dd>{item.object.imageLicense && item.object.imageRightsUri ? <a href={item.object.imageRightsUri} target="_blank" rel="noreferrer">{imageLicenseLabel} ↗</a> : imageLicenseLabel}</dd></div>
+              <div><dt>{t.baseMetadata}</dt><dd>{item.object.metadataRightsUri ? <a href={item.object.metadataRightsUri} target="_blank" rel="noreferrer">{item.object.metadataLicense} ↗</a> : item.object.metadataLicense || t.perFieldSeeRecord}</dd></div>
               {item.object.curatorialTextLicense && (
-                <div><dt>机构描述</dt><dd>{item.object.curatorialTextRightsUri ? <a href={item.object.curatorialTextRightsUri} target="_blank" rel="noreferrer">{item.object.curatorialTextLicense} ↗</a> : item.object.curatorialTextLicense}</dd></div>
+                <div><dt>{t.institutionDescription}</dt><dd>{item.object.curatorialTextRightsUri ? <a href={item.object.curatorialTextRightsUri} target="_blank" rel="noreferrer">{item.object.curatorialTextLicense} ↗</a> : item.object.curatorialTextLicense}</dd></div>
               )}
               {legacyRightsLabel && (
-                <div><dt>旧版综合声明</dt><dd>{item.object.rightsUri ? <a href={item.object.rightsUri} target="_blank" rel="noreferrer">{legacyRightsLabel} ↗</a> : legacyRightsLabel}</dd></div>
+                <div><dt>{t.legacyRights}</dt><dd>{item.object.rightsUri ? <a href={item.object.rightsUri} target="_blank" rel="noreferrer">{legacyRightsLabel} ↗</a> : legacyRightsLabel}</dd></div>
               )}
             </dl>
           </div>
@@ -317,6 +332,9 @@ function ExhibitionPosterVisual({
   exhibition: Exhibition;
   posterUrl: string | null;
 }) {
+  const { t: copy } = useLanguage();
+  const t = copy.view;
+  const brandLine = `${copy.brand.productName} · ${copy.brand.curatorTitle}`;
   const [posterLoaded, setPosterLoaded] = useState(false);
   const [posterFailed, setPosterFailed] = useState(false);
   const posterImageRef = useRef<HTMLImageElement>(null);
@@ -352,7 +370,7 @@ function ExhibitionPosterVisual({
             className={styles.posterImage}
             data-loaded={posterLoaded ? "true" : "false"}
             src={posterUrl}
-            alt={exhibition.poster?.altText ?? "AI 生成的展览视觉"}
+            alt={exhibition.poster?.altText ?? t.posterAlt}
             aria-hidden={posterLoaded ? undefined : true}
             onLoad={() => setPosterLoaded(true)}
             onError={handlePosterFailure}
@@ -363,7 +381,7 @@ function ExhibitionPosterVisual({
           <div
             className={styles.posterCollage}
             role="img"
-            aria-label="本展所选馆藏公开图像拼贴，用作入口视觉回退"
+            aria-label={t.posterCollageAlt}
           >
             {fallbackItems.map((item, index) => (
               <Image
@@ -381,12 +399,12 @@ function ExhibitionPosterVisual({
         )}
 
         {!showGeneratedPoster && fallbackItems.length === 0 && (
-          <div className={styles.posterUnavailable}>主题画面暂不可用</div>
+          <div className={styles.posterUnavailable}>{t.posterUnavailable}</div>
         )}
 
         {!showGeneratedPoster && (
           <div className={styles.posterFallbackCopy} aria-hidden="true">
-            <small>卧游 · AI 策展人彦远</small>
+            <small>{brandLine}</small>
             <strong>{exhibition.title}</strong>
             {exhibition.subtitle && <span>{exhibition.subtitle}</span>}
           </div>
@@ -394,8 +412,8 @@ function ExhibitionPosterVisual({
       </div>
       <figcaption>
         {showGeneratedPoster
-          ? "AI 生成展览海报；主题画面由模型生成，标题由系统精确排版"
-          : "馆藏公开图像拼贴与系统排版回退；图像许可见各展品来源"}
+          ? t.posterCaptionAi
+          : t.posterCaptionCollage}
       </figcaption>
     </figure>
   );
@@ -410,6 +428,13 @@ export function ExhibitionView2D({
   onEnterHall?: () => void;
   webglAvailable?: boolean;
 }) {
+  const { language, t: copy } = useLanguage();
+  const t = copy.view;
+  // Labels and curatorial prose were written once, when the exhibition was
+  // generated. Switching the interface afterwards cannot retranslate them, so
+  // say so rather than wrapping one language in the other and hoping.
+  const writtenIn = exhibition.visitorProfile?.language ?? "zh";
+  const languageMismatch = writtenIn !== language;
   const itemsById = new Map(exhibition.items.map((item) => [item.id, item]));
   const posterUrl = exhibition.poster?.backgroundUrl
     ? resolveApiAssetUrl(exhibition.poster.backgroundUrl)
@@ -421,7 +446,7 @@ export function ExhibitionView2D({
   return (
     <div className={styles.page}>
       <a href="#exhibition-body" className={styles.skipLink}>
-        跳到展览内容
+        {t.skipToContent}
       </a>
 
       <header className={styles.hero}>
@@ -431,7 +456,13 @@ export function ExhibitionView2D({
           posterUrl={posterUrl}
         />
         <div>
-          <p className={styles.eyebrow}>{CURATOR_TITLE}为你策展 · 文字版</p>
+          <p className={styles.eyebrow}>{t.eyebrow}</p>
+          {languageMismatch && (
+            <p className={styles.languageNotice} role="note">
+              <strong>{copy.exhibition.languageNoticeTitle}</strong>
+              {copy.exhibition.languageNoticeBody}
+            </p>
+          )}
           <h1>{exhibition.title}</h1>
           {exhibition.subtitle && <p className={styles.subtitle}>{exhibition.subtitle}</p>}
           <p className={styles.thesis}>{exhibition.curatorialThesis}</p>
@@ -440,15 +471,15 @@ export function ExhibitionView2D({
           <div className={styles.heroActions}>
             {onEnterHall && webglAvailable && (
               <button type="button" className={styles.primary} onClick={onEnterHall}>
-                进入 3D 展厅
+                {t.enterHall}
               </button>
             )}
-            <Link href="/">重新策展</Link>
+            <Link href="/">{t.curateAgain}</Link>
           </div>
 
           {onEnterHall && !webglAvailable && (
             <p className={styles.webglNote}>
-              当前设备不支持 3D 展厅（缺少 WebGL 或显卡能力不足），已为你打开完整的文字版本。
+              {t.noWebgl}
             </p>
           )}
         </div>
@@ -456,7 +487,7 @@ export function ExhibitionView2D({
 
       <CuratorialBriefPanel exhibition={exhibition} />
 
-      <nav className={styles.toc} aria-label="展览目录">
+      <nav className={styles.toc} aria-label={t.toc}>
         <ol>
           {exhibition.chapters.map((chapter) => (
             <li key={chapter.id}>
@@ -464,7 +495,7 @@ export function ExhibitionView2D({
             </li>
           ))}
           <li>
-            <a href="#epilogue">结语</a>
+            <a href="#epilogue">{t.epilogue}</a>
           </li>
         </ol>
       </nav>
@@ -474,7 +505,7 @@ export function ExhibitionView2D({
           <section key={chapter.id} className={styles.chapter} id={`chapter-${chapter.id}`}>
             <header className={styles.chapterHead}>
               <p className={styles.eyebrow}>
-                第 {chapter.order + 1} 部分 / 共 {exhibition.chapters.length}
+                {fill(t.chapterOf, { n: chapter.order + 1, total: exhibition.chapters.length })}
               </p>
               <h2>{chapter.title}</h2>
               <p>{chapter.leadIn}</p>
@@ -497,13 +528,13 @@ export function ExhibitionView2D({
         ))}
 
         <section className={styles.epilogue} id="epilogue">
-          <h2>结语</h2>
+          <h2>{t.epilogue}</h2>
           <p className={styles.epilogueText}>{exhibition.epilogue.text}</p>
           <EpilogueConversation
             exhibitionId={exhibition.id}
             openQuestions={exhibition.epilogue.openQuestions}
           />
-          <h2>这场展览的材料边界</h2>
+          <h2>{t.materialLimits}</h2>
           <ul className={styles.boundary}>
             {exhibition.epilogue.materialBoundary.map((limit) => (
               <li key={limit}>{limit}</li>
@@ -512,26 +543,26 @@ export function ExhibitionView2D({
         </section>
 
         <section className={styles.versions}>
-          <h2>生成记录</h2>
+          <h2>{t.generationRecord}</h2>
           <dl>
             <div>
-              <dt>实际路径</dt>
+              <dt>{t.actualPath}</dt>
               <dd>{generationProviderLabel(exhibition.versions.provider)}</dd>
             </div>
             <div>
-              <dt>配置模型</dt>
+              <dt>{t.configuredModel}</dt>
               <dd>{exhibition.versions.model}</dd>
             </div>
             <div>
-              <dt>提示</dt>
+              <dt>{t.promptVersion}</dt>
               <dd>{exhibition.versions.prompt}</dd>
             </div>
             <div>
-              <dt>馆藏</dt>
+              <dt>{t.collection}</dt>
               <dd>{exhibition.versions.collection}</dd>
             </div>
             <div>
-              <dt>检查器</dt>
+              <dt>{t.validator}</dt>
               <dd>{exhibition.versions.validator}</dd>
             </div>
           </dl>
@@ -541,7 +572,7 @@ export function ExhibitionView2D({
             </p>
           )}
           <p>
-            本展由 {CURATOR_TITLE} 生成。展品与说明可追溯到机构公开馆藏；策展解释不代表来源机构立场。
+            {t.footer}
           </p>
         </section>
       </main>

@@ -1,41 +1,80 @@
+import type { Language } from "./i18n";
 import type {
   CuratorialBrief,
   CuratorialObjectDecision,
   ExhibitionItem,
 } from "./types";
 
+/* Ethics and confidence vocabulary.
+   These read as verdicts, so the English is written to be as guarded as the
+   Chinese: "recorded as" and "not yet" rather than anything that would sound
+   like a clearance the record does not actually give. */
+
+type Bilingual = Record<Language, string>;
+
+const bi = (zh: string, en: string): Bilingual => ({ zh, en });
+
 export const CURATORIAL_CONFIDENCE_LABELS = {
-  supported: "有馆藏记录可追溯",
-  provisional: "暂定解释",
-  uncertain: "证据仍不足",
+  supported: bi("有馆藏记录可追溯", "Traceable to a collection record"),
+  provisional: bi("暂定解释", "Provisional reading"),
+  uncertain: bi("证据仍不足", "Evidence still insufficient"),
 } as const;
 
 export const PROVENANCE_STATUS_LABELS = {
-  not_reviewed: "来源史尚未审核",
-  unknown: "当前馆藏记录不足以判断来源史状态",
-  partial: "来源史记录不完整",
-  documented: "馆方记录可查，仍待人工核对",
+  not_reviewed: bi("来源史尚未审核", "Provenance not yet reviewed"),
+  unknown: bi(
+    "当前馆藏记录不足以判断来源史状态",
+    "The collection record is not enough to judge provenance status",
+  ),
+  partial: bi("来源史记录不完整", "Provenance record incomplete"),
+  documented: bi(
+    "馆方记录可查，仍待人工核对",
+    "Documented by the institution; still awaiting human verification",
+  ),
 } as const;
 
 export const EVALUATION_METHOD_LABELS = {
-  visitor_prompt: "访客讨论",
-  comprehension_check: "理解测试",
-  expert_review: "专家审核",
+  visitor_prompt: bi("访客讨论", "Visitor discussion"),
+  comprehension_check: bi("理解测试", "Comprehension check"),
+  expert_review: bi("专家审核", "Expert review"),
 } as const;
 
 export const CULTURAL_SENSITIVITY_STATUS_LABELS = {
-  not_reviewed: "文化敏感性尚未审核",
-  unknown: "当前记录不足以判断文化敏感性",
-  no_flags_after_review: "复核后未记录文化敏感性标记",
-  flags_present: "存在文化敏感性标记",
+  not_reviewed: bi("文化敏感性尚未审核", "Cultural sensitivity not yet reviewed"),
+  unknown: bi(
+    "当前记录不足以判断文化敏感性",
+    "The record is not enough to judge cultural sensitivity",
+  ),
+  no_flags_after_review: bi(
+    "复核后未记录文化敏感性标记",
+    "No cultural-sensitivity flags recorded after review",
+  ),
+  flags_present: bi("存在文化敏感性标记", "Cultural-sensitivity flags present"),
 } as const;
 
 export const COMMUNITY_REVIEW_STATUS_LABELS = {
-  not_assessed: "相关社群审阅需求尚未评估",
-  not_required: "记录为不需要相关社群审阅",
-  required: "需要相关社群审阅，尚未记录完成",
-  completed: "已记录完成相关社群审阅",
+  not_assessed: bi(
+    "相关社群审阅需求尚未评估",
+    "Whether community review is needed has not been assessed",
+  ),
+  not_required: bi(
+    "记录为不需要相关社群审阅",
+    "Recorded as not requiring community review",
+  ),
+  required: bi(
+    "需要相关社群审阅，尚未记录完成",
+    "Community review is required and is not recorded as complete",
+  ),
+  completed: bi(
+    "已记录完成相关社群审阅",
+    "Community review is recorded as complete",
+  ),
 } as const;
+
+/** Read one bilingual label. */
+export function label(entry: Bilingual, language: Language): string {
+  return entry[language];
+}
 
 export interface CuratorialEvidenceReference {
   id: string;
@@ -75,26 +114,46 @@ export function findCuratorialDecision(
   );
 }
 
-export function unresolvedEthicsMessages(brief: CuratorialBrief) {
+export function unresolvedEthicsMessages(
+  brief: CuratorialBrief,
+  language: Language = "zh",
+) {
   const messages: string[] = [];
+  const say = (zh: string, en: string) => messages.push(language === "en" ? en : zh);
+
   if (brief.ethics.provenanceStatus !== "documented") {
-    messages.push(PROVENANCE_STATUS_LABELS[brief.ethics.provenanceStatus]);
+    messages.push(PROVENANCE_STATUS_LABELS[brief.ethics.provenanceStatus][language]);
   }
   if (brief.ethics.culturalSensitivity.length === 0) {
     if (brief.ethics.culturalSensitivityStatus === "no_flags_after_review") {
-      messages.push("复核记录未发现文化敏感性标记");
+      say(
+        "复核记录未发现文化敏感性标记",
+        "The review record found no cultural-sensitivity flags",
+      );
     } else {
-      messages.push("未记录文化敏感性标记；这不等于已经排除风险");
+      say(
+        "未记录文化敏感性标记；这不等于已经排除风险",
+        "No cultural-sensitivity flags are recorded, which is not the same as having ruled any out",
+      );
     }
   }
   if (brief.ethics.communityReviewStatus === "completed") {
-    messages.push("已记录完成相关社群审阅；请结合审阅说明核对");
+    say(
+      "已记录完成相关社群审阅；请结合审阅说明核对",
+      "Community review is recorded as complete; read it together with the review notes",
+    );
   } else if (brief.ethics.communityReviewRequired || brief.ethics.communityReviewStatus === "required") {
-    messages.push("系统标记为需要相关社群审阅，尚未记录完成");
+    say(
+      "系统标记为需要相关社群审阅，尚未记录完成",
+      "Flagged as requiring community review, which is not recorded as complete",
+    );
   } else if (brief.ethics.communityReviewStatus === "not_required") {
-    messages.push("记录为不需要相关社群审阅");
+    say("记录为不需要相关社群审阅", "Recorded as not requiring community review");
   } else {
-    messages.push("相关社群审阅需求尚未评估");
+    say(
+      "相关社群审阅需求尚未评估",
+      "Whether community review is needed has not been assessed",
+    );
   }
   return messages;
 }

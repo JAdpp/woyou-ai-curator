@@ -682,3 +682,24 @@
   .briefColumns { grid-template-columns: 1fr; gap: 1.2rem; }
   .evidenceLinks a { white-space: normal; }
 }
+
+/* Shown when the reader's language differs from the one the exhibition was
+   written in. Stated plainly rather than dressed as a warning: nothing is
+   broken, the prose simply stays in the language it was written in. */
+.languageNotice {
+  max-width: 44rem;
+  margin: 0 0 1.1rem;
+  padding: 0.75rem 0.95rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.languageNotice strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--ink);
+}

@@ -118,7 +118,7 @@ function ReviewClaim({
   return (
     <article className={styles.reviewClaim} data-confidence={claim.confidence}>
       <div>
-        <span>{CURATORIAL_CONFIDENCE_LABELS[claim.confidence]}</span>
+        <span>{CURATORIAL_CONFIDENCE_LABELS[claim.confidence].zh}</span>
         <p>{claim.text}</p>
       </div>
       <ReviewEvidenceLinks evidenceIds={claim.evidenceIds} evidenceIndex={evidenceIndex} />
@@ -213,12 +213,12 @@ function CuratorialBriefReview({ exhibition }: { exhibition: Exhibition }) {
             <dl>
               <div data-review-needed={provenanceNeedsReview ? "true" : "manual"}>
                 <dt>来源史</dt>
-                <dd>{PROVENANCE_STATUS_LABELS[brief.ethics.provenanceStatus]}</dd>
+                <dd>{PROVENANCE_STATUS_LABELS[brief.ethics.provenanceStatus].zh}</dd>
               </div>
               <div data-review-needed={sensitivityNeedsReview ? "true" : "manual"}>
                 <dt>文化敏感性</dt>
                 <dd>
-                  {CULTURAL_SENSITIVITY_STATUS_LABELS[brief.ethics.culturalSensitivityStatus]}
+                  {CULTURAL_SENSITIVITY_STATUS_LABELS[brief.ethics.culturalSensitivityStatus].zh}
                   {brief.ethics.culturalSensitivity.length > 0
                     ? `：${brief.ethics.culturalSensitivity.join("；")}`
                     : brief.ethics.culturalSensitivityStatus === "no_flags_after_review"
@@ -228,7 +228,7 @@ function CuratorialBriefReview({ exhibition }: { exhibition: Exhibition }) {
               </div>
               <div data-review-needed={communityNeedsReview ? "true" : "manual"}>
                 <dt>相关社群审阅</dt>
-                <dd>{COMMUNITY_REVIEW_STATUS_LABELS[brief.ethics.communityReviewStatus]}</dd>
+                <dd>{COMMUNITY_REVIEW_STATUS_LABELS[brief.ethics.communityReviewStatus].zh}</dd>
               </div>
               <div>
                 <dt>外部知识</dt>
@@ -252,7 +252,7 @@ function CuratorialBriefReview({ exhibition }: { exhibition: Exhibition }) {
                 <ul>
                   {brief.evaluationTargets.map((target) => (
                     <li key={target.id}>
-                      <span>{EVALUATION_METHOD_LABELS[target.method]}</span>
+                      <span>{EVALUATION_METHOD_LABELS[target.method].zh}</span>
                       {target.statement}
                     </li>
                   ))}
