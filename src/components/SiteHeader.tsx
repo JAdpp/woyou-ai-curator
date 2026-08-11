@@ -4,6 +4,7 @@ import Link from "next/link";
 import { PRODUCT_NAME, PRODUCT_NAME_LATIN } from "@/lib/brand";
 import { useLanguage } from "@/lib/useLanguage";
 import { LanguageToggle } from "./LanguageToggle";
+import { WoyouMark } from "./WoyouMark";
 import styles from "./siteHeader.module.css";
 
 /**
@@ -39,7 +40,7 @@ export function SiteHeader({
         .join(" ")}
     >
       <Link className={styles.brand} href="/" aria-label={`${lead} ${t.header.home}`}>
-        <span className={styles.brandSeal} aria-hidden="true">卧</span>
+        <WoyouMark className={styles.brandMark} />
         <span>
           <strong>{lead}</strong>
           <small>{trail}</small>

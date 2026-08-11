@@ -27,6 +27,15 @@
   margin: 0;
 }
 
+.chatIdentity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.chatIdentity > div { min-width: 0; }
+
 .curatorIdentity {
   margin: 0 0 0.35rem;
   color: var(--muted, #6f665a);
@@ -81,6 +90,14 @@
   font-size: 0.68rem;
   line-height: 1.35;
 }
+
+.curatorSpeaker {
+  display: flex;
+  align-items: center;
+  gap: 0.48rem;
+}
+
+.curatorSpeaker > span:last-child { min-width: 0; }
 
 .visitorBubble .bubbleSpeaker {
   color: color-mix(in srgb, var(--paper, #faf7f1) 72%, transparent);
@@ -286,6 +303,14 @@
   flex-direction: column;
   gap: 1.75rem;
 }
+
+.pipelineIdentity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.pipelineIdentity > div { min-width: 0; }
 
 .pipelineShell h2 {
   font-size: clamp(1.3rem, 4vw, 1.9rem);

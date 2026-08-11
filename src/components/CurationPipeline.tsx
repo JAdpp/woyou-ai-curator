@@ -5,6 +5,7 @@ import { followJob, startCuration } from "@/lib/api";
 import type { GenerationJob } from "@/lib/types";
 import { useLanguage } from "@/lib/useLanguage";
 import { CollectionPuzzle } from "./CollectionPuzzle";
+import { CuratorAvatar } from "./CuratorAvatar";
 import styles from "./chat.module.css";
 
 const STATUS_GLYPH: Record<string, string> = {
@@ -78,11 +79,14 @@ export function CurationPipeline({
     <section className={styles.pipelineShell} aria-label={t.pipeline.ariaLabel}>
       <div className={styles.pipelineLayout}>
         <div className={styles.pipelineProcess} aria-live="polite" aria-busy={job?.status !== "completed"}>
-          <header>
-            <h2>{t.pipeline.heading}</h2>
-            {/* The stage text comes from the job and is written by the server in
-                the language the interview ran in, so it is not translated here. */}
-            <p className={styles.pipelineStage}>{job?.stage || t.pipeline.starting}</p>
+          <header className={styles.pipelineIdentity}>
+            <CuratorAvatar size="lg" />
+            <div>
+              <h2>{t.pipeline.heading}</h2>
+              {/* The stage text comes from the job and is written by the server in
+                  the language the interview ran in, so it is not translated here. */}
+              <p className={styles.pipelineStage}>{job?.stage || t.pipeline.starting}</p>
+            </div>
           </header>
 
           <ol className={styles.stepList}>

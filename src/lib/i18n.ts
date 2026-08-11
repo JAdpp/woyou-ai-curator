@@ -135,8 +135,8 @@ const COPY = {
     epigraph: line("澄怀观道，卧以游之。", "Clear the mind to see the way; travel it lying down."),
     epigraphCite: line("— 宗炳《画山水序》，五世纪", "— Zong Bing, Preface on Landscape Painting, 5th c."),
     heroTitle: line(
-      "把你的好奇，变成一座只为你搭的展厅。",
-      "Turn your curiosity into a room built for you alone.",
+      "把你对文明的好奇，变成一座只为你搭的展厅。",
+      "Turn your curiosity about civilisation into an exhibition hall built just for you.",
     ),
     heroBody: line(
       "“AI 策展人彦远”会从涵盖全球多种文化的开放馆藏中检索、比较，并为你组织主题、章节与导览。",
@@ -283,12 +283,68 @@ const COPY = {
     source: line("来源", "Source"),
     fieldLicence: line("字段许可", "Field licence"),
 
-    methodKicker: line("AI 技术 × 策展方法", "AI technique × curatorial method"),
-    methodTitle: line("AI 技术，服务于可检查的策展判断", "AI in service of a curatorial judgement you can check"),
+    methodKicker: line("AGENT 架构 × 策展 HARNESS", "AGENT ARCHITECTURE × CURATORIAL HARNESS"),
+    methodTitle: line("一位 AI 策展人，一套受控的策展 Harness", "One AI curator, one controlled curation harness"),
     methodLead: line(
-      "“彦远”不是先写故事、再寻找插图。它先从馆方著录与证据片段中召回候选，再把命题、分论点、对象角色和材料边界写进版本化策展简报。",
-      "Yanyuan does not write a story first and then look for pictures. It recalls candidates from institutional records and evidence excerpts, then writes the proposition, the sub-arguments, each object's role and the limits of the material into a versioned curatorial brief.",
+      "“彦远”不是靠一个提示词临场编展。访谈、检索、策展论证、展签与呈现被拆成可观察、可验证、可回退的阶段；模型负责提出解释，系统负责约束它能看什么、能写什么，以及什么结果可以进入展厅。",
+      "Yanyuan does not improvise an exhibition from one prompt. Interview, retrieval, curatorial argument, labels and presentation are split into observable, testable and recoverable stages: the model proposes readings, while the system controls what it may see, what it may write and what is allowed into the hall.",
     ),
+    agentArchitectureTitle: line("Agent 怎样把问题推进成展览", "How the agent advances a question into an exhibition"),
+    agentArchitectureLead: line(
+      "这是受控的单 Agent 工作流：确定性程序掌握流程，语言模型只在被授权的环节写作。",
+      "This is a controlled single-agent workflow: deterministic code owns the process, and the language model writes only inside authorised stages.",
+    ),
+    agentStageInterview: line("结构化访谈", "Structured interview"),
+    agentStageInterviewBody: line(
+      "状态机建立兴趣、熟悉度、参观时长与回避项；模型不能擅自改变访谈顺序。",
+      "A state machine builds interest, familiarity, visit length and exclusions; the model cannot rewrite the interview order.",
+    ),
+    agentStageRetrieve: line("可回答性与选物", "Answerability and selection"),
+    agentStageRetrieveBody: line(
+      "先判断馆藏能否支撑问题，再用混合 RAG 与跨文化多样性重排选择候选。",
+      "The collection is checked for support first, then hybrid RAG and cross-cultural diversity ranking select candidates.",
+    ),
+    agentStageBrief: line("策展合同", "Curatorial contract"),
+    agentStageBriefBody: line(
+      "在写标题和展签前，先固定 Big Idea、分论点、对象角色、证据 ID 与审阅状态。",
+      "Before titles or labels, the big idea, sub-arguments, object roles, evidence IDs and review status are fixed.",
+    ),
+    agentStageCompose: line("分阶段写作", "Staged composition"),
+    agentStageComposeBody: line(
+      "DeepSeek 先形成展览框架，再按章节并发展签；最终题名确定后，海报走独立旁路。",
+      "DeepSeek forms the exhibition frame first, then writes chapter labels in parallel; once the title settles, the poster runs as a separate sidecar.",
+    ),
+    agentStageValidate: line("验证后入场", "Validate before entry"),
+    agentStageValidateBody: line(
+      "结构、角色、证据深度与逐句引用通过检查后，展览才进入可参观状态。",
+      "Only after structure, roles, evidence depth and sentence-level citations pass their checks can the exhibition become visitable.",
+    ),
+    harnessTitle: line("Harness 怎样约束与接住模型", "How the harness constrains and catches the model"),
+    harnessLead: line(
+      "Harness 不是另一个模型，而是包围每次模型调用的合同、预算、校验、回退与留痕。",
+      "The harness is not another model. It is the contracts, budgets, validation, fallbacks and trace around every model call.",
+    ),
+    harnessContract: line("输入输出合同", "Input and output contracts"),
+    harnessContractBody: line(
+      "模型只接收本轮可见的馆方证据摘要，并且只能返回受类型约束的 JSON。",
+      "The model sees only the institutional evidence excerpts exposed for that call and may return only typed JSON.",
+    ),
+    harnessTransaction: line("事务性证据门", "Transactional evidence gate"),
+    harnessTransactionBody: line(
+      "隐藏证据、伪造 ID、跨对象借证或半写入结果会被整段拒绝，不进入展览记录。",
+      "Hidden evidence, invented IDs, cross-object borrowing and partially applied output are rejected as a unit and never enter the exhibition record.",
+    ),
+    harnessFallback: line("阶段预算与诚实回退", "Stage budgets and honest fallback"),
+    harnessFallbackBody: line(
+      "框架和展签各有墙钟预算；超时改用已标注的确定性文本，海报或语音失败不抹掉已经成立的展览。",
+      "Frame and label stages have wall-clock budgets. Timeouts switch to disclosed deterministic text, while a poster or voice failure never erases an otherwise valid exhibition.",
+    ),
+    harnessTrace: line("过程与版本留痕", "Process and version trace"),
+    harnessTraceBody: line(
+      "页面显示每一步的真实发现；记录保留实际 provider、模型、检索、馆藏、提示词与验证器版本。",
+      "The page shows what each stage actually found, while the record keeps the real provider, model, retrieval, collection, prompt and validator versions.",
+    ),
+    methodCoreTitle: line("支撑这条链路的四项核心技术", "Four core technologies supporting the chain"),
     method01: line("混合 RAG", "Hybrid RAG"),
     method01Body: line(
       "字段检索与多语向量检索经 RRF 融合，再按证据片段和文化差异重排；主体硬门控减少答非所问。",
@@ -309,8 +365,8 @@ const COPY = {
       "Qwen Image 3 generates the key visual, with any Chinese set precisely by a typesetter rather than the model; Qwen TTS supplies the studio voice, falling back visibly to the device voice when unavailable. The same exhibition structure drives both the 3D hall and the 2D web version.",
     ),
     methodBoundary: line(
-      "可追溯不等于专业审阅。卧游仍是内部研究 Demo；来源史、文化敏感性与相关社群审阅状态会如实保留。",
-      "Traceable is not the same as professionally reviewed. Woyou is an internal research demo; provenance, cultural sensitivity and community-review status are reported as they actually stand.",
+      "这是一套受控的单 Agent 编排，不是任意自主行动的多 Agent 网络。可追溯不等于专业审阅；来源史、文化敏感性与相关社群审阅状态会如实保留。",
+      "This is a controlled single-agent orchestration, not a network of freely acting autonomous agents. Traceable is not the same as professionally reviewed; provenance, cultural sensitivity and community-review status are reported as they actually stand.",
     ),
 
     collectionLive: line(

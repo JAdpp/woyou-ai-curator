@@ -6,6 +6,7 @@ import type { CollectionHighlights } from "@/lib/types";
 import { PRODUCT_NAME, PRODUCT_NAME_LATIN } from "@/lib/brand";
 import { fill, type Language } from "@/lib/i18n";
 import { useLanguage } from "@/lib/useLanguage";
+import { CuratorAvatar } from "./CuratorAvatar";
 import { SiteHeader } from "./SiteHeader";
 import styles from "./landing.module.css";
 
@@ -413,7 +414,10 @@ export function Landing({ onStart }: { onStart: () => void }) {
                 role="img"
                 aria-label={t.featureInterviewDiagram}
               >
-                <p className={styles.agentBubble}>{t.featureInterviewAsk}</p>
+                <p className={styles.agentBubble}>
+                  <CuratorAvatar size="xs" />
+                  <span>{t.featureInterviewAsk}</span>
+                </p>
                 <p className={styles.visitorBubble}>{t.featureInterviewReply}</p>
                 <div><span>{t.chipFirstTime}</span><span>{t.chipTenMinutes}</span><span>{t.chipRegions}</span></div>
               </div>
@@ -539,6 +543,61 @@ export function Landing({ onStart }: { onStart: () => void }) {
               {t.methodLead}
             </p>
           </div>
+
+          <div className={styles.agentHarness}>
+            <article className={styles.agentArchitecture}>
+              <header>
+                <span>AGENT</span>
+                <h3>{t.agentArchitectureTitle}</h3>
+                <p>{t.agentArchitectureLead}</p>
+              </header>
+              <ol className={styles.agentStages}>
+                {[
+                  [t.agentStageInterview, t.agentStageInterviewBody],
+                  [t.agentStageRetrieve, t.agentStageRetrieveBody],
+                  [t.agentStageBrief, t.agentStageBriefBody],
+                  [t.agentStageCompose, t.agentStageComposeBody],
+                  [t.agentStageValidate, t.agentStageValidateBody],
+                ].map(([title, body], index) => (
+                  <li key={title}>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <div>
+                      <strong>{title}</strong>
+                      <small>{body}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </article>
+
+            <article className={styles.harnessArchitecture}>
+              <header>
+                <span>HARNESS</span>
+                <h3>{t.harnessTitle}</h3>
+                <p>{t.harnessLead}</p>
+              </header>
+              <dl>
+                <div>
+                  <dt>{t.harnessContract}</dt>
+                  <dd>{t.harnessContractBody}</dd>
+                </div>
+                <div>
+                  <dt>{t.harnessTransaction}</dt>
+                  <dd>{t.harnessTransactionBody}</dd>
+                </div>
+                <div>
+                  <dt>{t.harnessFallback}</dt>
+                  <dd>{t.harnessFallbackBody}</dd>
+                </div>
+                <div>
+                  <dt>{t.harnessTrace}</dt>
+                  <dd>{t.harnessTraceBody}</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+
+          <h3 className={styles.methodLedgerTitle}>{t.methodCoreTitle}</h3>
 
           <dl className={styles.methodLedger}>
             <div>

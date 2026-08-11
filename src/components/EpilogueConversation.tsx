@@ -19,6 +19,7 @@ import {
   toEpilogueChatHistory,
   trimEpilogueDraft,
 } from "./epilogueConversationState";
+import { CuratorAvatar } from "./CuratorAvatar";
 import styles from "./EpilogueConversation.module.css";
 
 type ConversationContext = "page" | "hall";
@@ -216,14 +217,17 @@ export function EpilogueConversation({
     return (
       <section className={styles.root} data-context={context} data-state="compact">
         <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
-        <div className={styles.compactCopy}>
-          <p className={styles.kicker}>{t.kicker}</p>
-          <h3>{skipped ? "题笺替你留在这里" : "如果你还想把一个念头说完"}</h3>
-          <p>
-            {skipped
-              ? t.skippedBody
-              : fill(t.openBody, { n: Math.max(openQuestions.length, 1) })}
-          </p>
+        <div className={styles.compactIdentity}>
+          <CuratorAvatar size="sm" />
+          <div className={styles.compactCopy}>
+            <p className={styles.kicker}>{t.kicker}</p>
+            <h3>{skipped ? t.skippedTitle : t.openTitle}</h3>
+            <p>
+              {skipped
+                ? t.skippedBody
+                : fill(t.openBody, { n: Math.max(openQuestions.length, 1) })}
+            </p>
+          </div>
         </div>
         <div className={styles.compactActions}>
           <button type="button" className={styles.primaryButton} onClick={openConversation}>
@@ -243,9 +247,12 @@ export function EpilogueConversation({
     <section className={styles.root} data-context={context} data-state="open" aria-label={t.sectionLabel}>
       <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
       <header className={styles.header}>
-        <div>
-          <p className={styles.kicker}>可选讨论 · AI 策展人彦远</p>
-          <h3>{t.liveTitle}</h3>
+        <div className={styles.headerIdentity}>
+          <CuratorAvatar size="sm" />
+          <div>
+            <p className={styles.kicker}>{t.kicker}</p>
+            <h3>{t.liveTitle}</h3>
+          </div>
         </div>
         <div className={styles.headerActions}>
           {conversation.turns.length > 0 && (
@@ -270,7 +277,14 @@ export function EpilogueConversation({
       <div className={styles.transcript} role="log" aria-live="polite" aria-relevant="additions text">
         {conversation.turns.map((turn) => (
           <article className={styles.turn} data-role={turn.role} key={turn.id}>
-            <p className={styles.speaker}>{turn.role === "assistant" ? t.curator : t.visitor}</p>
+            {turn.role === "assistant" ? (
+              <div className={styles.speaker}>
+                <CuratorAvatar size="xs" />
+                <span>{t.curator}</span>
+              </div>
+            ) : (
+              <p className={styles.speaker}>{t.visitor}</p>
+            )}
             <div className={styles.turnBody}>
               <p>{turn.content}</p>
               {turn.notice && <p className={styles.serviceNotice}>{turn.notice}</p>}
@@ -297,7 +311,10 @@ export function EpilogueConversation({
         )}
         {pending && (
           <div className={styles.pendingTurn} role="status">
-            <span>{t.curator}</span>
+            <span className={styles.pendingSpeaker}>
+              <CuratorAvatar size="xs" />
+              <span>{t.curator}</span>
+            </span>
             <p>{t.thinking}</p>
           </div>
         )}

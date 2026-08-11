@@ -230,14 +230,26 @@ def test_duration_drives_visit_size_and_label_budget() -> None:
 # --------------------------------------------------------------- pipeline
 
 
+PIPELINE_FIXTURE_QUESTION = "山水画如何组织观看者的行旅视线？"
+
+
 def _run_pipeline(client: TestClient) -> dict[str, Any]:
     state = client.post("/api/interview/start").json()
     interview_id = state["id"]
     while not state["complete"]:
         question = state["nextQuestion"]
+        # Generic open-question suggestions are deliberately corpus-agnostic.
+        # This end-to-end fixture contains only landscape records, so anchor
+        # the visit to the fixture's reviewed question instead of assuming the
+        # first generic suggestion is retrieval-compatible.
+        value = (
+            PIPELINE_FIXTURE_QUESTION
+            if question["id"] == "open_question"
+            else question["options"][0]["value"]
+        )
         state = client.post(
             f"/api/interview/{interview_id}/answer",
-            json={"questionId": question["id"], "value": question["options"][0]["value"]},
+            json={"questionId": question["id"], "value": value},
         ).json()
 
     created = client.post("/api/exhibitions/generate", json={"interviewId": interview_id})

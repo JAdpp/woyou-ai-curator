@@ -82,6 +82,17 @@
   gap: 1rem;
 }
 
+.compactIdentity,
+.headerIdentity {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.72rem;
+}
+
+.compactIdentity > div,
+.headerIdentity > div { min-width: 0; }
+
 .compactActions,
 .headerActions {
   display: flex;
@@ -181,6 +192,17 @@
   font-size: 0.7rem;
   letter-spacing: 0.08em;
 }
+
+.turn[data-role="assistant"] .speaker,
+.pendingSpeaker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.28rem;
+  letter-spacing: 0.04em;
+}
+
+.pendingSpeaker > span:last-child { display: block; }
 
 .turn[data-role="assistant"] .speaker { color: var(--note-accent); }
 

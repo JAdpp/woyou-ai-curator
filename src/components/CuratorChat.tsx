@@ -5,8 +5,18 @@ import { answerInterview, startInterview } from "@/lib/api";
 import type { InterviewAnswerInput, InterviewState } from "@/lib/types";
 import { fill } from "@/lib/i18n";
 import { useLanguage } from "@/lib/useLanguage";
+import { CuratorAvatar } from "./CuratorAvatar";
 import { LanguageToggle } from "./LanguageToggle";
 import styles from "./chat.module.css";
+
+function CuratorSpeaker({ label }: { label: string }) {
+  return (
+    <span className={[styles.bubbleSpeaker, styles.curatorSpeaker].join(" ")}>
+      <CuratorAvatar size="xs" />
+      <span>{label}</span>
+    </span>
+  );
+}
 
 /**
  * The curator interview, rendered as a chat.
@@ -77,9 +87,12 @@ export function CuratorChat({
   return (
     <section className={styles.chatShell} aria-label={t.chat.ariaLabel}>
       <header className={styles.chatHeader}>
-        <div>
-          <p className={styles.curatorIdentity}>{curatorLine}</p>
-          <h2>{t.chat.heading}</h2>
+        <div className={styles.chatIdentity}>
+          <CuratorAvatar size="md" />
+          <div>
+            <p className={styles.curatorIdentity}>{curatorLine}</p>
+            <h2>{t.chat.heading}</h2>
+          </div>
         </div>
         <div className={styles.chatHeaderMeta}>
           {question && (
@@ -102,7 +115,7 @@ export function CuratorChat({
         {state?.transcript.map((turn) => (
           <div key={`${turn.questionId}-${turn.answeredAt}`}>
             <div className={styles.curatorBubble}>
-              <span className={styles.bubbleSpeaker}>{curatorLine}</span>
+              <CuratorSpeaker label={curatorLine} />
               {turn.prompt.split("\n").map((line, index) => (
                 <p key={index}>{line}</p>
               ))}
@@ -113,7 +126,7 @@ export function CuratorChat({
             </div>
             {turn.curatorReply && (
               <div className={styles.curatorBubble}>
-                <span className={styles.bubbleSpeaker}>{curatorLine}</span>
+                <CuratorSpeaker label={curatorLine} />
                 <p>{turn.curatorReply}</p>
               </div>
             )}
@@ -122,7 +135,7 @@ export function CuratorChat({
 
         {question && (
           <div className={styles.curatorBubble}>
-            <span className={styles.bubbleSpeaker}>{curatorLine}</span>
+            <CuratorSpeaker label={curatorLine} />
             {question.prompt.split("\n").map((line, index) => (
               <p key={index}>{line}</p>
             ))}
@@ -131,7 +144,7 @@ export function CuratorChat({
 
         {!state && !error && (
           <div className={styles.curatorBubble}>
-            <span className={styles.bubbleSpeaker}>{curatorLine}</span>
+            <CuratorSpeaker label={curatorLine} />
             <p>{t.chat.connecting}</p>
           </div>
         )}
