@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 !api/.env.example
+# Carries no secret — it exists to stop a developer's NEXT_PUBLIC_ value being
+# baked into the production bundle, which only works if everyone builds with it.
+!.env.production
 
 # local runtime state
 /api/.runtime/
