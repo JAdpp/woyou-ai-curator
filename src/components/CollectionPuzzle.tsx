@@ -12,6 +12,8 @@ import {
   scramblePuzzle,
   type PuzzleDirection,
 } from "./slidingPuzzle";
+import { fill } from "@/lib/i18n";
+import { useLanguage } from "@/lib/useLanguage";
 import styles from "./puzzle.module.css";
 
 const KEY_DIRECTIONS: Partial<Record<string, PuzzleDirection>> = {
@@ -22,6 +24,8 @@ const KEY_DIRECTIONS: Partial<Record<string, PuzzleDirection>> = {
 };
 
 export function CollectionPuzzle() {
+  const { t: copy } = useLanguage();
+  const t = copy.puzzle;
   const [highlights, setHighlights] = useState<CollectionHighlights | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -55,7 +59,7 @@ export function CollectionPuzzle() {
     : null;
   const imageLicense = institutionSummary?.imageLicenses.length
     ? institutionSummary.imageLicenses.join("、")
-    : "许可见机构记录";
+    : t.licenceFallback;
 
   function startBoard(nextBoard = scramblePuzzle()) {
     setInitialBoard(nextBoard);
@@ -86,9 +90,9 @@ export function CollectionPuzzle() {
 
   if (loadError || (highlights && items.length === 0)) {
     return (
-      <aside className={styles.unavailable} aria-label="馆藏拼图暂不可用">
-        <strong>馆藏拼图暂时没有接上</strong>
-        <p>彦远仍在继续策展，这不会影响展览生成。</p>
+      <aside className={styles.unavailable} aria-label={t.unavailableLabel}>
+        <strong>{t.unavailableTitle}</strong>
+        <p>{t.unavailableBody}</p>
       </aside>
     );
   }
@@ -97,10 +101,10 @@ export function CollectionPuzzle() {
     <aside className={styles.puzzle} aria-labelledby="collection-puzzle-title">
       <header className={styles.header}>
         <div>
-          <h2 id="collection-puzzle-title">等待时，拼一件馆藏</h2>
-          <p>点击空格旁的图块，或聚焦拼图后使用方向键。</p>
+          <h2 id="collection-puzzle-title">{t.heading}</h2>
+          <p>{t.instructions}</p>
         </div>
-        <span aria-live="polite">{completed ? "完成" : `${moves} 步`}</span>
+        <span aria-live="polite">{completed ? t.done : fill(t.moves, { n: moves })}</span>
       </header>
 
       <div
@@ -108,7 +112,7 @@ export function CollectionPuzzle() {
         data-ready={imageReady && !imageFailed ? "true" : "false"}
         data-complete={completed ? "true" : "false"}
         role="group"
-        aria-label="三乘三馆藏图像滑块拼图；方向键移动空格"
+        aria-label={t.boardLabel}
         tabIndex={0}
         onKeyDown={handleGridKey}
       >
@@ -153,7 +157,7 @@ export function CollectionPuzzle() {
               style={tileStyle}
               data-movable={movable ? "true" : "false"}
               aria-disabled={!movable || completed}
-              aria-label={`拼图第 ${tile} 片${movable && !completed ? "，可移入空格" : ""}`}
+              aria-label={`${fill(t.tileLabel, { n: tile })}${movable && !completed ? t.tileMovable : ""}`}
               onClick={() => applyMove(movePuzzleTile(board, position))}
             >
               <span>{tile}</span>
@@ -161,16 +165,16 @@ export function CollectionPuzzle() {
           );
         })}
 
-        {!imageReady && !imageFailed && <p className={styles.loading}>正在取一件馆藏图像…</p>}
-        {imageFailed && <p className={styles.loading}>这张图没有载入，可换一件继续。</p>}
-        {completed && <p className={styles.complete}>拼好了。彦远仍在整理展线。</p>}
+        {!imageReady && !imageFailed && <p className={styles.loading}>{t.loadingImage}</p>}
+        {imageFailed && <p className={styles.loading}>{t.imageFailed}</p>}
+        {completed && <p className={styles.complete}>{t.solved}</p>}
       </div>
 
       {item && (
         <div className={styles.objectMeta}>
           <strong>{item.title}</strong>
           <span>{item.institution}</span>
-          <small>馆藏图像 · {imageLicense}。拼图是独立的等待互动；策展仍依据访谈与馆藏资料进行。</small>
+          <small>{fill(t.credit, { licence: imageLicense })}</small>
         </div>
       )}
 
@@ -179,10 +183,10 @@ export function CollectionPuzzle() {
           setBoard(initialBoard);
           setMoves(0);
         }}>
-          重置拼图
+          {t.reset}
         </button>
         <button type="button" onClick={changeArtwork} disabled={items.length < 2}>
-          换一件藏品
+          {t.swap}
         </button>
       </div>
     </aside>

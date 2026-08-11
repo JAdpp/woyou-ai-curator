@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 import { logEvent, sendEpilogueChatMessage } from "@/lib/api";
+import { fill } from "@/lib/i18n";
+import { useLanguage } from "@/lib/useLanguage";
 import type { EpilogueChatRequest } from "@/lib/types";
 import {
   EMPTY_EPILOGUE_CONVERSATION,
@@ -36,6 +38,8 @@ export function EpilogueConversation({
   openQuestions,
   context = "page",
 }: EpilogueConversationProps) {
+  const { t: copy } = useLanguage();
+  const t = copy.epilogue;
   const [open, setOpen] = useState(false);
   const [skipped, setSkipped] = useState(false);
   const [draft, setDraft] = useState("");
@@ -143,7 +147,7 @@ export function EpilogueConversation({
         content: response.message,
         citations: response.citations,
         notice: response.notice || (response.mode === "local_fallback"
-          ? "当前回应由本展馆藏材料的本地回退生成，未调用实时模型。"
+          ? t.localFallback
           : undefined),
       });
       dispatch({ type: "set_suggestions", replies: response.suggestedReplies });
@@ -158,7 +162,7 @@ export function EpilogueConversation({
         return;
       }
       setDraft(attempt.message);
-      setError("彦远暂时没能接上这句话。你可以重试，或稍后再继续。");
+      setError(t.sendFailed);
     } finally {
       if (controllerRef.current === controller) {
         controllerRef.current = null;
@@ -172,7 +176,7 @@ export function EpilogueConversation({
     if (pending) return;
     const message = trimEpilogueDraft(draft);
     if (!message) {
-      setValidationMessage("写下一点想法后再发送。");
+      setValidationMessage(t.needText);
       inputRef.current?.focus();
       return;
     }
@@ -211,23 +215,23 @@ export function EpilogueConversation({
   if (!open) {
     return (
       <section className={styles.root} data-context={context} data-state="compact">
-        <span className={styles.folioMark} aria-hidden="true">题笺</span>
+        <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
         <div className={styles.compactCopy}>
-          <p className={styles.kicker}>可选讨论 · AI 策展人彦远</p>
+          <p className={styles.kicker}>{t.kicker}</p>
           <h3>{skipped ? "题笺替你留在这里" : "如果你还想把一个念头说完"}</h3>
           <p>
             {skipped
-              ? "不用现在回答；想回来时，彦远仍会从这场展览接着聊。"
-              : `彦远留下了 ${Math.max(openQuestions.length, 1)} 则展后题笺，也听你自由发问。`}
+              ? t.skippedBody
+              : fill(t.openBody, { n: Math.max(openQuestions.length, 1) })}
           </p>
         </div>
         <div className={styles.compactActions}>
           <button type="button" className={styles.primaryButton} onClick={openConversation}>
-            {skipped ? "重新打开题笺" : "与彦远聊一会儿"}
+            {skipped ? t.reopen : t.start}
           </button>
           {!skipped && (
             <button type="button" className={styles.textButton} onClick={() => closeConversation("skip")}>
-              先跳过
+              {t.skipNow}
             </button>
           )}
         </div>
@@ -236,47 +240,47 @@ export function EpilogueConversation({
   }
 
   return (
-    <section className={styles.root} data-context={context} data-state="open" aria-label="展后题笺">
-      <span className={styles.folioMark} aria-hidden="true">题笺</span>
+    <section className={styles.root} data-context={context} data-state="open" aria-label={t.sectionLabel}>
+      <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
       <header className={styles.header}>
         <div>
           <p className={styles.kicker}>可选讨论 · AI 策展人彦远</p>
-          <h3>把展览带出展厅</h3>
+          <h3>{t.liveTitle}</h3>
         </div>
         <div className={styles.headerActions}>
           {conversation.turns.length > 0 && (
             <button type="button" className={styles.textButton} onClick={clearConversation} disabled={pending}>
-              清空
+              {t.clear}
             </button>
           )}
           <button type="button" className={styles.textButton} onClick={() => closeConversation("collapse")}>
-            收起
+            {t.collapse}
           </button>
         </div>
       </header>
 
       <p className={styles.intro}>
-        这里没有评分，也没有标准答案。你可以回应一则题笺，提出异议，或从自己的经验谈起。
+        {t.noScoring}
       </p>
 
       {conversation.turns.length === 0 && (
-        <p className={styles.emptyNote}>彦远在等你选择一则题笺，也可以直接写下自己的问题。</p>
+        <p className={styles.emptyNote}>{t.emptyNote}</p>
       )}
 
       <div className={styles.transcript} role="log" aria-live="polite" aria-relevant="additions text">
         {conversation.turns.map((turn) => (
           <article className={styles.turn} data-role={turn.role} key={turn.id}>
-            <p className={styles.speaker}>{turn.role === "assistant" ? "彦远" : "访客"}</p>
+            <p className={styles.speaker}>{turn.role === "assistant" ? t.curator : t.visitor}</p>
             <div className={styles.turnBody}>
               <p>{turn.content}</p>
               {turn.notice && <p className={styles.serviceNotice}>{turn.notice}</p>}
               {turn.citations && turn.citations.length > 0 && (
                 <details className={styles.citations}>
-                  <summary>与本展材料的关联</summary>
+                  <summary>{t.citationsSummary}</summary>
                   <ul>
                     {turn.citations.map((citation, index) => (
                       <li key={`${citation.itemId || citation.objectId || "evidence"}-${index}`}>
-                        {citation.label || citation.itemId || citation.objectId || `${citation.evidenceIds?.length ?? 0} 条馆藏依据`}
+                        {citation.label || citation.itemId || citation.objectId || fill(t.citationFallback, { n: citation.evidenceIds?.length ?? 0 })}
                       </li>
                     ))}
                   </ul>
@@ -287,14 +291,14 @@ export function EpilogueConversation({
         ))}
         {pending && lastAttempt && (
           <article className={styles.turn} data-role="user">
-            <p className={styles.speaker}>访客</p>
+            <p className={styles.speaker}>{t.visitor}</p>
             <div className={styles.turnBody}><p>{lastAttempt.message}</p></div>
           </article>
         )}
         {pending && (
           <div className={styles.pendingTurn} role="status">
-            <span>彦远</span>
-            <p>正在回看这场展览里的线索……</p>
+            <span>{t.curator}</span>
+            <p>{t.thinking}</p>
           </div>
         )}
         <div ref={endRef} />
@@ -302,7 +306,7 @@ export function EpilogueConversation({
 
       {!hasVisitorTurn && openQuestions.length > 0 && (
         <fieldset className={styles.starters}>
-          <legend>{conversation.selectedOpenQuestion ? "换一则题笺" : "从一则题笺开始"}</legend>
+          <legend>{conversation.selectedOpenQuestion ? t.changeNote : t.pickNote}</legend>
           {openQuestions.map((question) => (
             <button
               type="button"
@@ -317,8 +321,8 @@ export function EpilogueConversation({
       )}
 
       {conversation.suggestedReplies.length > 0 && !pending && (
-        <div className={styles.suggestions} aria-label="可以继续谈的方向">
-          <span>可以接着谈</span>
+        <div className={styles.suggestions} aria-label={t.suggestionsLabel}>
+          <span>{t.suggestionsLead}</span>
           {conversation.suggestedReplies.map((reply) => (
             <button
               type="button"
@@ -340,21 +344,21 @@ export function EpilogueConversation({
           <span>{error}</span>
           {lastAttempt && (
             <button type="button" onClick={() => void performAttempt(lastAttempt)} disabled={pending}>
-              重试
+              {t.retry}
             </button>
           )}
         </div>
       )}
 
       <form className={styles.form} onSubmit={submitDraft} onKeyDown={(event) => event.stopPropagation()}>
-        <label htmlFor={`${formHintId}-input`}>写给彦远</label>
+        <label htmlFor={`${formHintId}-input`}>{t.inputLabel}</label>
         <textarea
           ref={inputRef}
           id={`${formHintId}-input`}
           value={draft}
           rows={context === "hall" ? 2 : 3}
           maxLength={800}
-          placeholder={conversation.selectedOpenQuestion ? "写下你的想法……" : "你注意到了什么？也可以提出不同看法。"}
+          placeholder={conversation.selectedOpenQuestion ? t.placeholderWithNote : t.placeholderOpen}
           aria-describedby={`${formHintId} ${validationMessage ? validationId : ""}`.trim()}
           aria-invalid={validationMessage ? true : undefined}
           disabled={pending}
@@ -366,21 +370,21 @@ export function EpilogueConversation({
         />
         <div className={styles.formFooter}>
           <p id={formHintId}>
-            访客发言会发送给模型生成回应，但不写入展览记录或统计事件。
+            {t.privacy}
           </p>
           <button
             type="submit"
             className={styles.primaryButton}
             disabled={pending || trimEpilogueDraft(draft).length === 0}
           >
-            {pending ? "彦远正在回应" : "发送"}
+            {pending ? t.sending : t.send}
           </button>
         </div>
         {validationMessage && <p className={styles.validation} id={validationId}>{validationMessage}</p>}
       </form>
 
       <button type="button" className={styles.skipButton} onClick={() => closeConversation("skip")}>
-        暂不参与这次讨论
+        {t.optOut}
       </button>
     </section>
   );
