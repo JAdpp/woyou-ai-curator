@@ -226,7 +226,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    getCollectionHighlights(28)
+    getCollectionHighlights(28, language)
       .then((data) => {
         if (!cancelled) {
           setHighlights(data);
@@ -304,7 +304,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
           </div>
 
           <p className={styles.microcopy}>
-            无需注册 · 访谈可整段跳过 · 同时支持 3D 与 2D 网页版
+            {t.microcopy}
           </p>
         </div>
 
@@ -329,7 +329,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
           <article className={styles.caseExample}>
             <div className={styles.caseHeading}>
               <div>
-                <span className={styles.caseIndex}>案例一 · 色彩与技术</span>
+                <span className={styles.caseIndex}>{t.caseOneIndex}</span>
                 <h2 id="landing-case-title">{t.blueCaseTitle}</h2>
               </div>
               <p>
@@ -361,7 +361,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
           <article className={styles.caseExample} aria-labelledby="landing-cat-case-title">
             <div className={styles.caseHeading}>
               <div>
-                <span className={styles.caseIndex}>案例二 · 跨文化动物</span>
+                <span className={styles.caseIndex}>{t.caseTwoIndex}</span>
                 <h2 id="landing-cat-case-title">{t.catCaseTitle}</h2>
               </div>
               <p>
@@ -479,7 +479,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
                     ))}
                     <span className={styles.cameraPoint} />
                   </div>
-                  <small>连续展线 · 逐站镜头 · 随时自由行走</small>
+                  <small>{t.mode3dCaption}</small>
                 </div>
                 <div className={styles.mode2d} aria-hidden="true">
                   <span className={styles.modeLabel}>{t.mode2d}</span>
@@ -497,7 +497,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
                       <span /><span /><span />
                     </div>
                   </div>
-                  <small>完整展签 · 机构来源 · 键盘与读屏可用</small>
+                  <small>{t.mode2dCaption}</small>
                 </div>
               </div>
             </article>
@@ -522,7 +522,7 @@ export function Landing({ onStart }: { onStart: () => void }) {
                   </div>
                   <div>
                     <dt>{t.fieldLicence}</dt>
-                    <dd>材质字段 CC0 1.0 · 馆方作品说明 CC BY 4.0</dd>
+                    <dd>{t.sampleFieldLicence}</dd>
                   </div>
                 </dl>
               </div>

@@ -423,7 +423,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/api/collection/highlights")
-    def collection_highlights(limit: int = 24) -> dict[str, object]:
+    def collection_highlights(limit: int = 24, language: str = "zh") -> dict[str, object]:
         """A spread of real objects for the landing page.
 
         Drawn round-robin across coverage domains so the wall shows the actual
@@ -458,7 +458,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # here. Without it a visitor is asked to start a conversation with no
         # idea what the collection can talk about.
         domain_summaries = []
-        for domain_id, label_hint in domain_choices_for(collection).items():
+        for domain_id, label_hint in domain_choices_for(collection, language).items():
             pool = by_domain.get(domain_id, [])
             if len(pool) < MIN_DOMAIN_OBJECTS:
                 continue

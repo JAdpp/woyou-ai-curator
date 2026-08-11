@@ -305,9 +305,14 @@ export function checkAgenda(agenda: AgendaInput) {
   });
 }
 
-export function getCollectionHighlights(limit = 24) {
-  return request<CollectionHighlights>(`/api/collection/highlights?limit=${limit}`);
+export function getCollectionHighlights(limit = 24, language?: "zh" | "en") {
+  const params = new URLSearchParams({ limit: String(limit) });
+  // Domain labels come from the collection manifest in Chinese; the server maps
+  // them by id when asked for English.
+  if (language) params.set("language", language);
+  return request<CollectionHighlights>(`/api/collection/highlights?${params}`);
 }
+
 
 /** `language` is fixed for the whole interview and rides on the profile from
  *  there into the exhibition record, so the labels are written in it too. */

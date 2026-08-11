@@ -114,6 +114,24 @@ const COPY = {
     defaultFailed: line("没能启动默认策展，请重试。", "Couldn't start the default curation. Please try again."),
   },
   landing: {
+    microcopy: line(
+      "无需注册 · 访谈可整段跳过 · 同时支持 3D 与 2D 网页版",
+      "No sign-up · the interview can be skipped entirely · 3D and 2D web versions",
+    ),
+    caseOneIndex: line("案例一 · 色彩与技术", "Case one · Colour and technique"),
+    caseTwoIndex: line("案例二 · 跨文化动物", "Case two · An animal across cultures"),
+    mode3dCaption: line(
+      "连续展线 · 逐站镜头 · 随时自由行走",
+      "One continuous route · stop-by-stop camera · walk freely at any time",
+    ),
+    mode2dCaption: line(
+      "完整展签 · 机构来源 · 键盘与读屏可用",
+      "Full labels · institutional sources · keyboard and screen-reader ready",
+    ),
+    sampleFieldLicence: line(
+      "材质字段 CC0 1.0 · 馆方作品说明 CC BY 4.0",
+      "Material field CC0 1.0 · institutional description CC BY 4.0",
+    ),
     epigraph: line("澄怀观道，卧以游之。", "Clear the mind to see the way; travel it lying down."),
     epigraphCite: line("— 宗炳《画山水序》，五世纪", "— Zong Bing, Preface on Landscape Painting, 5th c."),
     heroTitle: line(
