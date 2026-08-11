@@ -368,7 +368,11 @@ class ExhibitionGenerator:
                 exhibition.versions.provider = "deepseek"
             except (ProviderError, ValueError, TypeError, KeyError):
                 exhibition.coverage_limits.append(
-                    "模型输出不可用；本次展示采用仅基于已选馆藏证据的确定性中文模板。"
+                    "The model output was unusable; this visit falls back to a "
+                    "deterministic template built only from the selected "
+                    "collection evidence."
+                    if agenda.language == "en"
+                    else "模型输出不可用；本次展示采用仅基于已选馆藏证据的确定性中文模板。"
                 )
                 exhibition.versions.provider = "deterministic_fallback"
 
@@ -406,12 +410,20 @@ class ExhibitionGenerator:
 
         agenda = profile.to_agenda(collection_id)
         collection = self.collections.get(collection_id)
+        # Every finding below is on screen for the whole generation, so it is
+        # written in the language the visit was curated in.
+        en = profile.language == "en"
 
         await step(
             "profile",
-            f"{curation.REGISTER[profile.motivation]['density']}信息密度，"
-            f"{profile.duration_minutes} 分钟，{profile.item_count} 件展品，"
-            f"连续展线分为 {profile.chapter_count} 个叙事区段。",
+            (
+                f"{profile.duration_minutes} minutes, {profile.item_count} objects, "
+                f"one route in {profile.chapter_count} segments."
+                if en
+                else f"{curation.REGISTER[profile.motivation]['density']}信息密度，"
+                f"{profile.duration_minutes} 分钟，{profile.item_count} 件展品，"
+                f"连续展线分为 {profile.chapter_count} 个叙事区段。"
+            ),
         )
 
         # -- retrieval ---------------------------------------------------
@@ -437,12 +449,21 @@ class ExhibitionGenerator:
         full_depth = sum(
             1 for obj in objects if obj.evidence_depth == EvidenceDepth.FULL.value
         )
-        topic = profile.curiosity_label or profile.free_form_question or "这批藏品"
+        topic = profile.curiosity_label or profile.free_form_question or (
+            "these objects" if profile.language == "en" else "这批藏品"
+        )
+        eligible = len(self.collections.eligible_objects(collection))
         await step(
             "retrieve",
-            f"从 {len(self.collections.eligible_objects(collection))} 件可用藏品中筛出 "
-            f"{len(pool)} 件与「{topic}」相关，选定 {len(objects)} 件，"
-            f"其中 {full_depth} 件带机构撰写的说明。",
+            (
+                f"From {eligible} eligible objects, {len(pool)} relate to "
+                f"“{topic}”; {len(objects)} selected, {full_depth} of them with "
+                "an institution-written description."
+                if en
+                else f"从 {eligible} 件可用藏品中筛出 "
+                f"{len(pool)} 件与「{topic}」相关，选定 {len(objects)} 件，"
+                f"其中 {full_depth} 件带机构撰写的说明。"
+            ),
         )
 
         # -- deterministic skeleton --------------------------------------
@@ -505,27 +526,59 @@ class ExhibitionGenerator:
         if on_frame_ready is not None:
             await on_frame_ready(exhibition)
 
-        await step("theme", f"《{exhibition.title}》——{exhibition.subtitle or '基于当前馆藏的一条线索'}")
+        subtitle_fallback = (
+            "one thread through the current collection"
+            if en
+            else "基于当前馆藏的一条线索"
+        )
+        await step(
+            "theme",
+            (
+                f"“{exhibition.title}” — {exhibition.subtitle or subtitle_fallback}"
+                if en
+                else f"《{exhibition.title}》——{exhibition.subtitle or subtitle_fallback}"
+            ),
+        )
         await step(
             "chapters",
-            "、".join(f"{chapter.title}（{len(chapter.item_ids)} 件）" for chapter in exhibition.chapters),
+            (", " if en else "、").join(
+                (
+                    f"{chapter.title} ({len(chapter.item_ids)})"
+                    if en
+                    else f"{chapter.title}（{len(chapter.item_ids)} 件）"
+                )
+                for chapter in exhibition.chapters
+            ),
         )
 
         if model_applied:
             labelled_chapters = await self._write_labels(exhibition, profile)
 
         bound = sum(len(item.label_sentences) for item in exhibition.items)
-        chinese_titles = sum(1 for item in exhibition.items if item.display_title)
+        named = sum(1 for item in exhibition.items if item.display_title)
         if model_applied and labelled_chapters:
-            detail = f"{labelled_chapters}/{len(exhibition.chapters)} 章由模型撰写"
+            detail = (
+                f"{labelled_chapters}/{len(exhibition.chapters)} chapters written by the model"
+                if en
+                else f"{labelled_chapters}/{len(exhibition.chapters)} 章由模型撰写"
+            )
         elif model_applied:
-            detail = "模型未返回展签，改用确定性模板"
+            detail = (
+                "the model returned no labels; deterministic template used"
+                if en
+                else "模型未返回展签，改用确定性模板"
+            )
         else:
-            detail = "使用确定性模板"
+            detail = "deterministic template used" if en else "使用确定性模板"
         await step(
             "labels",
-            f"为 {len(exhibition.items)} 件展品写了 {bound} 条展签，"
-            f"{chinese_titles} 件有中文展品名；{detail}。",
+            (
+                f"{bound} label sentences for {len(exhibition.items)} objects, "
+                f"{named} with a display title; {detail}."
+                if en
+                else f"为 {len(exhibition.items)} 件展品写了 {bound} 条展签，"
+                f"{named} 件有中文展品名；{detail}。"
+            ),
         )
         await step(
             "epilogue",
@@ -533,9 +586,15 @@ class ExhibitionGenerator:
         )
         await step(
             "space",
-            f"{exhibition.space_design.space_form} 形制，一条连续展线，"
-            f"{len(exhibition.chapters)} 个叙事区段，"
-            f"主色 {exhibition.space_design.accent_color}，{exhibition.space_design.mood} 光照。",
+            (
+                f"{exhibition.space_design.space_form} plan, one continuous route, "
+                f"{len(exhibition.chapters)} segments, accent "
+                f"{exhibition.space_design.accent_color}, {exhibition.space_design.mood} lighting."
+                if en
+                else f"{exhibition.space_design.space_form} 形制，一条连续展线，"
+                f"{len(exhibition.chapters)} 个叙事区段，"
+                f"主色 {exhibition.space_design.accent_color}，{exhibition.space_design.mood} 光照。"
+            ),
         )
 
         exhibition.validation = validate_exhibition(exhibition)

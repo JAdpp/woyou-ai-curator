@@ -35,16 +35,30 @@ STEP_DEFINITIONS: list[tuple[str, str, str]] = [
     ("space", "编排 3D 展厅空间", "用连续动线连接叙事区段、灯光与画框"),
 ]
 
+# The pipeline is on screen for the whole generation, so it is the most visible
+# server-authored text there is.
+STEP_DEFINITIONS_EN: list[tuple[str, str, str]] = [
+    ("profile", "Read what you asked for", "Turn the interview into a curatorial brief"),
+    ("retrieve", "Search for candidates", "Filter the open collections for usable objects"),
+    ("theme", "Settle the theme", "Choose a subject and a line of argument for this visit"),
+    ("chapters", "Chapter and assign", "Arrange the objects into segments along one route"),
+    ("labels", "Write labels and lead-ins", "Keep every sentence traceable to an institutional record"),
+    ("poster", "Make the poster", "Generate a landscape visual for the entrance"),
+    ("epilogue", "Write the closing and its limits", "State what this exhibition does not answer"),
+    ("space", "Lay out the 3D hall", "Link segments, lighting and frames along one path"),
+]
+
 MAX_JOB_SECONDS = 180.0
 
 
 logger = logging.getLogger(__name__)
 
 
-def _new_steps() -> list[JobStep]:
+def _new_steps(language: str = "zh") -> list[JobStep]:
+    definitions = STEP_DEFINITIONS_EN if language == "en" else STEP_DEFINITIONS
     return [
         JobStep(key=key, title=title, detail=detail)
-        for key, title, detail in STEP_DEFINITIONS
+        for key, title, detail in definitions
     ]
 
 
@@ -60,8 +74,8 @@ class JobStore:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
 
-    def create(self) -> GenerationJob:
-        job = GenerationJob(id=str(uuid4()), status="queued", steps=_new_steps())
+    def create(self, language: str = "zh") -> GenerationJob:
+        job = GenerationJob(id=str(uuid4()), status="queued", steps=_new_steps(language))
         self._jobs[job.id] = job
         self._events[job.id] = asyncio.Event()
         return job

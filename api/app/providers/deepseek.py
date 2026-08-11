@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any
 
 import httpx
 
 from ..config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -55,8 +58,25 @@ class DeepSeekProvider:
                 request(), timeout=self.timeout_seconds
             )
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            return self._parse_json(content)
+            body = response.json()
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
+            try:
+                return self._parse_json(content)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                # Falling back to deterministic prose is by design, but doing it
+                # without saying why hid a whole language's worth of output. The
+                # finish reason distinguishes a truncated completion from a
+                # malformed one, and the tail shows where it stopped. Model
+                # output only -- never the prompt or the key.
+                logger.warning(
+                    "DeepSeek JSON unparsable finish_reason=%s completion_tokens=%s length=%s tail=%r",
+                    choice.get("finish_reason"),
+                    (body.get("usage") or {}).get("completion_tokens"),
+                    len(content) if isinstance(content, str) else None,
+                    content[-160:] if isinstance(content, str) else content,
+                )
+                raise
         except asyncio.TimeoutError as exc:
             raise ProviderError("DeepSeek request exceeded its wall-clock timeout") from exc
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:

@@ -827,7 +827,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
         _event(store, EventName.GENERATION_STARTED, motivation=profile.motivation)
-        job = jobs.create()
+        job = jobs.create(profile.language)
         jobs.run(job.id, await _run_curation(profile, request.collection_id))
         return job
 
