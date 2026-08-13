@@ -16,16 +16,36 @@ import type {
 import { readStoredLanguage } from "./i18n";
 
 const _envApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+/**
+ * Base for requests this module issues itself, from whichever side is running.
+ *
+ * With no explicit base, server-side rendering talks to the FastAPI backend
+ * directly on loopback while the browser uses a relative path so it rides the
+ * same nginx origin it was served from.  A single baked absolute URL cannot
+ * satisfy both, and an empty env value must fall through to this split rather
+ * than short-circuit to "".
+ */
 export const API_BASE_URL = _envApiBase
   ? _envApiBase
-  : // With no explicit base, server-side rendering talks to the FastAPI backend
-    // directly on loopback while the browser uses a relative path so it rides the
-    // same nginx origin it was served from.  A single baked absolute URL cannot
-    // satisfy both, and an empty env value must fall through to this split rather
-    // than short-circuit to "".
-    typeof window === "undefined"
+  : typeof window === "undefined"
     ? "http://127.0.0.1:9001"
     : "";
+
+/**
+ * Base for URLs the BROWSER resolves: `<img src>`, audio sources, WebGL texture
+ * loads, CSS backgrounds.
+ *
+ * This deliberately never falls back to the loopback base above.  Loopback is
+ * right for a fetch the server performs on its own behalf, but the moment the
+ * same string is rendered into markup it is resolved against the *visitor's*
+ * machine, where nothing is listening.  The image then fails before any request
+ * leaves the device — so the server log stays empty and the breakage looks like
+ * it has nothing to do with us.  That is exactly how six server-rendered case
+ * images shipped broken while every client-rendered image on the same page
+ * worked.
+ */
+const BROWSER_ASSET_BASE = _envApiBase || "";
 
 export type AudioGuideKind = "lobby" | "chapter" | "artwork" | "epilogue";
 
@@ -39,7 +59,7 @@ const AUDIO_GUIDE_CACHE_LIMIT = 8;
 
 export function resolveApiAssetUrl(path: string) {
   if (/^(?:https?:|data:|blob:)/i.test(path)) return path;
-  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  return `${BROWSER_ASSET_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 /**
@@ -51,7 +71,7 @@ export function resolveApiAssetUrl(path: string) {
  * load quickly.
  */
 export function resolveObjectImageUrl(objectId: string, width: 512 | 1024 | 1536 = 1024) {
-  return `${API_BASE_URL}/api/images/${encodeURIComponent(objectId)}?w=${width}`;
+  return `${BROWSER_ASSET_BASE}/api/images/${encodeURIComponent(objectId)}?w=${width}`;
 }
 
 /** Absolute URL for one server-rendered Qwen narration segment. */
@@ -66,7 +86,7 @@ export function resolveAudioGuideUrl(
   ) {
     parameters.set("ref", segment.ref);
   }
-  return `${API_BASE_URL}/api/exhibitions/${encodeURIComponent(exhibitionId)}/audio-guide?${parameters.toString()}`;
+  return `${BROWSER_ASSET_BASE}/api/exhibitions/${encodeURIComponent(exhibitionId)}/audio-guide?${parameters.toString()}`;
 }
 
 /** Absolute endpoint for the optional post-visit conversation. */
