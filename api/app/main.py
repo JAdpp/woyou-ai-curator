@@ -676,10 +676,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             language=language,
         )
         turn.curator_reply = voice.reply
-        if wants_suggestions and voice.suggestions and next_question is not None:
-            state.next_question = InterviewService.open_question_question(
+        if (
+            wants_suggestions
+            and voice.suggestions
+            and next_question is not None
+            # A second tab may have answered this question while the model was
+            # composing. Never let a late response rewind the state machine.
+            and state.next_question is next_question
+        ):
+            suggested_question = InterviewService.open_question_question(
                 state.profile.curiosity_label, voice.suggestions, language
             )
+            suggested_question.step = next_question.step
+            suggested_question.total_steps = next_question.total_steps
+            state.next_question = suggested_question
 
     # ------------------------------------------------------------------
     # Curation pipeline

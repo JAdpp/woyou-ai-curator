@@ -20,6 +20,7 @@ export type VisitorPace = "grasshopper" | "butterfly" | "ant";
 export type InterviewQuestionId =
   | "curiosity"
   | "motivation"
+  | "custom_question"
   | "prior_knowledge"
   | "duration"
   | "negotiation"

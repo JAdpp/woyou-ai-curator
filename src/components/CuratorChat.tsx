@@ -152,34 +152,36 @@ export function CuratorChat({
 
       {question && (
         <div className={styles.answerArea}>
-          <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
-            {question.options.map((option) => {
-              const selected = multiSelected.includes(option.value);
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={selected ? styles.optionSelected : styles.option}
-                  aria-pressed={question.multiSelect ? selected : undefined}
-                  disabled={busy}
-                  onClick={() => {
-                    if (question.multiSelect) {
-                      setMultiSelected((current) =>
-                        current.includes(option.value)
-                          ? current.filter((value) => value !== option.value)
-                          : [...current, option.value],
-                      );
-                      return;
-                    }
-                    void send({ questionId: question.id, value: option.value });
-                  }}
-                >
-                  <strong>{option.label}</strong>
-                  {option.hint && <small>{option.hint}</small>}
-                </button>
-              );
-            })}
-          </div>
+          {question.options.length > 0 && (
+            <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
+              {question.options.map((option) => {
+                const selected = multiSelected.includes(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={selected ? styles.optionSelected : styles.option}
+                    aria-pressed={question.multiSelect ? selected : undefined}
+                    disabled={busy}
+                    onClick={() => {
+                      if (question.multiSelect) {
+                        setMultiSelected((current) =>
+                          current.includes(option.value)
+                            ? current.filter((value) => value !== option.value)
+                            : [...current, option.value],
+                        );
+                        return;
+                      }
+                      void send({ questionId: question.id, value: option.value });
+                    }}
+                  >
+                    <strong>{option.label}</strong>
+                    {option.hint && <small>{option.hint}</small>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {question.multiSelect && (
             <button

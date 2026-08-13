@@ -8,6 +8,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.curation import assign_roles, chapter_sizes, ensure_core_evidence_candidate, plan_roles
+from app.interview_voice import InterviewVoice
 from app.jobs import STEP_DEFINITIONS
 from app.models import DURATION_PLAN, EvidenceDepth, VisitorProfile
 
@@ -37,10 +38,17 @@ def test_interview_completes_within_seven_turns_and_yields_a_usable_profile(
         turns += 1
         assert turns <= 7, "the interview must never exceed seven turns"
         question = state["nextQuestion"]
-        assert question["options"], f"question {question['id']} offered no options"
+        assert question["options"] or question["allowFreeText"], (
+            f"question {question['id']} offered no way to answer"
+        )
+        payload = (
+            {"questionId": question["id"], "freeText": "山水画如何组织观看者的行旅视线？"}
+            if question["id"] == "custom_question"
+            else {"questionId": question["id"], "value": question["options"][0]["value"]}
+        )
         answered = client.post(
             f"/api/interview/{interview_id}/answer",
-            json={"questionId": question["id"], "value": question["options"][0]["value"]},
+            json=payload,
         )
         assert answered.status_code == 200, answered.text
         state = answered.json()
@@ -49,6 +57,334 @@ def test_interview_completes_within_seven_turns_and_yields_a_usable_profile(
     assert profile["motivation"] in {"explorer", "recharger", "facilitator", "professional"}
     assert profile["durationMinutes"] in {5, 10, 15}
     assert len(state["transcript"]) == turns
+
+
+def _answer_interview(
+    client: TestClient, state: dict[str, Any], **answer: object
+) -> dict[str, Any]:
+    response = client.post(
+        f"/api/interview/{state['id']}/answer",
+        json={"questionId": state["nextQuestion"]["id"], **answer},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_initial_free_text_question_is_not_asked_again_even_for_explorer(
+    client: TestClient,
+) -> None:
+    question_text = "山水画如何组织观看者的行旅视线？"
+    state = client.post("/api/interview/start").json()
+    state = _answer_interview(client, state, freeText=question_text)
+    assert state["nextQuestion"]["id"] == "motivation"
+    assert state["nextQuestion"]["step"] == 2
+    assert state["nextQuestion"]["totalSteps"] == 5
+
+    # Even the motivation most likely to ask for a question must recognise
+    # that the visitor already supplied one in the opening turn.
+    state = _answer_interview(client, state, value="explorer")
+    seen = ["curiosity", "motivation"]
+    steps = [1, 2]
+    while not state["complete"]:
+        question = state["nextQuestion"]
+        seen.append(question["id"])
+        steps.append(question["step"])
+        value = question["options"][0]["value"]
+        state = _answer_interview(client, state, value=value)
+
+    assert seen == [
+        "curiosity",
+        "motivation",
+        "prior_knowledge",
+        "duration",
+        "exclusions",
+    ]
+    assert steps == [1, 2, 3, 4, 5]
+    assert state["profile"]["freeFormQuestion"] == question_text
+    assert state["profile"]["openQuestion"] is None
+    profile = VisitorProfile.model_validate(state["profile"])
+    assert profile.to_agenda(state["collectionId"]).question == question_text
+
+
+def test_explorer_is_asked_for_the_question_immediately_and_only_once(
+    client: TestClient,
+) -> None:
+    question_text = "山水画如何组织观看者的行旅视线？"
+    state = client.post("/api/interview/start").json()
+    state = _answer_interview(client, state, value="__unsure__")
+    state = _answer_interview(client, state, value="explorer")
+
+    custom = state["nextQuestion"]
+    assert custom["id"] == "custom_question"
+    assert custom["prompt"] == "这个问题是？"
+    assert custom["options"] == []
+    assert custom["allowFreeText"] is True
+    assert custom["skippable"] is False
+    assert custom["step"] == 3
+    assert custom["totalSteps"] == 6
+
+    # An empty direct API submission must not create a turn or fall through to
+    # the generic question later in the interview.
+    unchanged = _answer_interview(client, state, freeText="   ")
+    assert unchanged["nextQuestion"]["id"] == "custom_question"
+    assert len(unchanged["transcript"]) == 2
+
+    state = _answer_interview(client, unchanged, freeText=question_text)
+    assert state["nextQuestion"]["id"] == "prior_knowledge"
+    assert state["nextQuestion"]["prompt"] == "对这个问题涉及的主题，你现在了解多少？"
+    progress = [("curiosity", 1, 5), ("motivation", 2, 6), ("custom_question", 3, 6)]
+    while not state["complete"]:
+        question = state["nextQuestion"]
+        progress.append((question["id"], question["step"], question["totalSteps"]))
+        state = _answer_interview(
+            client, state, value=question["options"][0]["value"]
+        )
+
+    ids = [turn["questionId"] for turn in state["transcript"]]
+    assert ids == [
+        "curiosity",
+        "motivation",
+        "custom_question",
+        "prior_knowledge",
+        "duration",
+        "exclusions",
+    ]
+    assert ids.count("custom_question") == 1
+    assert "open_question" not in ids
+    assert progress == [
+        ("curiosity", 1, 5),
+        ("motivation", 2, 6),
+        ("custom_question", 3, 6),
+        ("prior_knowledge", 4, 6),
+        ("duration", 5, 6),
+        ("exclusions", 6, 6),
+    ]
+    assert state["profile"]["openQuestion"] == question_text
+    profile = VisitorProfile.model_validate(state["profile"])
+    assert profile.to_agenda(state["collectionId"]).question == question_text
+
+
+def test_custom_question_is_not_replaced_by_model_suggestions(
+    client: TestClient, monkeypatch
+) -> None:
+    calls: list[bool] = []
+
+    async def fake_compose(*_args: object, **kwargs: object) -> InterviewVoice:
+        calls.append(bool(kwargs["want_suggestions"]))
+        return InterviewVoice(
+            reply="我会先记住你刚才选的方向。",
+            suggestions=("无关问题一？", "无关问题二？", "无关问题三？"),
+        )
+
+    monkeypatch.setattr("app.main.interview_voice.compose", fake_compose)
+
+    state = client.post("/api/interview/start").json()
+    state = _answer_interview(client, state, value="__unsure__")
+    state = _answer_interview(client, state, value="explorer")
+
+    assert calls == [False, False]
+    assert state["nextQuestion"]["id"] == "custom_question"
+    assert state["nextQuestion"]["prompt"] == "这个问题是？"
+    assert state["nextQuestion"]["options"] == []
+
+
+def test_configured_provider_cannot_add_suggestions_to_custom_question(
+    client: TestClient, monkeypatch
+) -> None:
+    provider = client.app.state.generator.provider
+    captured: list[bool] = []
+
+    async def fake_generate_json(
+        _system_prompt: str, user_payload: dict[str, object]
+    ) -> dict[str, object]:
+        captured.append(bool(user_payload["wantSuggestions"]))
+        return {
+            "reply": "我会沿着你刚才选的方向继续。",
+            "suggestions": ["无关问题一？", "无关问题二？", "无关问题三？"],
+        }
+
+    monkeypatch.setattr(provider, "api_key", "configured-test-key")
+    monkeypatch.setattr(provider, "generate_json", fake_generate_json)
+
+    state = client.post("/api/interview/start").json()
+    state = _answer_interview(client, state, value="__unsure__")
+    state = _answer_interview(client, state, value="explorer")
+
+    assert captured == [False, False]
+    assert state["nextQuestion"]["id"] == "custom_question"
+    assert state["nextQuestion"]["prompt"] == "这个问题是？"
+    assert state["nextQuestion"]["options"] == []
+
+
+def test_custom_question_has_an_english_input_only_variant(
+    client: TestClient,
+) -> None:
+    state = client.post("/api/interview/start?language=en").json()
+    state = _answer_interview(client, state, value="__unsure__")
+    state = _answer_interview(client, state, value="explorer")
+
+    custom = state["nextQuestion"]
+    assert custom["id"] == "custom_question"
+    assert custom["prompt"] == "What is the question?"
+    assert custom["options"] == []
+    assert custom["allowFreeText"] is True
+
+    state = _answer_interview(
+        client,
+        state,
+        freeText="Why are dogs companions in some cultures and guardians in others?",
+    )
+    assert state["nextQuestion"]["id"] == "prior_knowledge"
+    assert state["nextQuestion"]["prompt"] == (
+        "How much do you already know about the subject behind that question?"
+    )
+
+
+def test_custom_question_replaces_an_auto_recommended_domain(
+    client: TestClient, monkeypatch
+) -> None:
+    from app import interview
+
+    monkeypatch.setattr(interview, "MIN_DOMAIN_OBJECTS", 1)
+    collection = client.app.state.collections.get()
+    for obj in collection.objects:
+        obj.evidence_domain_ids = ["global:making-material"]
+
+    state = client.post("/api/interview/start").json()
+    state = _answer_interview(client, state, value="__unsure__")
+    assert state["profile"]["curiosityDomainId"] == "global:making-material"
+    state = _answer_interview(client, state, value="explorer")
+    state = _answer_interview(
+        client,
+        state,
+        freeText="狗在各国文化中为什么既是伙伴，又是守护者？",
+    )
+
+    # The domain selected by "you choose" was only a temporary default. It
+    # must not constrain a later visitor-authored question about something
+    # else, or retrieval will faithfully answer the wrong topic.
+    assert state["profile"]["curiosityDomainId"] is None
+    assert state["profile"]["curiosityLabel"] == ""
+    assert state["nextQuestion"]["prompt"] == "对这个问题涉及的主题，你现在了解多少？"
+
+
+def test_later_written_question_also_replaces_an_auto_recommended_domain(
+    client: TestClient, monkeypatch
+) -> None:
+    from app import interview
+
+    monkeypatch.setattr(interview, "MIN_DOMAIN_OBJECTS", 1)
+    collection = client.app.state.collections.get()
+    for obj in collection.objects:
+        obj.evidence_domain_ids = ["global:making-material"]
+
+    state = client.post("/api/interview/start").json()
+    for value in ("__unsure__", "recharger", "none", "5"):
+        state = _answer_interview(client, state, value=value)
+    assert state["nextQuestion"]["id"] == "open_question"
+    assert state["profile"]["curiosityDomainId"] == "global:making-material"
+
+    state = _answer_interview(
+        client,
+        state,
+        freeText="狗在各国文化中为什么既是伙伴，又是守护者？",
+    )
+    assert state["profile"]["curiosityDomainId"] is None
+    assert state["profile"]["curiosityLabel"] == ""
+
+
+def test_clicking_a_suggested_question_keeps_its_auto_recommended_context(
+    client: TestClient, monkeypatch
+) -> None:
+    from app import interview
+
+    monkeypatch.setattr(interview, "MIN_DOMAIN_OBJECTS", 1)
+    collection = client.app.state.collections.get()
+    for obj in collection.objects:
+        obj.evidence_domain_ids = ["global:making-material"]
+
+    state = client.post("/api/interview/start").json()
+    for value in ("__unsure__", "recharger", "none", "5"):
+        state = _answer_interview(client, state, value=value)
+    suggestion = state["nextQuestion"]["options"][0]["value"]
+    state = _answer_interview(client, state, value=suggestion)
+
+    assert state["profile"]["openQuestion"] == suggestion
+    assert state["profile"]["curiosityDomainId"] == "global:making-material"
+
+
+def test_late_model_suggestions_cannot_rewind_an_answered_question(
+    client: TestClient, monkeypatch
+) -> None:
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    state = client.post("/api/interview/start").json()
+    for value in ("__unsure__", "recharger", "none"):
+        state = _answer_interview(client, state, value=value)
+    assert state["nextQuestion"]["id"] == "duration"
+
+    composing_suggestions = Event()
+    release_suggestions = Event()
+
+    async def delayed_compose(*_args: object, **kwargs: object) -> InterviewVoice:
+        if kwargs["want_suggestions"]:
+            composing_suggestions.set()
+            await asyncio.to_thread(release_suggestions.wait)
+            return InterviewVoice(
+                reply="我会沿着这条线继续找。",
+                suggestions=("迟到的问题一？", "迟到的问题二？", "迟到的问题三？"),
+            )
+        return InterviewVoice(reply="我记下了。")
+
+    monkeypatch.setattr("app.main.interview_voice.compose", delayed_compose)
+    interview_id = state["id"]
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first_request = executor.submit(
+            client.post,
+            f"/api/interview/{interview_id}/answer",
+            json={"questionId": "duration", "value": "5"},
+        )
+        assert composing_suggestions.wait(timeout=5)
+
+        visible = client.get(f"/api/interview/{interview_id}").json()
+        assert visible["nextQuestion"]["id"] == "open_question"
+        answered = client.post(
+            f"/api/interview/{interview_id}/answer",
+            json={"questionId": "open_question", "value": "__no_question__"},
+        )
+        assert answered.status_code == 200, answered.text
+        assert answered.json()["nextQuestion"]["id"] == "exclusions"
+
+        release_suggestions.set()
+        assert first_request.result(timeout=5).status_code == 200
+
+    final = client.get(f"/api/interview/{interview_id}").json()
+    assert final["nextQuestion"]["id"] == "exclusions"
+    assert [turn["questionId"] for turn in final["transcript"]].count(
+        "open_question"
+    ) == 1
+
+
+def test_non_explorer_topic_path_keeps_one_later_open_question(
+    client: TestClient,
+) -> None:
+    state = client.post("/api/interview/start").json()
+    state = _answer_interview(client, state, value="__unsure__")
+    state = _answer_interview(client, state, value="recharger")
+    assert state["nextQuestion"]["id"] == "prior_knowledge"
+    state = _answer_interview(
+        client, state, value=state["nextQuestion"]["options"][0]["value"]
+    )
+    state = _answer_interview(client, state, value="5")
+
+    assert state["nextQuestion"]["id"] == "open_question"
+    assert state["nextQuestion"]["prompt"].startswith("关于")
+    assert state["nextQuestion"]["step"] == 5
+    assert all(
+        turn["questionId"] != "custom_question" for turn in state["transcript"]
+    )
 
 
 def test_curiosity_options_only_offer_domains_the_corpus_can_route(
@@ -83,11 +419,11 @@ def test_duration_question_describes_a_continuous_line_not_separate_halls(
 ) -> None:
     state = client.post("/api/interview/start").json()
     interview_id = state["id"]
-    for _ in range(3):
+    for value in ("__unsure__", "recharger", "none"):
         question = state["nextQuestion"]
         state = client.post(
             f"/api/interview/{interview_id}/answer",
-            json={"questionId": question["id"], "value": question["options"][0]["value"]},
+            json={"questionId": question["id"], "value": value},
         ).json()
 
     question = state["nextQuestion"]
@@ -242,14 +578,14 @@ def _run_pipeline(client: TestClient) -> dict[str, Any]:
         # This end-to-end fixture contains only landscape records, so anchor
         # the visit to the fixture's reviewed question instead of assuming the
         # first generic suggestion is retrieval-compatible.
-        value = (
-            PIPELINE_FIXTURE_QUESTION
-            if question["id"] == "open_question"
-            else question["options"][0]["value"]
+        payload = (
+            {"questionId": question["id"], "freeText": PIPELINE_FIXTURE_QUESTION}
+            if question["id"] in {"custom_question", "open_question"}
+            else {"questionId": question["id"], "value": question["options"][0]["value"]}
         )
         state = client.post(
             f"/api/interview/{interview_id}/answer",
-            json={"questionId": question["id"], "value": value},
+            json=payload,
         ).json()
 
     created = client.post("/api/exhibitions/generate", json={"interviewId": interview_id})

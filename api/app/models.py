@@ -419,8 +419,8 @@ class VisitorProfile(ApiModel):
     curiosity_domain_id: str | None = None
     curiosity_label: str = ""
     free_form_question: str | None = Field(default=None, max_length=500)
-    # The one thing the visitor most wants answered, asked separately from the
-    # opening topic so a broad theme and a sharp question can coexist.
+    # The one thing the visitor most wants answered. It is collected only when
+    # the opening turn did not already contain a visitor-written question.
     open_question: str | None = Field(default=None, max_length=300)
     motivation: VisitorMotivation = VisitorMotivation.EXPLORER
     prior_knowledge: Literal["none", "some", "familiar"] = "none"
@@ -1143,6 +1143,7 @@ class ErrorDetail(ApiModel):
 class InterviewQuestionId(str, Enum):
     CURIOSITY = "curiosity"
     MOTIVATION = "motivation"
+    CUSTOM_QUESTION = "custom_question"
     PRIOR_KNOWLEDGE = "prior_knowledge"
     DURATION = "duration"
     NEGOTIATION = "negotiation"

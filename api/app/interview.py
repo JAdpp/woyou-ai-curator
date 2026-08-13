@@ -11,9 +11,10 @@ Question design follows the visitor typologies in 01b §3.1:
   * duration    — Véron & Levasseur (1983) circulation styles, via DURATION_PLAN
   * label budget— Serrell (1997) on actual visitor attention
 
-Hard ceiling of seven turns, four of them required. The seventh exists because
-a broad opening topic and a sharp specific question are different things: the
-visitor is asked for both, and the specific one anchors retrieval when given.
+Hard ceiling of seven turns, four of them required. A visitor-written core
+question is collected either in the opening turn or in one later follow-up,
+never both. The seventh turn exists only when the answerability gate needs to
+negotiate a broader or better-supported route.
 """
 
 from __future__ import annotations
@@ -190,7 +191,11 @@ class InterviewService:
                 "Or just tell me what you want to understand…",
             ),
             step=1,
-            total_steps=TOTAL_STEPS,
+            # Five is the shortest real route (the visitor may type the core
+            # question here). Conditional branches only raise this total; the
+            # progress indicator therefore never moves backwards from 1/6 to
+            # 2/5 after the opening answer.
+            total_steps=5,
         )
 
     @staticmethod
@@ -230,17 +235,49 @@ class InterviewService:
         )
 
     @staticmethod
-    def _prior_knowledge_question(topic: str, language: str = "zh") -> InterviewQuestion:
+    def _custom_question_question(language: str = "zh") -> InterviewQuestion:
+        """Collect the question promised by the explorer motivation.
+
+        This deliberately has its own id.  ``open_question`` is the later,
+        optional prompt whose choices may be suggested by the language model;
+        reusing that id here would let those suggestions overwrite this direct
+        follow-up and recreate the conversational mismatch this branch avoids.
+        """
+
+        return InterviewQuestion(
+            id=InterviewQuestionId.CUSTOM_QUESTION,
+            prompt=i18n.pick(language, "这个问题是？", "What is the question?"),
+            options=[],
+            allow_free_text=True,
+            free_text_placeholder=i18n.pick(
+                language,
+                "直接写下你想弄明白的问题…",
+                "Write the question you want to figure out…",
+            ),
+            step=3,
+            total_steps=TOTAL_STEPS,
+        )
+
+    @staticmethod
+    def _prior_knowledge_question(
+        topic: str, language: str = "zh", *, question_led: bool = False
+    ) -> InterviewQuestion:
         if language == "en":
-            subject = f"“{topic}”" if topic else "this subject"
-            prompt = f"How much do you already know about {subject}?"
+            if question_led:
+                prompt = "How much do you already know about the subject behind that question?"
+            else:
+                subject = f"“{topic}”" if topic else "this subject"
+                prompt = f"How much do you already know about {subject}?"
             options = [
                 InterviewOption(value=value, label=label, hint=hint)
                 for value, (label, hint) in i18n.PRIOR_KNOWLEDGE_EN.items()
             ]
         else:
-            subject = f"“{topic}”" if topic else "这个主题"
-            prompt = f"对{subject}，你现在了解多少？"
+            if question_led:
+                prompt = "对这个问题涉及的主题，你现在了解多少？"
+            else:
+                subject = f"“{topic}”" if topic else "这个主题"
+                prompt = f"对{subject}，你现在了解多少？"
             options = [
                 InterviewOption(value="none", label="第一次接触", hint="从最基本的看法讲起"),
                 InterviewOption(value="some", label="略知一二", hint="跳过常识，直接进主线"),
@@ -444,6 +481,14 @@ class InterviewService:
             # Ignore replies to a question we are no longer on rather than
             # corrupting the profile with a stale value.
             return state
+        if (
+            current.id == InterviewQuestionId.CUSTOM_QUESTION
+            and not (answer.free_text or "").strip()
+        ):
+            # The visitor explicitly chose "there is a question I want to
+            # figure out".  Do not record an empty turn and silently move on;
+            # keep the input-only question active until it has an answer.
+            return state
 
         turn = InterviewTurn(
             question_id=answer.question_id,
@@ -502,6 +547,11 @@ class InterviewService:
                     i18n.MOTIVATION_LABELS_EN[answer.value],
                 )
 
+        elif question_id == InterviewQuestionId.CUSTOM_QUESTION:
+            profile.open_question = free_text[:300]
+            turn.answer_label = free_text[:60]
+            self._replace_auto_domain_from_question(state, free_text, collection)
+
         elif question_id == InterviewQuestionId.PRIOR_KNOWLEDGE:
             if answer.value in {"none", "some", "familiar"}:
                 profile.prior_knowledge = answer.value
@@ -554,6 +604,8 @@ class InterviewService:
             else:
                 profile.open_question = chosen[:300]
                 turn.answer_label = chosen[:60]
+                if free_text:
+                    self._replace_auto_domain_from_question(state, chosen, collection)
 
         elif question_id == InterviewQuestionId.EXCLUSIONS:
             if answer.skipped or not answer.value or answer.value == SKIP_VALUE:
@@ -592,24 +644,99 @@ class InterviewService:
     ) -> InterviewQuestion | None:
         asked = {turn.question_id for turn in state.transcript}
         language = state.profile.language
+        has_specific_question = bool(
+            (state.profile.open_question or state.profile.free_form_question or "").strip()
+        )
         if InterviewQuestionId.MOTIVATION not in asked:
-            return self._motivation_question(language)
+            return self._with_progress(state, self._motivation_question(language))
+        if (
+            state.profile.motivation == VisitorMotivation.EXPLORER
+            and not has_specific_question
+            and InterviewQuestionId.CUSTOM_QUESTION not in asked
+        ):
+            return self._with_progress(state, self._custom_question_question(language))
         if InterviewQuestionId.PRIOR_KNOWLEDGE not in asked:
-            return self._prior_knowledge_question(state.profile.curiosity_label, language)
+            return self._with_progress(
+                state,
+                self._prior_knowledge_question(
+                    state.profile.curiosity_label,
+                    language,
+                    question_led=has_specific_question,
+                ),
+            )
         if InterviewQuestionId.DURATION not in asked:
-            return self._duration_question(language)
+            return self._with_progress(state, self._duration_question(language))
         # Asked before the answerability gate so that the sharper question is
         # what gets probed; negotiating over the broad topic while ignoring the
         # visitor's actual question would check the wrong thing.
-        if InterviewQuestionId.OPEN_QUESTION not in asked:
-            return self.open_question_question(state.profile.curiosity_label, language=language)
+        if not has_specific_question and InterviewQuestionId.OPEN_QUESTION not in asked:
+            return self._with_progress(
+                state,
+                self.open_question_question(state.profile.curiosity_label, language=language),
+            )
         if InterviewQuestionId.NEGOTIATION not in asked:
             negotiation = self._negotiation_question(state, collection)
             if negotiation is not None:
-                return negotiation
+                return self._with_progress(state, negotiation)
         if InterviewQuestionId.EXCLUSIONS not in asked:
-            return self._exclusions_question(language)
+            return self._with_progress(state, self._exclusions_question(language))
         return None
+
+    def _replace_auto_domain_from_question(
+        self,
+        state: InterviewState,
+        question_text: str,
+        collection: LoadedCollection,
+    ) -> None:
+        """Replace only a domain that the system, rather than the visitor, chose.
+
+        The opening ``__unsure__`` option installs the richest domain so the
+        interview can keep moving. It is provisional: once the visitor later
+        writes a concrete question, retrieval must follow that question. A
+        domain explicitly selected or named in the opening turn is preserved.
+        """
+
+        opening_turn = next(
+            (
+                previous
+                for previous in state.transcript
+                if previous.question_id == InterviewQuestionId.CURIOSITY
+            ),
+            None,
+        )
+        if opening_turn is None or opening_turn.answer_value != UNSURE_VALUE:
+            return
+        matched = self._match_domain(question_text, collection)
+        state.profile.curiosity_domain_id = matched
+        state.profile.curiosity_label = (
+            domain_choices_for(collection, state.profile.language)[matched][0]
+            if matched
+            else ""
+        )
+
+    @staticmethod
+    def _with_progress(
+        state: InterviewState, question: InterviewQuestion
+    ) -> InterviewQuestion:
+        """Number the actual conditional route without going backwards.
+
+        A question typed into the opening prompt serves as both topic and core
+        question, so that route has five visible turns.  The dedicated custom
+        question and the later optional open question each keep the usual six.
+        Answerability negotiation adds one turn only when it actually appears.
+        """
+
+        asked = {turn.question_id for turn in state.transcript}
+        opening_already_specific = bool(state.profile.free_form_question) and not (
+            InterviewQuestionId.CUSTOM_QUESTION in asked
+            or InterviewQuestionId.OPEN_QUESTION in asked
+        )
+        total = 5 if opening_already_specific else TOTAL_STEPS
+        if InterviewQuestionId.NEGOTIATION in asked or state.negotiation_note:
+            total += 1
+        question.step = len(state.transcript) + 1
+        question.total_steps = max(total, question.step)
+        return question
 
     def _match_domain(self, text: str, collection: LoadedCollection) -> str | None:
         """Recognise only a domain the visitor actually named.
