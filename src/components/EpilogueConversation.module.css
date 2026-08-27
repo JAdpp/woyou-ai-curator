@@ -115,6 +115,7 @@
   padding: 0.56rem 0.86rem;
   cursor: pointer;
   font-size: 0.82rem;
+  min-height: 2.75rem;
 }
 
 .root[data-context="hall"] .primaryButton {
@@ -128,10 +129,11 @@
   border: 0;
   background: none;
   color: var(--note-muted);
-  padding: 0.35rem 0;
+  padding: 0.35rem 0.3rem;
   cursor: pointer;
   font-size: 0.78rem;
   text-underline-offset: 0.2em;
+  min-height: 2.75rem;
 }
 
 .textButton:hover,
@@ -257,6 +259,7 @@
   cursor: pointer;
   font-size: 0.84rem;
   line-height: 1.55;
+  min-height: 2.75rem;
 }
 
 .starters button:hover,
@@ -284,6 +287,7 @@
   cursor: pointer;
   font-size: 0.76rem;
   text-align: left;
+  min-height: 2.75rem;
 }
 
 .suggestions button:hover { border-bottom-color: var(--note-accent); color: var(--note-accent); }
@@ -310,6 +314,7 @@
   color: var(--note-ink);
   padding: 0.15rem 0;
   cursor: pointer;
+  min-height: 2.75rem;
 }
 
 .form {

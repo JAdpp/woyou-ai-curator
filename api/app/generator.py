@@ -91,6 +91,46 @@ PARTIAL_SCOPE_PATTERNS = (
 )
 
 
+@dataclass(frozen=True)
+class CulturalCoverageObligation:
+    """A named culture/place the visitor explicitly asks the comparison to include.
+
+    This is deliberately a small reviewed vocabulary rather than free model
+    extraction.  Only controlled catalogue origin fields may satisfy a named
+    obligation; a description that merely mentions another place is not enough
+    to claim that the exhibition contains an object from that culture.
+    """
+
+    label_zh: str
+    question_patterns: tuple[str, ...]
+    origin_patterns: tuple[str, ...] = ()
+    culture_pack_ids: tuple[str, ...] = ()
+
+
+CULTURAL_COVERAGE_OBLIGATIONS: tuple[CulturalCoverageObligation, ...] = (
+    CulturalCoverageObligation("中国", (r"中国|中华|\bchinese\b|\bchina\b",), (r"\bchina\b|\bchinese\b",)),
+    CulturalCoverageObligation("日本", (r"日本|\bjapan(?:ese)?\b",), (r"\bjapan(?:ese)?\b",)),
+    CulturalCoverageObligation("韩国／朝鲜", (r"韩国|朝鲜|\bkorea(?:n)?\b",), (r"\bkorea(?:n)?\b",)),
+    CulturalCoverageObligation("越南", (r"越南|\bvietnam(?:ese)?\b",), (r"\bvietnam(?:ese)?\b",)),
+    CulturalCoverageObligation("印度", (r"印度|\bindia(?:n)?\b",), (r"\bindia(?:n)?\b",)),
+    CulturalCoverageObligation("伊朗／波斯", (r"伊朗|波斯|\biran(?:ian)?\b|\bpersia(?:n)?\b",), (r"\biran(?:ian)?\b|\bpersia(?:n)?\b",)),
+    CulturalCoverageObligation("代尔夫特", (r"代尔夫特|\bdelft\b",), (r"\bdelft\b",)),
+    CulturalCoverageObligation("荷兰", (r"荷兰|尼德兰|\bnetherlands\b|\bdutch\b|\bholland\b",), (r"\bnetherlands\b|\bdutch\b|\bholland\b",)),
+    CulturalCoverageObligation("埃及", (r"埃及|\begypt(?:ian)?\b",), (r"\begypt(?:ian)?\b",)),
+    CulturalCoverageObligation("希腊", (r"希腊|\bgree(?:ce|k)\b",), (r"\bgree(?:ce|k)\b",)),
+    CulturalCoverageObligation("罗马", (r"罗马|\broman\b|\brome\b",), (r"\broman\b|\brome\b",)),
+    CulturalCoverageObligation("墨西哥", (r"墨西哥|\bmexic(?:o|an)\b",), (r"\bmexic(?:o|an)\b",)),
+    CulturalCoverageObligation("秘鲁", (r"秘鲁|\bperu(?:vian)?\b",), (r"\bperu(?:vian)?\b",)),
+    CulturalCoverageObligation("非洲", (r"非洲|\bafrica(?:n)?\b",), culture_pack_ids=("africa",)),
+    CulturalCoverageObligation("美洲", (r"美洲|\bamericas?\b",), culture_pack_ids=("americas",)),
+    CulturalCoverageObligation("欧洲", (r"欧洲|\beurope(?:an)?\b",), culture_pack_ids=("europe",)),
+    CulturalCoverageObligation("东亚", (r"东亚|\beast asia(?:n)?\b",), culture_pack_ids=("east_asia",)),
+    CulturalCoverageObligation("东南亚", (r"东南亚|\bsoutheast asia(?:n)?\b",), culture_pack_ids=("southeast_asia",)),
+    CulturalCoverageObligation("西亚／北非", (r"西亚|中东|北非|\bwest asia(?:n)?\b|\bmiddle east(?:ern)?\b|\bnorth africa(?:n)?\b",), culture_pack_ids=("west_asia_north_africa",)),
+    CulturalCoverageObligation("大洋洲／太平洋", (r"大洋洲|太平洋文化|\boceania(?:n)?\b|\bpacific island",), culture_pack_ids=("oceania",)),
+)
+
+
 class ExhibitionGenerator:
     def __init__(
         self,
@@ -245,6 +285,28 @@ class ExhibitionGenerator:
             status = AnswerabilityStatus.UNSUPPORTED
             gaps = ["馆藏元数据与证据片段不足以支持这个问题，系统不会用模型常识补全。"]
 
+        coverage_obligations = self._cultural_coverage_obligations(agenda.question)
+        missing_obligations = [
+            obligation
+            for obligation in coverage_obligations
+            if not any(
+                self._object_satisfies_cultural_obligation(result.obj, obligation)
+                for result in matched
+            )
+        ]
+        if missing_obligations:
+            missing_labels = "、".join(
+                f"“{obligation.label_zh}”" for obligation in missing_obligations
+            )
+            coverage_gap = (
+                f"当前直接证据候选缺少{missing_labels}的馆藏对象，"
+                "无法按原问题完成这组跨文化比较。"
+            )
+            if status == AnswerabilityStatus.SUPPORTED:
+                status = AnswerabilityStatus.PARTIALLY_SUPPORTED
+            if coverage_gap not in gaps:
+                gaps.insert(0, coverage_gap)
+
         evidence_domain_ids: list[str] = []
         for result in matched[:10]:
             for domain_id in result.obj.themes:
@@ -257,6 +319,14 @@ class ExhibitionGenerator:
         ):
             evidence_domain_ids.insert(0, policy.evidence_domain_id)
         supported_aspects = self._supported_aspects(exhibition_theme, matched)
+        if coverage_obligations:
+            covered_labels = [
+                obligation.label_zh
+                for obligation in coverage_obligations
+                if obligation not in missing_obligations
+            ]
+            if covered_labels:
+                supported_aspects.append("已覆盖文化／地点：" + "、".join(covered_labels))
         can_generate = status == AnswerabilityStatus.SUPPORTED
         return AgendaCheckResponse(
             status=status,
@@ -346,6 +416,53 @@ class ExhibitionGenerator:
             aspects.append("藏品类型：" + "、".join(types[:3]))
         aspects.append(f"可定位机构记录：{len(matched)} 件候选藏品")
         return aspects[:4]
+
+    @staticmethod
+    def _cultural_coverage_obligations(
+        question: str,
+    ) -> list[CulturalCoverageObligation]:
+        """Return named comparison legs only when the question names two or more.
+
+        Generic requests such as “各国文化中的狗” intentionally remain under
+        the diversity re-ranker.  A question that explicitly names China, Iran
+        and Delft, however, must contain evidence for all three or negotiate a
+        narrower question before generation.
+        """
+
+        obligations = [
+            obligation
+            for obligation in CULTURAL_COVERAGE_OBLIGATIONS
+            if any(
+                re.search(pattern, question, re.IGNORECASE)
+                for pattern in obligation.question_patterns
+            )
+        ]
+        return obligations if len(obligations) >= 2 else []
+
+    @staticmethod
+    def _object_satisfies_cultural_obligation(
+        obj: MuseumObject,
+        obligation: CulturalCoverageObligation,
+    ) -> bool:
+        """Match only catalogue origin fields or reviewed broad culture packs."""
+
+        if set(obj.culture_pack_ids) & set(obligation.culture_pack_ids):
+            return True
+        controlled_origin = " ".join(
+            value
+            for value in (
+                obj.culture,
+                obj.culture_display,
+                obj.place,
+                obj.creator,
+                obj.maker,
+            )
+            if value
+        )
+        return any(
+            re.search(pattern, controlled_origin, re.IGNORECASE)
+            for pattern in obligation.origin_patterns
+        )
 
     async def generate(self, agenda: AgendaInput) -> Exhibition:
         check = self.check_agenda(agenda)

@@ -22,13 +22,24 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DEFAULT_MAX_IMAGE_BYTES = 15 * 1024 * 1024
 GENERATION_MAX_ATTEMPTS = 2
 GENERATION_RETRY_DELAY_SECONDS = 0.75
-POSTER_COMPOSITION_VERSION = "pillow-poster-v2-opaque-panel"
+# The visual model is never asked to render exhibition copy.  The compositor
+# owns the only legitimate typography area, which is an opaque replacement of
+# the generated pixels rather than a translucent overlay.  This makes the
+# reserved title field a deterministic no-pseudo-text boundary even if an image
+# model ignores part of its negative prompt.
+POSTER_COMPOSITION_VERSION = "pillow-poster-v4-safe-edge-crop"
 POSTER_CREDIT = "卧游 · AI策展人彦远"
 POSTER_PANEL_RATIO = 0.47
 POSTER_PANEL_TRANSITION_RATIO = 0.025
+# Image models often place signature-like marks, fake seals or pseudo-QR blocks
+# at a canvas edge even when explicitly forbidden.  A deterministic editorial
+# crop removes that high-risk perimeter before any system typography is added.
+POSTER_SOURCE_EDGE_CROP_RATIO = 0.10
 POSTER_NEGATIVE_PROMPT = (
-    "readable text, letters, Chinese characters, pseudo-text, typography, logo, watermark, "
-    "QR code, museum label, infographic, menu, interface, list, seal, emblem, replica of a "
+    "readable text, letters, Chinese characters, numbers, pseudo-text, pseudo-writing, decorative "
+    "script, typography, logo, watermark, QR code, museum label, caption card, title card, label card, "
+    "placard, nameplate, infographic, menu, interface, list, document fragment, page, manuscript, "
+    "paper sheet with marks, marked paper sheet, seal, stamp, emblem, replica of a "
     "specific museum object, framed artifact, fake historical artifact, period costume, altar, "
     "pedestal, generic abstract-only composition, clutter, low contrast, distorted symbols"
 )
@@ -38,7 +49,8 @@ _VISUAL_BRIEF_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
         ("猫", "cat", "cats", "feline"),
         "Contemporary editorial collage of unmistakable feline silhouettes, alert eyes, and "
         "curving tails, built from paper fibre, clay, ink-line, and metal textures with multiple "
-        "directions of gaze; no people, costumes, altars, pedestals, or faux artifacts",
+        "directions of gaze; paper is material texture only, never a sheet, card, page, label, or "
+        "document; no people, costumes, altars, pedestals, or faux artifacts",
     ),
     (
         ("动物", "兽", "鸟", "鱼", "马", "犬", "狗", "animal", "bird", "fish", "horse", "dog"),
@@ -220,9 +232,12 @@ def build_poster_visual_prompt(context: PosterContext) -> str:
         "Do not reproduce, imitate, reconstruct, stage, or display any specific museum object, accession "
         "photograph, historical artifact, institution identity, period costume, or faux-antique object. "
         "Do not create a gallery room, display case, altar, pedestal, framed exhibit, infographic, menu, "
-        "interface, list, seal, or emblem. Render no text or text-like feature at all: no glyph, signage, title, "
-        "Chinese character, letter, number, pseudo-text, label, logo, watermark, signature, or QR code. "
-        "Output one polished visual layer with clear thematic imagery, no typography, and no signage."
+        "interface, list, seal, stamp, emblem, caption card, title card, label card, placard, nameplate, "
+        "document fragment, page, manuscript, or marked paper sheet. Render no text or text-like feature at "
+        "all: no glyph, signage, title, Chinese character, letter, number, pseudo-text, pseudo-writing, "
+        "decorative script, label, logo, watermark, signature, or QR code. Treat paper, clay, fibre, and ink "
+        "only as non-linguistic material texture, never as a written surface. Output one polished visual layer "
+        "with clear thematic imagery and no ephemera: no typography, and no signage."
     )
 
 
@@ -649,6 +664,11 @@ class AliyunImageProvider:
             ) from exc
 
         width, height = expected_size
+        crop_x = round(width * POSTER_SOURCE_EDGE_CROP_RATIO)
+        crop_y = round(height * POSTER_SOURCE_EDGE_CROP_RATIO)
+        poster = poster.crop(
+            (crop_x, crop_y, width - crop_x, height - crop_y)
+        ).resize((width, height), Image.Resampling.LANCZOS)
         title = _compact_context(context.title, max_length=160)
         secondary = self._secondary_text(context, title)
 
@@ -734,6 +754,8 @@ class AliyunImageProvider:
             "panelWidthPx": panel_width,
             "panelRatio": POSTER_PANEL_RATIO,
             "transitionWidthPx": transition_width,
+            "sourceEdgeCropRatio": POSTER_SOURCE_EDGE_CROP_RATIO,
+            "sourceEdgeCropPixels": {"x": crop_x, "y": crop_y},
         }
 
     @asynccontextmanager

@@ -21,7 +21,8 @@
     "data:supplement:aic": "python scripts/supplement_aic_global_collection.py --target 1000",
     "test:web": "tsx --test src/**/*.test.ts",
     "data:rebuild": "python scripts/import_collections.py --from-snapshot",
-    "data:rebuild:global": "python scripts/import_global_collections.py --from-snapshot"
+    "data:rebuild:global:base": "python scripts/import_global_collections.py --from-snapshot",
+    "data:rebuild:global": "npm run data:rebuild:global:base && python scripts/supplement_global_collection.py --from-snapshot && python scripts/supplement_aic_global_collection.py --target 1000 --from-snapshot"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

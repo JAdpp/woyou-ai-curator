@@ -100,7 +100,10 @@ def _compact(value: object, *, limit: int) -> str:
 
 
 def _sanitise_visitor_text(value: object) -> str:
-    text = _compact(value, limit=300)
+    # InterviewAnswer and VisitorProfile both permit up to 500 characters.
+    # Keep the whole accepted question in context rather than silently
+    # truncating it again at the voice layer.
+    text = _compact(value, limit=500)
     return _PROMPT_ATTACK_RE.sub(" ", text).strip()
 
 
@@ -135,6 +138,120 @@ def _clean_suggestions(value: object, *, language: str = "zh") -> tuple[str, ...
     return tuple(cleaned[:3])
 
 
+def _question_anchor(
+    visitor_question: str | None,
+    free_text: str | None,
+    answer_label: str | None,
+    topic: str,
+    *,
+    language: str,
+) -> str:
+    """Keep the visitor's actual question in every deterministic reply.
+
+    The full question enters this function on every turn. Only the displayed
+    quotation is shortened so a curator reply remains one scannable sentence.
+    """
+
+    raw = next(
+        (
+            value
+            for value in (visitor_question, free_text, topic, answer_label)
+            if value and value.strip()
+        ),
+        "",
+    )
+    clean = _sanitise_visitor_text(raw).replace("？", "").replace("?", "")
+    limit = 72 if language == "en" else 24
+    return clean[:limit].rstrip("，,。.!！；;：:")
+
+
+def compose_immediate(
+    *,
+    question_id: InterviewQuestionId | str,
+    answer_label: str | None,
+    free_text: str | None,
+    skipped: bool,
+    topic: str,
+    visitor_question: str | None,
+    available_domains: list[tuple[str, str, str]],
+    want_suggestions: bool,
+    language: str = "zh",
+) -> InterviewVoice:
+    """Return a contextual curator response without any provider I/O.
+
+    Interview navigation is latency-sensitive and already deterministic. A
+    remote prose call used to add 10--20 seconds to every answer; this local
+    response preserves the conversational hand-off while the next question is
+    returned immediately.
+    """
+
+    asked = question_id.value if isinstance(question_id, InterviewQuestionId) else str(question_id)
+    anchor = _question_anchor(
+        visitor_question,
+        free_text,
+        answer_label,
+        topic,
+        language=language,
+    )
+    subject = topic.strip() or (available_domains[0][1] if available_domains else "")
+
+    if language == "en":
+        quoted = f'“{anchor}”' if anchor else "your question"
+        if skipped:
+            reply = f"I’ll keep {quoted} as the thread and leave the skipped choice open."
+        elif asked in {
+            InterviewQuestionId.CURIOSITY.value,
+            InterviewQuestionId.CUSTOM_QUESTION.value,
+            InterviewQuestionId.OPEN_QUESTION.value,
+        }:
+            reply = f"I’ll keep {quoted} as the question that each object must help answer."
+        elif asked == InterviewQuestionId.DURATION.value:
+            reply = f"I’ll shape {quoted} into a route that fits the time you chose."
+        elif asked == InterviewQuestionId.EXCLUSIONS.value:
+            reply = f"I’ll keep {quoted} in view while avoiding what you asked not to see."
+        else:
+            reply = f"I’ll adjust the depth around {quoted} without replacing your question."
+        reply = _clean_reply(reply, language=language)
+        suggestion_subject = subject or "this subject"
+        suggestions = (
+            f"How did different cultures use {suggestion_subject}?",
+            f"How did material and purpose shape {suggestion_subject}?",
+            f"Which object most changes how we understand {suggestion_subject}?",
+        )
+    else:
+        quoted = f"“{anchor}”" if anchor else "你的问题"
+        if skipped:
+            reply = f"我会保留{quoted}这条主线，把刚才跳过的选择留白。"
+        elif asked in {
+            InterviewQuestionId.CURIOSITY.value,
+            InterviewQuestionId.CUSTOM_QUESTION.value,
+            InterviewQuestionId.OPEN_QUESTION.value,
+        }:
+            reply = f"我会把{quoted}作为主线，让每件展品都帮助回答它。"
+        elif asked == InterviewQuestionId.DURATION.value:
+            reply = f"我会把{quoted}收束成一条在所选时长内走得完的线。"
+        elif asked == InterviewQuestionId.EXCLUSIONS.value:
+            reply = f"我会保留{quoted}这条主线，同时避开你不想看的内容。"
+        else:
+            reply = f"我会围绕{quoted}调整讲解深度，不会换掉你的问题。"
+        reply = _clean_reply(reply, language=language)
+        suggestion_subject = subject or "这些藏品"
+        suggestions = (
+            f"不同文化怎样围绕{suggestion_subject}形成不同做法？",
+            f"{suggestion_subject}的材料与用途如何相互影响？",
+            f"哪件藏品最能改变我们对{suggestion_subject}的理解？",
+        )
+
+    return InterviewVoice(
+        reply=reply,
+        suggestions=(
+            _clean_suggestions(list(suggestions), language=language)
+            if want_suggestions
+            else ()
+        ),
+    )
+
+
 async def compose(
     provider: JsonProvider | None,
     *,
@@ -143,6 +260,7 @@ async def compose(
     free_text: str | None,
     skipped: bool,
     topic: str,
+    visitor_question: str | None,
     available_domains: list[tuple[str, str, str]],
     want_suggestions: bool,
     language: str = "zh",
@@ -167,6 +285,10 @@ async def compose(
         "answeredQuestion": asked,
         "visitorChoice": _sanitise_visitor_text(answer_label),
         "visitorText": _sanitise_visitor_text(free_text),
+        # Keep the original, complete user-authored question available on
+        # every later turn. `topic` may be an automatically routed domain and
+        # must never silently replace what the visitor actually asked.
+        "visitorQuestion": _sanitise_visitor_text(visitor_question),
         "visitorSkipped": skipped,
         "topic": _compact(topic, limit=60),
         "wantSuggestions": want_suggestions,

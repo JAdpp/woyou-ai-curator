@@ -26,7 +26,7 @@ from functools import lru_cache
 from typing import Any
 
 
-ROUTING_VERSION = "1.1.0"
+ROUTING_VERSION = "1.1.1"
 # Backward-compatible descriptive name used by the standalone manifest helper.
 TAXONOMY_VERSION = ROUTING_VERSION
 
@@ -90,7 +90,11 @@ CULTURE_PACKS: tuple[CulturePack, ...] = (
             "mongolia",
             "mongolian",
         ),
-        strong_patterns=("chinese art", "japanese art", "korean art", "arts of asia"),
+        # "Arts of Asia" is an institution department spanning East, South,
+        # Southeast and West Asia.  Treating it as a strong East-Asia signal
+        # misclassified explicitly Iranian AIC records, so only geographically
+        # specific department labels receive a strong boost here.
+        strong_patterns=("chinese art", "japanese art", "korean art"),
         aliases=("东亚", "中国", "日本", "韩国", "朝鲜", "蒙古"),
     ),
     CulturePack(

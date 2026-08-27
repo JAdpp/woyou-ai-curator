@@ -6,7 +6,6 @@ import type { InterviewAnswerInput, InterviewState } from "@/lib/types";
 import { fill } from "@/lib/i18n";
 import { useLanguage } from "@/lib/useLanguage";
 import { CuratorAvatar } from "./CuratorAvatar";
-import { LanguageToggle } from "./LanguageToggle";
 import styles from "./chat.module.css";
 
 function CuratorSpeaker({ label }: { label: string }) {
@@ -19,21 +18,18 @@ function CuratorSpeaker({ label }: { label: string }) {
 }
 
 /**
- * The curator interview, rendered as a chat.
- *
- * The conversation is driven entirely by server state: the backend decides
- * which question comes next and which options exist, so the visitor can never
- * be offered a theme the collection cannot route. This component only renders
- * turns and posts answers.
+ * The curator interview, rendered as a server-driven chat. The server owns the
+ * question order; the client owns visible waiting, focus, and recovery around
+ * those transitions.
  */
 export function CuratorChat({
   onComplete,
   onSkip,
 }: {
   onComplete: (state: InterviewState) => void;
-  onSkip: () => void;
+  onSkip: (state: InterviewState) => void;
 }) {
-  const { language, setLanguage, t } = useLanguage();
+  const { language, t } = useLanguage();
   const curatorLine = `${t.brand.curatorName} · ${t.brand.curatorRole}`;
   const [state, setState] = useState<InterviewState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,7 +37,12 @@ export function CuratorChat({
   const [freeText, setFreeText] = useState("");
   const [multiSelected, setMultiSelected] = useState<string[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
+  const questionRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
+  const question = state?.nextQuestion ?? null;
+  const questionKey = question
+    ? `${question.id}:${question.step}:${question.prompt}`
+    : "";
 
   useEffect(() => {
     // React 19 strict mode double-invokes effects; one session is enough.
@@ -49,12 +50,9 @@ export function CuratorChat({
     startedRef.current = true;
     startInterview(language)
       .then(setState)
-      .catch((startError) =>
-        setError(startError instanceof Error ? startError.message : t.chat.startFailed),
-      );
-    // Started once, in whatever language was active then. The profile carries
-    // that language onward, so switching later changes the interface but not
-    // the interview already under way.
+      .catch(() => setError(t.chat.startFailed));
+    // Language is fixed in the profile created by this call. The header below
+    // displays that fact instead of offering a misleading mid-interview toggle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -64,6 +62,14 @@ export function CuratorChat({
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     thread.scrollTo({ top: thread.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
   }, [state]);
+
+  useEffect(() => {
+    if (!questionKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      questionRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [questionKey]);
 
   async function send(answer: InterviewAnswerInput) {
     if (!state || busy) return;
@@ -75,14 +81,97 @@ export function CuratorChat({
       setFreeText("");
       setMultiSelected([]);
       if (next.complete) onComplete(next);
-    } catch (answerError) {
-      setError(answerError instanceof Error ? answerError.message : t.chat.errorGeneric);
+    } catch {
+      // Provider and validation internals belong in logs, not in visitor copy.
+      setError(t.chat.errorGeneric);
     } finally {
       setBusy(false);
     }
   }
 
-  const question = state?.nextQuestion ?? null;
+  const directQuestionFirst = question?.id === "curiosity" && question.allowFreeText;
+  const hasExplicitNoneOption = question?.options.some((option) => option.value === "none") ?? false;
+  const freeTextId = question ? `curator-free-text-${question.id}` : "curator-free-text";
+
+  const freeTextControl = question?.allowFreeText ? (
+    <form
+      className={styles.freeTextBlock}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!freeText.trim()) return;
+        void send({ questionId: question.id, freeText: freeText.trim() });
+      }}
+    >
+      <label htmlFor={freeTextId}>
+        {directQuestionFirst ? t.chat.askDirectly : t.chat.freeTextLabel}
+      </label>
+      <div className={styles.freeTextRow}>
+        <input
+          id={freeTextId}
+          value={freeText}
+          onChange={(event) => setFreeText(event.target.value)}
+          placeholder={question.freeTextPlaceholder ?? t.chat.freeTextPlaceholder}
+          maxLength={question.id === "open_question" ? 300 : 500}
+          disabled={busy}
+        />
+        <button type="submit" disabled={busy || !freeText.trim()}>
+          {t.chat.send}
+        </button>
+      </div>
+    </form>
+  ) : null;
+
+  const optionControls = question && question.options.length > 0 ? (
+    <>
+      <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
+        {question.options.map((option) => {
+          const selected = multiSelected.includes(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={selected ? styles.optionSelected : styles.option}
+              aria-pressed={question.multiSelect ? selected : undefined}
+              disabled={busy}
+              onClick={() => {
+                if (question.multiSelect) {
+                  // "Nothing in particular" is a complete, exclusive answer,
+                  // not one more topic to add before pressing Confirm.
+                  if (option.value === "none") {
+                    setMultiSelected([]);
+                    void send({ questionId: question.id, value: option.value });
+                    return;
+                  }
+                  setMultiSelected((current) =>
+                    current.includes(option.value)
+                      ? current.filter((value) => value !== option.value)
+                      : [...current.filter((value) => value !== "none"), option.value],
+                  );
+                  return;
+                }
+                void send({ questionId: question.id, value: option.value });
+              }}
+            >
+              <strong>{option.label}</strong>
+              {option.hint && <small>{option.hint}</small>}
+            </button>
+          );
+        })}
+      </div>
+      {question.multiSelect && (
+        <button
+          type="button"
+          className={styles.primaryAction}
+          disabled={busy}
+          onClick={() => void send({ questionId: question.id, value: multiSelected.join(",") })}
+        >
+          {multiSelected.length > 0
+            ? fill(t.chat.confirmCount, { n: multiSelected.length })
+            : t.chat.confirmNone}
+        </button>
+      )}
+    </>
+  ) : null;
 
   return (
     <section className={styles.chatShell} aria-label={t.chat.ariaLabel}>
@@ -103,11 +192,13 @@ export function CuratorChat({
               {question.step} / {question.totalSteps}
             </span>
           )}
-          <LanguageToggle
-            language={language}
-            onChange={setLanguage}
-            label={t.header.languageGroup}
-          />
+          <span
+            className={styles.languageLocked}
+            title={t.chat.languageLockedHint}
+            aria-label={`${t.chat.languageLocked}. ${t.chat.languageLockedHint}`}
+          >
+            {t.chat.languageLocked}
+          </span>
         </div>
       </header>
 
@@ -134,7 +225,11 @@ export function CuratorChat({
         ))}
 
         {question && (
-          <div className={styles.curatorBubble}>
+          <div
+            className={[styles.curatorBubble, styles.currentQuestion].join(" ")}
+            ref={questionRef}
+            tabIndex={-1}
+          >
             <CuratorSpeaker label={curatorLine} />
             {question.prompt.split("\n").map((line, index) => (
               <p key={index}>{line}</p>
@@ -151,76 +246,27 @@ export function CuratorChat({
       </div>
 
       {question && (
-        <div className={styles.answerArea}>
-          {question.options.length > 0 && (
-            <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
-              {question.options.map((option) => {
-                const selected = multiSelected.includes(option.value);
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={selected ? styles.optionSelected : styles.option}
-                    aria-pressed={question.multiSelect ? selected : undefined}
-                    disabled={busy}
-                    onClick={() => {
-                      if (question.multiSelect) {
-                        setMultiSelected((current) =>
-                          current.includes(option.value)
-                            ? current.filter((value) => value !== option.value)
-                            : [...current, option.value],
-                        );
-                        return;
-                      }
-                      void send({ questionId: question.id, value: option.value });
-                    }}
-                  >
-                    <strong>{option.label}</strong>
-                    {option.hint && <small>{option.hint}</small>}
-                  </button>
-                );
-              })}
-            </div>
+        <div className={styles.answerArea} aria-busy={busy}>
+          {busy && (
+            <p className={styles.thinkingStatus} role="status" aria-live="polite">
+              <span aria-hidden="true">◐</span>
+              {t.chat.thinking}
+            </p>
           )}
 
-          {question.multiSelect && (
-            <button
-              type="button"
-              className={styles.primaryAction}
-              disabled={busy}
-              onClick={() => void send({ questionId: question.id, value: multiSelected.join(",") })}
-            >
-              {multiSelected.length > 0
-                ? fill(t.chat.confirmCount, { n: multiSelected.length })
-                : t.chat.confirmNone}
-            </button>
+          {directQuestionFirst && freeTextControl}
+          {directQuestionFirst && optionControls ? (
+            <details className={styles.suggestionDetails}>
+              <summary>{t.chat.browseSuggestions}</summary>
+              <div className={styles.suggestionOptions}>{optionControls}</div>
+            </details>
+          ) : (
+            optionControls
           )}
-
-          {question.allowFreeText && (
-            <form
-              className={styles.freeTextRow}
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!freeText.trim()) return;
-                void send({ questionId: question.id, freeText: freeText.trim() });
-              }}
-            >
-              <input
-                value={freeText}
-                onChange={(event) => setFreeText(event.target.value)}
-                placeholder={question.freeTextPlaceholder ?? t.chat.freeTextPlaceholder}
-                maxLength={200}
-                disabled={busy}
-                aria-label={t.chat.freeTextLabel}
-              />
-              <button type="submit" disabled={busy || !freeText.trim()}>
-                {t.chat.send}
-              </button>
-            </form>
-          )}
+          {!directQuestionFirst && freeTextControl}
 
           <div className={styles.secondaryRow}>
-            {question.skippable && (
+            {question.skippable && !(question.multiSelect && hasExplicitNoneOption) && (
               <button
                 type="button"
                 disabled={busy}
@@ -229,9 +275,11 @@ export function CuratorChat({
                 {t.chat.skipQuestion}
               </button>
             )}
-            <button type="button" onClick={onSkip} disabled={busy}>
-              {t.chat.skipInterview}
-            </button>
+            {question.step < question.totalSteps && state && (
+              <button type="button" onClick={() => onSkip(state)} disabled={busy}>
+                {state.transcript.length > 0 ? t.chat.continueWithAnswers : t.chat.skipInterview}
+              </button>
+            )}
           </div>
         </div>
       )}

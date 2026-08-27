@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, type RootState } from "@react-three/fiber";
 import type { Exhibition } from "@/lib/types";
 import { logEvent } from "@/lib/api";
-import { usePrefersReducedMotion } from "@/lib/useClientCapability";
+import { useIsTouchPrimary, usePrefersReducedMotion } from "@/lib/useClientCapability";
 import { buildHallLayout, EYE_HEIGHT, type TourStop } from "./layout";
+import { clampStopIndex } from "./progress";
 import { FreeWalkCamera, GuidedCamera, type JoystickState } from "./Controls";
 import { HallScene } from "./Scene";
 import { HallOverlay } from "./HallOverlay";
@@ -23,19 +24,31 @@ export type HallMode = "guided" | "free";
  */
 export function Hall3D({
   exhibition,
+  initialStopIndex = 0,
+  onStopChange,
+  onRuntimeFailure,
   onExit,
 }: {
   exhibition: Exhibition;
+  initialStopIndex?: number;
+  onStopChange?: (stopIndex: number) => void;
+  onRuntimeFailure?: (error: unknown) => void;
   onExit: () => void;
 }) {
   const layout = useMemo(() => buildHallLayout(exhibition), [exhibition]);
-  const [stopIndex, setStopIndex] = useState(0);
+  const [stopIndex, setStopIndex] = useState(() =>
+    clampStopIndex(layout.stops.length, initialStopIndex),
+  );
   const [mode, setMode] = useState<HallMode>("guided");
   const [pointerLocked, setPointerLocked] = useState(false);
   const reduceMotion = usePrefersReducedMotion();
+  const touchPrimary = useIsTouchPrimary();
   const [cameraArrived, setCameraArrived] = useState(reduceMotion);
   const joystick = useRef<JoystickState>({ x: 0, y: 0 });
   const visitedRef = useRef<Set<string>>(new Set());
+  const canvasCleanupRef = useRef<(() => void) | null>(null);
+  const runtimeFailureRef = useRef(onRuntimeFailure);
+  const effectiveMode: HallMode = touchPrimary ? "guided" : mode;
 
   const stop: TourStop = layout.stops[stopIndex] ?? layout.stops[0];
 
@@ -45,6 +58,7 @@ export function Hall3D({
       if (clamped === stopIndex) return;
       setCameraArrived(false);
       setStopIndex(clamped);
+      onStopChange?.(clamped);
       const next = layout.stops[clamped];
       if (next?.kind === "chapter" && next.chapterId && !visitedRef.current.has(next.chapterId)) {
         visitedRef.current.add(next.chapterId);
@@ -57,7 +71,7 @@ export function Hall3D({
         logEvent("epilogue_reached", exhibition.id);
       }
     },
-    [exhibition.id, layout.stops, stopIndex],
+    [exhibition.id, layout.stops, onStopChange, stopIndex],
   );
 
   // Switching to guided from free walk snaps to the nearest stop rather than
@@ -70,13 +84,33 @@ export function Hall3D({
   }, [mode]);
 
   const enterFree = useCallback(() => {
+    if (touchPrimary) return;
     setMode("free");
     setCameraArrived(false);
     logEvent("free_walk_entered", exhibition.id);
-  }, [exhibition.id]);
+  }, [exhibition.id, touchPrimary]);
+
+  useEffect(() => () => canvasCleanupRef.current?.(), []);
 
   useEffect(() => {
-    if (mode !== "guided") return;
+    runtimeFailureRef.current = onRuntimeFailure;
+  }, [onRuntimeFailure]);
+
+  const handleCanvasCreated = useCallback(({ gl }: RootState) => {
+    canvasCleanupRef.current?.();
+    const canvas = gl.domElement;
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      runtimeFailureRef.current?.(new Error("WebGL context lost"));
+    };
+    canvas.addEventListener("webglcontextlost", handleContextLost, { once: true });
+    canvasCleanupRef.current = () => {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (effectiveMode !== "guided") return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
       const interactiveTarget = target instanceof HTMLElement
@@ -98,7 +132,7 @@ export function Hall3D({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, stopIndex, goTo]);
+  }, [effectiveMode, stopIndex, goTo]);
 
   const activeItemId = stop.kind === "artwork" ? stop.itemId ?? null : null;
 
@@ -106,10 +140,12 @@ export function Hall3D({
     <div className={styles.hallRoot}>
       <Canvas
         className={styles.canvas}
+        aria-hidden="true"
         shadows={false}
         dpr={[1, 1.75]}
         gl={{ antialias: true, powerPreference: "high-performance" }}
         camera={{ fov: 58, near: 0.1, far: 120, position: [0, EYE_HEIGHT, 6] }}
+        onCreated={handleCanvasCreated}
       >
         <Suspense fallback={null}>
           <HallScene
@@ -118,12 +154,12 @@ export function Hall3D({
             onSelectItem={(itemId) => {
               const index = layout.stops.findIndex((candidate) => candidate.itemId === itemId);
               if (index >= 0) {
-                if (mode === "free") enterGuided();
+                if (effectiveMode === "free") enterGuided();
                 goTo(index);
               }
             }}
           />
-          {mode === "guided" ? (
+          {effectiveMode === "guided" ? (
             <GuidedCamera
               layout={layout}
               stop={stop}
@@ -147,17 +183,18 @@ export function Hall3D({
         layout={layout}
         stop={stop}
         stopIndex={stopIndex}
-        mode={mode}
+        mode={effectiveMode}
         cameraArrived={cameraArrived}
         pointerLocked={pointerLocked}
         reduceMotion={reduceMotion}
+        freeWalkAvailable={!touchPrimary}
         onGoTo={goTo}
         onEnterGuided={enterGuided}
         onEnterFree={enterFree}
         onExit={onExit}
       />
 
-      {mode === "free" && <TouchJoystick stateRef={joystick} />}
+      {effectiveMode === "free" && <TouchJoystick stateRef={joystick} />}
     </div>
   );
 }

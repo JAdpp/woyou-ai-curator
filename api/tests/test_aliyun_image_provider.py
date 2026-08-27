@@ -19,6 +19,7 @@ from app.providers.aliyun_image import (
     POSTER_CREDIT,
     POSTER_NEGATIVE_PROMPT,
     POSTER_PANEL_RATIO,
+    POSTER_SOURCE_EDGE_CROP_RATIO,
     build_poster_visual_prompt,
 )
 
@@ -105,6 +106,9 @@ def test_generates_and_immediately_persists_safe_png(tmp_path: Path) -> None:
     assert "Layered terrain, water currents, mist" in prompt
     assert "editorial artwork layer for later typography" in prompt
     assert "Render no text or text-like feature at all" in prompt
+    assert "caption card" in prompt
+    assert "document fragment" in prompt
+    assert "marked paper sheet" in prompt
     assert re.search(r"[\u3400-\u9fff]", prompt) is None
 
     composed = result.image_path.read_bytes()
@@ -130,6 +134,7 @@ def test_generates_and_immediately_persists_safe_png(tmp_path: Path) -> None:
     assert metadata["textOverlay"]["credit"] == POSTER_CREDIT
     assert metadata["textOverlay"]["panelOpaque"] is True
     assert metadata["textOverlay"]["panelWidthPx"] == round(1536 * POSTER_PANEL_RATIO)
+    assert metadata["textOverlay"]["sourceEdgeCropRatio"] == POSTER_SOURCE_EDGE_CROP_RATIO
     assert metadata["seed"] == 20260806
     assert metadata["requestId"] == "req-test-123"
     assert metadata["sha256"] == result.sha256
@@ -314,6 +319,32 @@ def test_cat_context_maps_to_safe_feline_visual_brief_without_raw_copy() -> None
     assert re.search(r"[\u3400-\u9fff]", prompt) is None
 
 
+def test_model_request_prohibits_fake_curatorial_ephemera_in_both_prompt_channels() -> None:
+    """Prompt and negative prompt defend against the observed faux-copy failure.
+
+    The test deliberately checks both channels because some image backends give
+    more weight to ``negative_prompt`` while others mostly follow the primary
+    instruction.  The actual exhibition title remains compositor-owned.
+    """
+
+    prompt = build_poster_visual_prompt(poster_context())
+    forbidden = (
+        "pseudo-text",
+        "pseudo-writing",
+        "caption card",
+        "title card",
+        "label card",
+        "document fragment",
+        "marked paper sheet",
+        "seal",
+        "stamp",
+    )
+
+    for term in forbidden:
+        assert term in prompt
+        assert term in POSTER_NEGATIVE_PROMPT
+
+
 def test_opaque_panel_fully_replaces_bright_pseudo_text_source_pixels(tmp_path: Path) -> None:
     size = (1536, 864)
     panel_width = round(size[0] * POSTER_PANEL_RATIO)
@@ -362,6 +393,33 @@ def test_opaque_panel_fully_replaces_bright_pseudo_text_source_pixels(tmp_path: 
         panel_pixels = poster.crop((0, 0, panel_width, size[1])).convert("RGB").getdata()
         assert (255, 0, 255) not in panel_pixels
         assert (0, 255, 255) not in panel_pixels
+
+
+def test_source_edge_crop_discards_model_signature_and_qr_zone(tmp_path: Path) -> None:
+    size = (1536, 864)
+    edge_x = round(size[0] * POSTER_SOURCE_EDGE_CROP_RATIO)
+    edge_y = round(size[1] * POSTER_SOURCE_EDGE_CROP_RATIO)
+    source = Image.new("RGB", size, (73, 102, 126))
+    draw = ImageDraw.Draw(source)
+    # High-contrast pseudo-QR and pseudo-signature marks occupy the exact edge
+    # zone where image models tend to sign an otherwise text-free visual.
+    draw.rectangle((size[0] - edge_x, 0, size[0], size[1]), fill=(255, 0, 255))
+    draw.rectangle((0, size[1] - edge_y, size[0], size[1]), fill=(255, 0, 255))
+    buffer = io.BytesIO()
+    source.save(buffer, format="PNG")
+
+    provider = AliyunImageProvider(
+        api_key="fake-test-key",
+        api_host="https://workspace.cn-beijing.maas.aliyuncs.com",
+        output_dir=tmp_path,
+    )
+    composed, overlay = provider._compose_poster(buffer.getvalue(), poster_context())
+
+    assert overlay["sourceEdgeCropRatio"] == POSTER_SOURCE_EDGE_CROP_RATIO
+    assert overlay["sourceEdgeCropPixels"] == {"x": edge_x, "y": edge_y}
+    with Image.open(io.BytesIO(composed)) as poster:
+        visible_visual = poster.crop((round(size[0] * 0.55), 0, size[0], size[1]))
+        assert (255, 0, 255) not in visible_visual.convert("RGB").getdata()
 
 
 def test_colon_title_prefers_two_semantic_lines_without_changing_text(tmp_path: Path) -> None:

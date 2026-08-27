@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -55,6 +57,32 @@ class _DelayedPosterProvider:
         )
 
 
+class _BlockingLobbyAudio:
+    """A deliberately unresolved audio task used to prove job independence."""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_audio(self, exhibition, kind: str, reference=None) -> None:
+        self.calls.append((exhibition.id, kind))
+        assert kind == "lobby"
+        assert reference is None
+        self.started.set()
+        await asyncio.to_thread(self.release.wait, 2)
+
+
+class _FailingLobbyAudio:
+    def __init__(self) -> None:
+        self.called = threading.Event()
+
+    async def get_audio(self, _exhibition, kind: str, _reference=None) -> None:
+        assert kind == "lobby"
+        self.called.set()
+        raise RuntimeError("TTS transport detail must not affect curation")
+
+
 def test_frame_deadline_falls_back_before_the_job_safety_timeout(client) -> None:
     settings = replace(
         client.app.state.settings,
@@ -97,8 +125,31 @@ def test_job_deadline_message_does_not_blame_the_visitors_topic() -> None:
 
     job = asyncio.run(scenario())
     assert job.status == "failed"
+    assert job.error_code == "curation_timeout"
     assert "主题不受支持" in (job.error or "")
     assert "收窄主题" not in (job.error or "")
+
+
+def test_unexpected_job_error_is_sanitised_and_has_a_stable_code() -> None:
+    async def scenario():
+        jobs = JobStore(max_job_seconds=1)
+        job = jobs.create()
+
+        async def broken_work(_jobs: JobStore, _job_id: str) -> None:
+            raise RuntimeError("secret certificate path and proxy internals")
+
+        jobs.run(job.id, broken_work)
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if jobs.get(job.id).status == "failed":
+                break
+        return jobs.get(job.id)
+
+    job = asyncio.run(scenario())
+    assert job.status == "failed"
+    assert job.error_code == "curation_failed"
+    assert "问题仍然保留" in (job.error or "")
+    assert "certificate" not in (job.error or "")
 
 
 def test_interrupted_persisted_skeleton_becomes_an_honest_draft(client) -> None:
@@ -192,6 +243,66 @@ def test_final_poster_merge_never_moves_exhibition_updated_at_backwards(
     assert exhibition["updatedAt"] >= exhibition["poster"]["generatedAt"]
 
 
+def test_lobby_tts_prewarm_starts_after_completion_without_blocking_the_job(client) -> None:
+    service = _BlockingLobbyAudio()
+    client.app.state.audio_guide_service = service
+
+    created = client.post(
+        "/api/exhibitions/generate",
+        json={"profile": {"durationMinutes": 5}},
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["id"]
+
+    job = None
+    for _ in range(100):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.01)
+
+    assert job is not None and job["status"] == "completed", job
+    # The background task is now intentionally blocked, but the exhibition is
+    # already public.  A visitor never waits for this TTS request on the
+    # curation progress screen.
+    assert service.started.wait(timeout=1)
+    assert service.calls == [(job["exhibitionId"], "lobby")]
+    assert client.get(f"/api/jobs/{job_id}").json()["status"] == "completed"
+    assert client.get(f"/api/exhibitions/{job['exhibitionId']}").status_code == 200
+
+    service.release.set()
+    for _ in range(100):
+        if not client.app.state.audio_prewarm_tasks:
+            break
+        time.sleep(0.01)
+    assert not client.app.state.audio_prewarm_tasks
+
+
+def test_lobby_tts_prewarm_failure_keeps_the_exhibition_completed(client) -> None:
+    service = _FailingLobbyAudio()
+    client.app.state.audio_guide_service = service
+
+    created = client.post(
+        "/api/exhibitions/generate",
+        json={"profile": {"durationMinutes": 5}},
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["id"]
+
+    job = None
+    for _ in range(100):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.01)
+
+    assert job is not None and job["status"] == "completed", job
+    assert service.called.wait(timeout=1)
+    exhibition = client.get(f"/api/exhibitions/{job['exhibitionId']}").json()
+    assert exhibition["status"] == "ready"
+    assert client.get(f"/api/jobs/{job_id}").json()["error"] is None
+
+
 def test_deepseek_http_timeout_is_a_total_wall_clock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -218,3 +329,140 @@ def test_deepseek_http_timeout_is_a_total_wall_clock(
     with pytest.raises(ProviderError, match="wall-clock timeout"):
         asyncio.run(provider.generate_json("system", {"question": "test"}))
     assert perf_counter() - started < 0.20
+
+
+@pytest.mark.parametrize(
+    "transport_error",
+    [ssl.SSLError("raw TLS certificate details"), OSError("raw socket details")],
+)
+def test_deepseek_wraps_raw_transport_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    transport_error: BaseException,
+) -> None:
+    class BrokenClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            raise transport_error
+
+    monkeypatch.setattr("app.providers.deepseek.httpx.AsyncClient", BrokenClient)
+    provider = DeepSeekProvider(Settings(deepseek_api_key="test"))
+
+    with pytest.raises(ProviderError) as caught:
+        asyncio.run(provider.generate_json("system", {"question": "test"}))
+
+    assert caught.value.code == "provider_network_error"
+    assert "raw " not in str(caught.value)
+    assert "稍后重试" in caught.value.public_message
+
+
+def test_deepseek_preserves_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    class CancelledClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr("app.providers.deepseek.httpx.AsyncClient", CancelledClient)
+    provider = DeepSeekProvider(Settings(deepseek_api_key="test"))
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(provider.generate_json("system", {"question": "test"}))
+
+
+def test_raw_tls_failure_reaches_the_deterministic_generator_fallback(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class BrokenClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            raise ssl.SSLError("certificate verify failed: private proxy path")
+
+    monkeypatch.setattr("app.providers.deepseek.httpx.AsyncClient", BrokenClient)
+    settings = replace(
+        client.app.state.settings,
+        deepseek_api_key="test",
+        deepseek_timeout_seconds=1,
+        deepseek_frame_timeout_seconds=1,
+        deepseek_labels_timeout_seconds=1,
+    )
+    generator = ExhibitionGenerator(
+        settings,
+        client.app.state.collections,
+        provider=DeepSeekProvider(settings),
+    )
+
+    exhibition = asyncio.run(
+        generator.generate_from_profile(VisitorProfile(durationMinutes=5))
+    )
+
+    assert exhibition.status == "ready"
+    assert exhibition.versions.provider == "deterministic_fallback"
+    assert any("确定性模板" in limit for limit in exhibition.coverage_limits)
+
+
+def test_tls_failure_completes_the_public_job_without_leaking_ssl_details(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class BrokenClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            raise ssl.SSLError("private certificate and proxy details")
+
+    monkeypatch.setattr("app.providers.deepseek.httpx.AsyncClient", BrokenClient)
+    monkeypatch.setattr(
+        client.app.state.generator.provider,
+        "api_key",
+        "test",
+    )
+    created = client.post(
+        "/api/exhibitions/generate",
+        json={"profile": {"durationMinutes": 5}},
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["id"]
+
+    job = None
+    for _ in range(100):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.01)
+
+    assert job is not None and job["status"] == "completed", job
+    assert job["errorCode"] is None
+    assert job["error"] is None
+    exhibition = client.get(
+        f"/api/exhibitions/{job['exhibitionId']}"
+    ).json()
+    assert exhibition["versions"]["provider"] == "deterministic_fallback"

@@ -303,6 +303,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     interview_sessions: dict[str, InterviewState] = {}
     jobs = JobStore(max_job_seconds=settings.generation_job_timeout_seconds)
     poster_background_tasks: set[asyncio.Task[bool]] = set()
+    audio_prewarm_tasks: set[asyncio.Task[None]] = set()
     image_cache = ImageCache(
         settings.store_path.parent / "cache" / "objects",
         limit_bytes=settings.image_cache_limit_mb * 1024 * 1024,
@@ -322,6 +323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.interview_sessions = interview_sessions
     app.state.jobs = jobs
     app.state.poster_background_tasks = poster_background_tasks
+    app.state.audio_prewarm_tasks = audio_prewarm_tasks
     app.state.image_cache = image_cache
 
     @app.exception_handler(CollectionDataError)
@@ -644,15 +646,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # A stale answer is ignored by the state machine and leaves the
         # transcript untouched; there is nothing to speak to in that case.
         if len(updated.transcript) > before:
-            await _voice_over_interview(updated)
+            _voice_over_interview(updated)
         interview_sessions[interview_id] = updated
         return updated
 
-    async def _voice_over_interview(state: InterviewState) -> None:
+    def _voice_over_interview(state: InterviewState) -> None:
         """Attach the curator's spoken reply, and ground the next options in it.
 
-        Purely additive: the state machine has already decided the sequence, so
-        a provider failure leaves a working interview with one less sentence.
+        This path is deliberately local and deterministic: the next question
+        must not wait on an AI prose call. The original visitor question is
+        carried into every reply so an automatically inferred domain can never
+        replace it conversationally.
         """
         turn = state.transcript[-1]
         next_question = state.next_question
@@ -664,13 +668,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         collection = collections.get(state.collection_id)
         language = state.profile.language
-        voice = await interview_voice.compose(
-            generator.provider,
+        visitor_question = (
+            state.profile.open_question or state.profile.free_form_question or ""
+        )
+        voice = interview_voice.compose_immediate(
             question_id=turn.question_id,
             answer_label=turn.answer_label,
             free_text=turn.free_text,
             skipped=turn.skipped,
             topic=state.profile.curiosity_label,
+            visitor_question=visitor_question,
             available_domains=interviews.available_domains(collection, language),
             want_suggestions=wants_suggestions,
             language=language,
@@ -694,6 +701,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ------------------------------------------------------------------
     # Curation pipeline
     # ------------------------------------------------------------------
+
+    async def _prewarm_lobby_audio_quietly(exhibition_id: str) -> None:
+        """Populate the first guide segment without delaying a finished exhibition.
+
+        The guide remains an optional enhancement: failures here are logged for
+        operators but never change either the completed job or its exhibition.
+        Looking the service up on ``app.state`` also keeps the runtime and test
+        injection boundary identical to the public audio-guide endpoint.
+        """
+
+        service: AudioGuideService | None = app.state.audio_guide_service
+        if service is None:
+            return
+        try:
+            exhibition = store.get_exhibition(exhibition_id)
+            await service.get_audio(exhibition, "lobby")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - audio must stay best-effort
+            logger.warning(
+                "Lobby-audio prewarm failed for exhibition %s: %s",
+                exhibition_id,
+                type(exc).__name__,
+            )
+
+    def _schedule_lobby_audio_prewarm(exhibition_id: str) -> None:
+        """Retain a non-blocking TTS task until it resolves or fails safely."""
+
+        if app.state.audio_guide_service is None:
+            return
+        task = asyncio.create_task(_prewarm_lobby_audio_quietly(exhibition_id))
+        audio_prewarm_tasks.add(task)
+        task.add_done_callback(audio_prewarm_tasks.discard)
 
     async def _run_curation(profile: VisitorProfile, collection_id: str | None):
         """Return the coroutine a job runs, closing over the request payload."""
@@ -778,6 +818,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 saved = store.save_exhibition(exhibition)
 
                 job_store.complete(job_id, saved.id)
+                # First narration is intentionally not a pipeline step.  It
+                # starts only after the visit is complete and can overlap with
+                # the client entering the hall, so an upstream TTS delay or
+                # outage never lengthens curation progress.
+                _schedule_lobby_audio_prewarm(saved.id)
                 _event(
                     store,
                     EventName.GENERATION_COMPLETED,

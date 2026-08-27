@@ -62,7 +62,7 @@ AI 策展人叫 **彦远**，取自张彦远（约 815–877）——《历代�
 
 推荐链路是 `冻结馆藏 → 检索 → 重排 → 证据片段 → 大模型写作`。运行时不临时抓取博物馆 API，也不让模型凭常识先挑藏品：
 
-1. 17,245 件冻结对象走原有字段化 BM25：题名、文化包与证据域、材料/类型/标签、馆方说明分别赋权；中英文概念展开和“所有主题锚点必须命中”的硬门仍保留。
+1. 17,246 件冻结对象走原有字段化 BM25：题名、文化包与证据域、材料/类型/标签、馆方说明分别赋权；中英文概念展开和“所有主题锚点必须命中”的硬门仍保留。
 2. 同一问题由本地多语 embedding 同时检索对象级文档和全局馆方 `evidence[]`；后一条通路避免对象长文在 512-token 窗口后部被截断。两条 dense 排名先融合，再与 BM25 用 RRF 融合，不用余弦分数直接覆盖精确字段命中。
 3. 对融合候选再逐条比较馆方 `evidence[]`；**仅由 dense 找到**的对象必须有至少一条机构证据越过语义阈值，否则不能入选。dense-only 只对显式维护了多语别名策略的概念开放；未知的中英文主题都保留词法门控，避免向量库永远返回“最接近的五件”。猫、狗等具体实体即使开启 dense，也保留词法实体锚点。
 4. 跨文化请求最后使用 MMR，减少媒材、机构与文化区域重复。命中的证据片段排到对象证据列表前部，再进入受 `evidenceIds` 约束的写作阶段。
@@ -80,11 +80,11 @@ AI 策展人叫 **彦远**，取自张彦远（约 815–877）——《历代�
 
 ## 馆藏数据
 
-当前默认馆藏是 `data/collections/global_open/`：**17,245 件**具有公开图片的 CC0 / Public Domain 对象，来自 [Cleveland Museum of Art Open Access](https://openaccess-api.clevelandart.org/)、[The Metropolitan Museum of Art Open Access](https://metmuseum.github.io/) 与 [Art Institute of Chicago API](https://api.artic.edu/docs/)。这是面向 Demo 的全球首批 serving corpus，不是对世界文化或各馆藏规模的代表性抽样。
+当前默认馆藏是 `data/collections/global_open/`：**17,246 件**具有公开图片的 CC0 / Public Domain 对象，来自 [Cleveland Museum of Art Open Access](https://openaccess-api.clevelandart.org/)、[The Metropolitan Museum of Art Open Access](https://metmuseum.github.io/) 与 [Art Institute of Chicago API](https://api.artic.edu/docs/)。这是面向 Demo 的全球首批 serving corpus，不是对世界文化或各机构馆藏规模的代表性抽样。
 
-纳入门槛：机构公开声明 CC0 / Public Domain、图片可解析、有稳定机构对象页，并保留至少 2 条可定位证据片段。当前 **17,245 / 17,245** 件均完成远程图片校验，`objects.json` 的 SHA-256 与 manifest 一致。
+纳入门槛：机构公开声明 CC0 / Public Domain、图片可解析、有稳定机构对象页，并保留至少 2 条可定位证据片段。当前 **17,246 / 17,246** 件均完成远程图片校验，`objects.json` 的 SHA-256 与 manifest 一致。
 
-机构分布：Cleveland Museum of Art 15,199 件，The Met 1,046 件，Art Institute of Chicago 1,000 件。证据深度：6,126 件 `full`（含机构说明）/ 11,119 件 `thin`（主要是权威著录字段）。
+机构分布：Cleveland Museum of Art 15,200 件，The Met 1,046 件，Art Institute of Chicago 1,000 件。证据深度：6,126 件 `full`（含机构说明）/ 11,120 件 `thin`（主要是权威著录字段）。
 
 文化包是可重叠的语料分面，不把对象的文化身份压成唯一标签：
 
@@ -187,8 +187,11 @@ RAG_MAX_RESULTS=250
 # 首次构建全球馆藏：实时抓取并完整校验远程图片
 npm.cmd run data:import:global
 
-# 从已冻结快照重建；仍会重新验证 serving 图片
+# 从全部已冻结快照重建基础集、CMA 补充集和 AIC 切片；仍会重新验证 serving 图片
 npm.cmd run data:rebuild:global
+
+# 只重建 14,000 件 CMA 基础集与 Met 种子（通常不要单独使用）
+npm.cmd run data:rebuild:global:base
 
 # 为当前全球馆藏补充 CMA 的南亚/东南亚对象
 npm.cmd run data:supplement:global
@@ -204,7 +207,7 @@ npm.cmd run data:import
 npm.cmd run data:rebuild
 ```
 
-导入器每次创建新的原始快照，不静默覆盖来源证据；输出文件用原子替换写入。更换数据版本后应重跑回归集。全球导入器按机构部门分层取样，并保留未命中当前证据域但满足权利、图片和证据门槛的对象，避免把分类规则误当成纳入门槛。
+导入器每次创建新的原始快照，不静默覆盖来源证据；输出文件用原子替换写入。完整离线重建会依次恢复基础集、CMA 南亚／东南亚补充快照与 AIC 分层切片，避免只运行基础导入器时悄然减少馆藏。更换数据版本后应重跑回归集。全球导入器按机构部门分层取样，并保留未命中当前证据域但满足权利、图片和证据门槛的对象，避免把分类规则误当成纳入门槛。
 
 ## 质量检查
 
@@ -224,8 +227,8 @@ npm.cmd run test
 最近一次结果：
 
 ```
-collection      global_open @ 20260808-17245-rights1
-objects         17245 loaded, 17245 with evidence
+collection      global_open @ 20260826-17246
+objects         17246 loaded, 17246 with evidence
 evidence depth  6126 full / 11119 thin
 ok    answerability   26 questions, {'supported': 20, 'partially_supported': 3, 'unsupported': 3}
 ok    exhibitions     48 generated, roles {opening:48, context:132, core_evidence:124, contrast:48, synthesis:48}
@@ -236,7 +239,7 @@ ok    personalisation mean Jaccard distance 0.93
 
 - **最近一次旧提示词生成耗时约 117 秒**，高于 01b 的 P95 < 60 秒目标。现在仍是框架 + 按章并发展签，海报并行；但框架新增受控证据摘要与 claim/evidence map 后尚未重新进行冻结环境计时，因此不把旧版“主题 23 秒抵达”当作当前结果。要真正达标仍可能需要流式解析或更细的阶段缓存。
 - **3D 交互与响应式布局已经过真实浏览器运行验收**：覆盖桌面与 433 px 移动端、展签拖拽/键盘移动/缩放/收纳、横版海报与馆藏图回退、上下导航可见性。尚未做长时间帧率、显存占用与不同 GPU 下 WebGL 光照基准测试。
-- 这版全球广度仍主要来自 Cleveland Museum of Art（15,199 / 17,245）；The Met 1,046 件、AIC 1,000 件是分层种子，因此不能把机构分布或文化包件数解释成世界馆藏分布。下一批应优先扩 The Met 全球 Public Domain 池，并引入第四个权利与供图边界清楚的机构。
+- 这版全球广度仍主要来自 Cleveland Museum of Art（15,200 / 17,246）；The Met 1,046 件、AIC 1,000 件是分层种子，因此不能把机构分布或文化包件数解释成世界馆藏分布。下一批应优先扩 The Met 全球 Public Domain 池，并引入第四个权利与供图边界清楚的机构。
 - 「交流与流动」虽由 84 件增至 118 件，仍是当前最稀疏的证据域；大洋洲文化包 103 件，也低于每包 200 件的内部目标。两者是下一轮定向补库优先级，而不是用更多欧洲/制作类对象稀释问题。
 - 517 件合格对象暂未命中十个证据域、234 件未稳定分配到文化包；它们被明确保留并计入 manifest，供后续本体规则改进，而不是静默丢弃。
 - AIC 图片请求目前依赖其文档建议的项目识别头；Cloudflare 规则若再次变化，需向 AIC 获取受支持的接入方式。AIC 官方同时要求图片单线程、约一秒间隔，因此不适合未经分层筛选就全量逐图验证。

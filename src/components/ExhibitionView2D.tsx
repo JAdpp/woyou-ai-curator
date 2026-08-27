@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type {
@@ -27,6 +27,8 @@ import {
 } from "@/lib/generationRecord";
 import { getImageLicenseLabel, getLegacyRightsLabel } from "@/lib/rights";
 import { EpilogueConversation } from "./EpilogueConversation";
+import { buildHallLayout } from "./hall/layout";
+import { clampStopIndex, stopAnchor } from "./hall/progress";
 import styles from "./view2d.module.css";
 
 type ViewCopy = ReturnType<typeof useLanguage>["t"]["view"];
@@ -198,21 +200,30 @@ function ItemBlock({
   exhibitionId,
   decision,
   evidenceIndex,
+  tourStopIndex,
+  contentLang,
 }: {
   item: ExhibitionItem;
   index: number;
   exhibitionId: string;
   decision?: CuratorialObjectDecision;
   evidenceIndex: CuratorialEvidenceIndex;
+  tourStopIndex: number;
+  contentLang: string;
 }) {
-  const { t: copy } = useLanguage();
+  const { language, t: copy } = useLanguage();
   const t = copy.view;
   const [sourceOpen, setSourceOpen] = useState(false);
   const imageLicenseLabel = getImageLicenseLabel(item.object);
   const legacyRightsLabel = getLegacyRightsLabel(item.object);
 
   return (
-    <article className={styles.item} id={`item-${item.id}`}>
+    <article
+      className={styles.item}
+      id={`item-${item.id}`}
+      data-tour-stop={tourStopIndex}
+      tabIndex={-1}
+    >
       <div className={styles.itemVisual}>
         {/* Institution-hosted image, served via our proxy at texture size.
             Never generated or redrawn. */}
@@ -224,6 +235,15 @@ function ItemBlock({
           sizes="(max-width: 900px) 90vw, 440px"
           unoptimized
         />
+        <p className={styles.altTextSource}>
+          {item.object.altTextSource === "institution_authored"
+            ? language === "en"
+              ? "Image description supplied by the holding institution."
+              : "图像替代文字由来源机构提供。"
+            : language === "en"
+              ? "Alternative text is assembled from catalogue fields; it is not a visually verified description."
+              : "替代文字由题名、年代等著录字段组成，并非经视觉核验的图像描述。"}
+        </p>
         <p className={styles.credit}>
           <span>{t.image}: {imageLicenseLabel}</span>
           <a
@@ -245,13 +265,13 @@ function ItemBlock({
             <span className={styles.depthTag}>{t.tombstoneOnly}</span>
           )}
         </p>
-        <h3>{item.displayTitle || item.object.titleOriginal || item.object.title}</h3>
+        <h3 lang={contentLang}>{item.displayTitle || item.object.titleOriginal || item.object.title}</h3>
         <p className={styles.original}>{item.object.title}</p>
         <p className={styles.tombstone}>
           {[item.object.date, item.object.medium, item.object.culture].filter(Boolean).join(" · ")}
         </p>
 
-        <div className={styles.label}>
+        <div className={styles.label} lang={contentLang}>
           {item.labelSentences.map((sentence) => (
             <p key={sentence.id} data-type={sentence.type}>
               {sentence.text}
@@ -423,10 +443,18 @@ export function ExhibitionView2D({
   exhibition,
   onEnterHall,
   webglAvailable,
+  initialStopIndex = 0,
+  restoreInitialFocus = false,
+  onActiveStopChange,
+  hallRuntimeFailed = false,
 }: {
   exhibition: Exhibition;
   onEnterHall?: () => void;
   webglAvailable?: boolean;
+  initialStopIndex?: number;
+  restoreInitialFocus?: boolean;
+  onActiveStopChange?: (stopIndex: number) => void;
+  hallRuntimeFailed?: boolean;
 }) {
   const { language, t: copy } = useLanguage();
   const t = copy.view;
@@ -441,15 +469,96 @@ export function ExhibitionView2D({
     : null;
   const evidenceIndex = buildCuratorialEvidenceIndex(exhibition.items);
   const generationNotice = generationFallbackNotice(exhibition.versions.provider);
+  const layout = useMemo(() => buildHallLayout(exhibition), [exhibition]);
+  const safeInitialStopIndex = clampStopIndex(layout.stops.length, initialStopIndex);
+  const mainRef = useRef<HTMLElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const lastVisibleStopRef = useRef(safeInitialStopIndex);
+  const restoredFocusRef = useRef(false);
+  const contentLang = writtenIn === "en" ? "en" : "zh-CN";
+  const chapterStopIndex = useMemo(() => {
+    const index = new Map<string, number>();
+    layout.stops.forEach((stop, stopIndex) => {
+      if (stop.kind === "chapter" && stop.chapterId) index.set(stop.chapterId, stopIndex);
+    });
+    return index;
+  }, [layout.stops]);
+  const itemStopIndex = useMemo(() => {
+    const index = new Map<string, number>();
+    layout.stops.forEach((stop, stopIndex) => {
+      if (stop.kind === "artwork" && stop.itemId) index.set(stop.itemId, stopIndex);
+    });
+    return index;
+  }, [layout.stops]);
+  const epilogueStopIndex = layout.stops.findIndex((stop) => stop.kind === "epilogue");
   let runningIndex = 0;
 
+  // Returning from 3D lands on the same chapter or object and places keyboard
+  // focus there. Stop zero is left alone so a fresh 2D visit keeps the normal
+  // browser focus order.
+  useEffect(() => {
+    if (!restoreInitialFocus || restoredFocusRef.current || safeInitialStopIndex <= 0) return;
+    const anchor = stopAnchor(layout.stops[safeInitialStopIndex]);
+    if (!anchor) return;
+    restoredFocusRef.current = true;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(anchor);
+      target?.scrollIntoView({ block: "start" });
+      target?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [exhibition.id, layout.stops, restoreInitialFocus, safeInitialStopIndex]);
+
+  // A lightweight scroll spy keeps the 3D resume point aligned with what the
+  // reader is actually looking at in the long-form page.
+  useEffect(() => {
+    const root = pageRef.current;
+    if (!root || !onActiveStopChange) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-tour-stop]"));
+      if (nodes.length === 0) return;
+      const readingLine = window.innerHeight * 0.34;
+      let active = nodes[0];
+      for (const node of nodes) {
+        if (node.getBoundingClientRect().top <= readingLine) active = node;
+        else break;
+      }
+      const next = clampStopIndex(layout.stops.length, active.dataset.tourStop);
+      if (next === lastVisibleStopRef.current) return;
+      lastVisibleStopRef.current = next;
+      onActiveStopChange(next);
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(update);
+    };
+    if (restoreInitialFocus && safeInitialStopIndex > 0) schedule();
+    else update();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [layout.stops.length, onActiveStopChange, restoreInitialFocus, safeInitialStopIndex]);
+
   return (
-    <div className={styles.page}>
-      <a href="#exhibition-body" className={styles.skipLink}>
+    <div className={styles.page} ref={pageRef}>
+      <a
+        href="#exhibition-body"
+        className={styles.skipLink}
+        onClick={(event) => {
+          event.preventDefault();
+          mainRef.current?.focus({ preventScroll: true });
+          mainRef.current?.scrollIntoView({ block: "start" });
+        }}
+      >
         {t.skipToContent}
       </a>
 
-      <header className={styles.hero}>
+      <header className={styles.hero} data-tour-stop={0}>
         <ExhibitionPosterVisual
           key={posterUrl ?? "collection-collage"}
           exhibition={exhibition}
@@ -463,10 +572,10 @@ export function ExhibitionView2D({
               {copy.exhibition.languageNoticeBody}
             </p>
           )}
-          <h1>{exhibition.title}</h1>
-          {exhibition.subtitle && <p className={styles.subtitle}>{exhibition.subtitle}</p>}
-          <p className={styles.thesis}>{exhibition.curatorialThesis}</p>
-          <p className={styles.coreAnswer}>{exhibition.coreAnswer}</p>
+          <h1 lang={contentLang}>{exhibition.title}</h1>
+          {exhibition.subtitle && <p className={styles.subtitle} lang={contentLang}>{exhibition.subtitle}</p>}
+          <p className={styles.thesis} lang={contentLang}>{exhibition.curatorialThesis}</p>
+          <p className={styles.coreAnswer} lang={contentLang}>{exhibition.coreAnswer}</p>
 
           <div className={styles.heroActions}>
             {onEnterHall && webglAvailable && (
@@ -480,6 +589,13 @@ export function ExhibitionView2D({
           {onEnterHall && !webglAvailable && (
             <p className={styles.webglNote}>
               {t.noWebgl}
+            </p>
+          )}
+          {onEnterHall && hallRuntimeFailed && webglAvailable && (
+            <p className={styles.webglNote} role="alert">
+              {language === "en"
+                ? "The 3D hall could not finish loading, so this exhibition has returned to the complete 2D version. Your place is preserved; you can try the hall again."
+                : "3D 展厅没有完整载入，已回到同一展览的完整 2D 版本。当前位置已保留，你也可以再次尝试进入。"}
             </p>
           )}
         </div>
@@ -500,15 +616,21 @@ export function ExhibitionView2D({
         </ol>
       </nav>
 
-      <main id="exhibition-body">
+      <main id="exhibition-body" ref={mainRef} tabIndex={-1}>
         {exhibition.chapters.map((chapter) => (
-          <section key={chapter.id} className={styles.chapter} id={`chapter-${chapter.id}`}>
+          <section
+            key={chapter.id}
+            className={styles.chapter}
+            id={`chapter-${chapter.id}`}
+            data-tour-stop={chapterStopIndex.get(chapter.id) ?? 0}
+            tabIndex={-1}
+          >
             <header className={styles.chapterHead}>
               <p className={styles.eyebrow}>
                 {fill(t.chapterOf, { n: chapter.order + 1, total: exhibition.chapters.length })}
               </p>
-              <h2>{chapter.title}</h2>
-              <p>{chapter.leadIn}</p>
+              <h2 lang={contentLang}>{chapter.title}</h2>
+              <p lang={contentLang}>{chapter.leadIn}</p>
             </header>
             {chapter.itemIds.map((itemId) => {
               const item = itemsById.get(itemId);
@@ -521,15 +643,22 @@ export function ExhibitionView2D({
                   exhibitionId={exhibition.id}
                   decision={findCuratorialDecision(exhibition.curatorialBrief, item)}
                   evidenceIndex={evidenceIndex}
+                  tourStopIndex={itemStopIndex.get(item.id) ?? 0}
+                  contentLang={contentLang}
                 />
               );
             })}
           </section>
         ))}
 
-        <section className={styles.epilogue} id="epilogue">
+        <section
+          className={styles.epilogue}
+          id="epilogue"
+          data-tour-stop={epilogueStopIndex >= 0 ? epilogueStopIndex : layout.stops.length - 1}
+          tabIndex={-1}
+        >
           <h2>{t.epilogue}</h2>
-          <p className={styles.epilogueText}>{exhibition.epilogue.text}</p>
+          <p className={styles.epilogueText} lang={contentLang}>{exhibition.epilogue.text}</p>
           <EpilogueConversation
             exhibitionId={exhibition.id}
             openQuestions={exhibition.epilogue.openQuestions}

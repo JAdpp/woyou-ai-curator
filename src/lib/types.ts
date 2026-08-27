@@ -488,6 +488,8 @@ export interface GenerationJob {
   steps: JobStep[];
   exhibitionId?: string | null;
   error?: string | null;
+  /** Stable public category for recovery UI; provider internals never belong here. */
+  errorCode?: string | null;
 }
 
 export interface AnalyticsSummary {

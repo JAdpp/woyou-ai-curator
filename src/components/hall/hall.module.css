@@ -30,6 +30,18 @@
   pointer-events: auto;
 }
 
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .eyebrow {
   display: block;
   font-size: 0.68rem;
@@ -90,6 +102,10 @@
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
 }
 
 .ghostButton:hover:not(:disabled),
@@ -125,6 +141,7 @@
   font-size: 0.82rem;
   padding: 0.4rem 0.85rem;
   cursor: pointer;
+  min-height: 2.75rem;
 }
 
 .modeActive {
@@ -298,6 +315,7 @@
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  min-height: 2.75rem;
 }
 
 .primaryAction:hover { background: #f0d69f; }
@@ -475,6 +493,10 @@
   color: inherit;
   text-decoration: none;
   cursor: pointer;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
 }
 
 .sourcePanel {
@@ -521,7 +543,13 @@
 .epilogueText { line-height: 1.85; margin: 0 0 1.2rem; font-size: 1.05rem; }
 
 .boundaryDetails { margin: 1.2rem 0; font-size: 0.84rem; }
-.boundaryDetails summary { cursor: pointer; opacity: 0.7; }
+.boundaryDetails summary {
+  cursor: pointer;
+  opacity: 0.7;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+}
 .boundaryDetails ul { margin: 0.6rem 0 0; padding-left: 1.1rem; }
 .boundaryDetails li { line-height: 1.7; margin-bottom: 0.35rem; opacity: 0.88; }
 
@@ -535,6 +563,7 @@
   font: inherit;
   color: inherit;
   cursor: pointer;
+  min-height: 2.75rem;
 }
 
 /* ---------------------------------------------------------- bottom bar */
@@ -559,6 +588,7 @@
   border-radius: 0.32rem;
   cursor: pointer;
   white-space: nowrap;
+  min-height: 2.75rem;
 }
 
 .bottomBar > button:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -572,29 +602,49 @@
   margin: 0;
   padding: 0;
   overflow-x: auto;
-  justify-content: center;
+  justify-content: safe center;
   scrollbar-width: none;
 }
 
 .stopTrack::-webkit-scrollbar { display: none; }
 
+.stopTrack li {
+  flex: 0 0 2.75rem;
+  display: grid;
+  place-items: center;
+}
+
 .stopDot,
 .stopActive {
-  width: 0.55rem;
-  height: 0.55rem;
+  position: relative;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 999px;
   border: none;
   padding: 0;
   cursor: pointer;
+  background: transparent;
+}
+
+.stopDot::after,
+.stopActive::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
   background: rgba(243, 239, 230, 0.3);
+  transform: translate(-50%, -50%);
   transition: transform 0.2s, background 0.2s;
 }
 
-.stopDot[data-kind="chapter"],
-.stopActive[data-kind="chapter"] { border-radius: 2px; width: 0.75rem; }
+.stopDot[data-kind="chapter"]::after,
+.stopActive[data-kind="chapter"]::after { border-radius: 2px; width: 0.75rem; }
 
-.stopActive { background: #e8c98a; transform: scale(1.5); }
-.stopDot:hover { background: rgba(243, 239, 230, 0.65); }
+.stopActive::after { background: #e8c98a; transform: translate(-50%, -50%) scale(1.5); }
+.stopDot:hover::after { background: rgba(243, 239, 230, 0.65); }
 
 .stopDot:focus-visible,
 .stopActive:focus-visible { outline: 2px solid #e8c98a; outline-offset: 3px; }
@@ -653,7 +703,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .lobbyCard, .chapterCard, .labelCard, .epilogueCard { animation: none; }
-  .stopDot, .stopActive { transition: none; }
+  .stopDot::after, .stopActive::after { transition: none; }
 }
 
 @media (max-width: 640px) {
@@ -692,11 +742,11 @@
   }
   .ghostButton,
   .accessibleLink {
-    padding: 0.34rem 0.55rem;
+    padding: 0.4rem 0.55rem;
     font-size: 0.74rem;
   }
   .modeToggle button {
-    padding: 0.34rem 0.58rem;
+    padding: 0.4rem 0.58rem;
     font-size: 0.74rem;
   }
   .bottomBar {
@@ -704,8 +754,24 @@
     padding: 0.7rem 0.6rem 0.9rem;
   }
   .bottomBar > button {
-    padding: 0.42rem 0.55rem;
+    padding: 0.45rem 0.55rem;
     font-size: 0.75rem;
   }
+  .dragHandle,
+  .labelWindowActions button {
+    min-height: 2.75rem;
+  }
+  .labelWindowActions button { min-width: 2.75rem; height: 2.75rem; }
   .lobbyStats { gap: 1.1rem; }
+}
+
+@media (pointer: coarse) {
+  .dragHandle,
+  .labelWindowActions button {
+    min-height: 2.75rem;
+  }
+  .labelWindowActions button {
+    min-width: 2.75rem;
+    height: 2.75rem;
+  }
 }

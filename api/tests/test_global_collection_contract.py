@@ -75,6 +75,21 @@ def test_global_router_keeps_unmatched_qualified_objects() -> None:
     assert routed["id"] == "test:1"
 
 
+def test_loader_repairs_stale_iranian_arts_of_asia_pack() -> None:
+    obj = normalize_object(
+        _raw(
+            creator="Iran",
+            culture="Iran",
+            place="Iran",
+            department="Arts of Asia",
+            culturePackIds=["east_asia"],
+        )
+    )
+
+    assert obj is not None
+    assert obj.culture_pack_ids == ["west_asia_north_africa"]
+
+
 def test_dedupe_uses_source_identity_not_generic_title() -> None:
     first = _raw(id="test:1", sourceId="1", title="Bowl", date="", creator="")
     second = _raw(id="test:2", sourceId="2", title="Bowl", date="", creator="")

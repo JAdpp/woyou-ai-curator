@@ -53,10 +53,13 @@ export function EpilogueConversation({
     EMPTY_EPILOGUE_CONVERSATION,
   );
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const compactPrimaryRef = useRef<HTMLButtonElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const idCounterRef = useRef(0);
   const openedLoggedRef = useRef(false);
+  const restoreCompactFocusRef = useRef(false);
+  const wasPendingRef = useRef(false);
   const formHintId = useId();
   const validationId = useId();
 
@@ -68,9 +71,30 @@ export function EpilogueConversation({
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   useEffect(() => {
-    if (!open) return;
-    inputRef.current?.focus({ preventScroll: true });
-  }, [open, conversation.selectedOpenQuestion]);
+    if (open) {
+      inputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (!restoreCompactFocusRef.current) return;
+    restoreCompactFocusRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      compactPrimaryRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, skipped, conversation.selectedOpenQuestion]);
+
+  // Submitting disables the textarea, which causes browsers to drop focus.
+  // Return it after either a reply or a recoverable failure so keyboard users
+  // can continue without traversing the whole discussion again.
+  useEffect(() => {
+    const wasPending = wasPendingRef.current;
+    wasPendingRef.current = pending;
+    if (!wasPending || pending || !open) return;
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, pending]);
 
   useEffect(() => {
     if (!open || conversation.turns.length === 0) return;
@@ -90,6 +114,7 @@ export function EpilogueConversation({
   };
 
   const closeConversation = (reason: "collapse" | "skip") => {
+    restoreCompactFocusRef.current = true;
     if (reason === "skip") {
       controllerRef.current?.abort();
       setPending(false);
@@ -230,7 +255,12 @@ export function EpilogueConversation({
           </div>
         </div>
         <div className={styles.compactActions}>
-          <button type="button" className={styles.primaryButton} onClick={openConversation}>
+          <button
+            ref={compactPrimaryRef}
+            type="button"
+            className={styles.primaryButton}
+            onClick={openConversation}
+          >
             {skipped ? t.reopen : t.start}
           </button>
           {!skipped && (

@@ -31,6 +31,8 @@ from sources.base import (  # noqa: E402
     COLLECTIONS_ROOT,
     HttpClient,
     Snapshot,
+    SourceObject,
+    sha256_bytes,
     utc_now,
     verify_images,
 )
@@ -39,11 +41,110 @@ from sources.base import (  # noqa: E402
 DEFAULT_DEPARTMENT = "Indian and Southeast Asian Art"
 
 
+def _snapshot_source_dir(raw_root: Path, requested: str) -> Path:
+    if requested != "latest":
+        source_dir = raw_root / "snapshots" / requested / "cma-supplement"
+        if not source_dir.is_dir():
+            raise SystemExit(f"CMA supplement snapshot not found: {source_dir}")
+        return source_dir
+    candidates = sorted(
+        raw_root.glob("snapshots/*/cma-supplement"), reverse=True
+    )
+    for candidate in candidates:
+        if (candidate / "raw_manifest.json").is_file() and (
+            candidate / "selection" / "selected.json"
+        ).is_file():
+            return candidate
+    raise SystemExit(f"no rebuildable CMA supplement snapshot under {raw_root}")
+
+
+def _verified_snapshot_bytes(
+    collection_dir: Path,
+    entry: dict[str, object],
+) -> bytes:
+    relative_path = str(entry.get("path") or "")
+    path = (collection_dir / relative_path).resolve()
+    if not relative_path or not path.is_relative_to(collection_dir.resolve()):
+        raise RuntimeError("CMA supplement snapshot path escaped collection")
+    content = path.read_bytes()
+    if sha256_bytes(content) != str(entry.get("sha256") or ""):
+        raise RuntimeError(f"CMA supplement snapshot SHA mismatch: {relative_path}")
+    return content
+
+
+def _rebuild_from_snapshot(
+    collection_dir: Path,
+    raw_root: Path,
+    requested: str,
+    target: int,
+) -> tuple[list[SourceObject], str]:
+    """Re-map the frozen selection without silently fetching a newer sample."""
+
+    source_dir = _snapshot_source_dir(raw_root, requested)
+    manifest = json.loads(
+        (source_dir / "raw_manifest.json").read_text(encoding="utf-8")
+    )
+    entries = [
+        entry
+        for entry in (manifest.get("entries") or [])
+        if isinstance(entry, dict)
+    ]
+    selection_entry = next(
+        (entry for entry in entries if entry.get("kind") == "selection"),
+        None,
+    )
+    if selection_entry is None:
+        raise RuntimeError("CMA supplement snapshot has no selection receipt")
+    selection = json.loads(
+        _verified_snapshot_bytes(collection_dir, selection_entry).decode("utf-8")
+    )
+    selected_ids = [
+        str(object_id)
+        for object_id in (selection.get("selectedObjectIds") or [])
+        if str(object_id)
+    ][:target]
+    if len(selected_ids) < target:
+        raise RuntimeError(
+            f"CMA supplement snapshot selected {len(selected_ids)} objects; "
+            f"cannot rebuild target {target}"
+        )
+
+    mapped_by_id: dict[str, SourceObject] = {}
+    for entry in entries:
+        if entry.get("kind") != "search" or str(entry.get("name") or "").endswith(
+            "-probe"
+        ):
+            continue
+        payload = json.loads(
+            _verified_snapshot_bytes(collection_dir, entry).decode("utf-8")
+        )
+        page_path = str(entry.get("path") or "")
+        for obj in cma_global._map_page(cma_global._records(payload), page_path):
+            mapped_by_id[obj.id] = obj
+
+    missing = [object_id for object_id in selected_ids if object_id not in mapped_by_id]
+    if missing:
+        raise RuntimeError(
+            f"CMA supplement snapshot is missing {len(missing)} selected records"
+        )
+    snapshot_id = source_dir.parent.name
+    rebuilt = [mapped_by_id[object_id] for object_id in selected_ids]
+    log(f"[supplement] rebuilt {len(rebuilt)} records from snapshot {snapshot_id}")
+    return rebuilt, snapshot_id
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--collection-id", default=DEFAULT_COLLECTION_ID)
     parser.add_argument("--department", default=DEFAULT_DEPARTMENT)
     parser.add_argument("--target", type=int, default=1200)
+    parser.add_argument(
+        "--from-snapshot",
+        nargs="?",
+        const="latest",
+        metavar="SNAPSHOT_ID",
+        help="Rebuild the frozen CMA supplement instead of fetching a new sample.",
+    )
     args = parser.parse_args()
 
     collection_id = args.collection_id.strip()
@@ -62,22 +163,31 @@ def main() -> int:
         raise SystemExit("refusing to supplement a collection before its base image check passes")
 
     raw_root = collection_dir / "raw"
-    snapshot = Snapshot(raw_root, "cma-supplement")
-    supplement = cma_global.fetch_department(
-        HttpClient(min_interval=0.25),
-        snapshot,
-        args.department,
-        args.target,
-        log,
-    )
-    snapshot.store(
-        "selection",
-        "selected",
-        "urn:woyou:global-open:cma-supplement-selection",
-        _source_selection_bytes(supplement),
-        200,
-    )
-    snapshot.finalize()
+    if args.from_snapshot:
+        supplement, snapshot_id = _rebuild_from_snapshot(
+            collection_dir,
+            raw_root,
+            args.from_snapshot,
+            args.target,
+        )
+    else:
+        snapshot = Snapshot(raw_root, "cma-supplement")
+        supplement = cma_global.fetch_department(
+            HttpClient(min_interval=0.25),
+            snapshot,
+            args.department,
+            args.target,
+            log,
+        )
+        snapshot.store(
+            "selection",
+            "selected",
+            "urn:woyou:global-open:cma-supplement-selection",
+            _source_selection_bytes(supplement),
+            200,
+        )
+        snapshot.finalize()
+        snapshot_id = snapshot.id
 
     supplement = _route_source_objects(supplement)
     log(f"[images] validating {len(supplement)} supplement image URLs…")
@@ -102,7 +212,7 @@ def main() -> int:
     _validate_before_emit(combined, allow_small=False, require_image_check=True)
 
     snapshot_ids = dict(manifest.get("snapshotIds") or {})
-    snapshot_ids[f"cmaSupplement:{args.department}"] = snapshot.id
+    snapshot_ids[f"cmaSupplement:{args.department}"] = snapshot_id
     version = f"{utc_now()[:10].replace('-', '')}-{len(combined)}"
     _emit(
         collection_dir,

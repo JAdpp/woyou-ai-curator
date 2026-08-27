@@ -37,11 +37,16 @@ def _normalized_source_text(value: str) -> str:
 
 def _institution_fact_is_extractive(sentence_text: str, evidence_texts: list[str]) -> bool:
     sentence = _normalized_source_text(sentence_text)
-    if len(sentence) < 8:
+    if not sentence:
         return False
     for evidence_text in evidence_texts:
         evidence = _normalized_source_text(evidence_text)
-        if sentence in evidence or evidence in sentence:
+        # Short catalogue facts such as "Dogs" or "Jade" are still exact
+        # institution text.  The length floor only protects fuzzy substring
+        # matching; it must not invalidate a byte-for-byte normalized quote.
+        if sentence == evidence:
+            return True
+        if len(sentence) >= 8 and (sentence in evidence or evidence in sentence):
             return True
     return False
 

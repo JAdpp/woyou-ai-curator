@@ -169,14 +169,14 @@ def test_custom_question_is_not_replaced_by_model_suggestions(
 ) -> None:
     calls: list[bool] = []
 
-    async def fake_compose(*_args: object, **kwargs: object) -> InterviewVoice:
+    def fake_compose(**kwargs: object) -> InterviewVoice:
         calls.append(bool(kwargs["want_suggestions"]))
         return InterviewVoice(
             reply="我会先记住你刚才选的方向。",
             suggestions=("无关问题一？", "无关问题二？", "无关问题三？"),
         )
 
-    monkeypatch.setattr("app.main.interview_voice.compose", fake_compose)
+    monkeypatch.setattr("app.main.interview_voice.compose_immediate", fake_compose)
 
     state = client.post("/api/interview/start").json()
     state = _answer_interview(client, state, value="__unsure__")
@@ -188,7 +188,7 @@ def test_custom_question_is_not_replaced_by_model_suggestions(
     assert state["nextQuestion"]["options"] == []
 
 
-def test_configured_provider_cannot_add_suggestions_to_custom_question(
+def test_configured_provider_is_not_called_while_advancing_the_interview(
     client: TestClient, monkeypatch
 ) -> None:
     provider = client.app.state.generator.provider
@@ -210,7 +210,7 @@ def test_configured_provider_cannot_add_suggestions_to_custom_question(
     state = _answer_interview(client, state, value="__unsure__")
     state = _answer_interview(client, state, value="explorer")
 
-    assert captured == [False, False]
+    assert captured == []
     assert state["nextQuestion"]["id"] == "custom_question"
     assert state["nextQuestion"]["prompt"] == "这个问题是？"
     assert state["nextQuestion"]["options"] == []
@@ -313,58 +313,72 @@ def test_clicking_a_suggested_question_keeps_its_auto_recommended_context(
     assert state["profile"]["curiosityDomainId"] == "global:making-material"
 
 
-def test_late_model_suggestions_cannot_rewind_an_answered_question(
+def test_slow_model_provider_cannot_delay_the_next_interview_question(
     client: TestClient, monkeypatch
 ) -> None:
     import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
 
     state = client.post("/api/interview/start").json()
     for value in ("__unsure__", "recharger", "none"):
         state = _answer_interview(client, state, value=value)
     assert state["nextQuestion"]["id"] == "duration"
 
-    composing_suggestions = Event()
-    release_suggestions = Event()
+    provider = client.app.state.generator.provider
+    called = False
 
-    async def delayed_compose(*_args: object, **kwargs: object) -> InterviewVoice:
-        if kwargs["want_suggestions"]:
-            composing_suggestions.set()
-            await asyncio.to_thread(release_suggestions.wait)
-            return InterviewVoice(
-                reply="我会沿着这条线继续找。",
-                suggestions=("迟到的问题一？", "迟到的问题二？", "迟到的问题三？"),
-            )
-        return InterviewVoice(reply="我记下了。")
+    async def delayed_generate_json(*_args: object, **_kwargs: object) -> dict:
+        nonlocal called
+        called = True
+        await asyncio.sleep(1)
+        return {"reply": "不应出现", "suggestions": []}
 
-    monkeypatch.setattr("app.main.interview_voice.compose", delayed_compose)
-    interview_id = state["id"]
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        first_request = executor.submit(
-            client.post,
-            f"/api/interview/{interview_id}/answer",
-            json={"questionId": "duration", "value": "5"},
-        )
-        assert composing_suggestions.wait(timeout=5)
+    monkeypatch.setattr(provider, "api_key", "configured-test-key")
+    monkeypatch.setattr(provider, "generate_json", delayed_generate_json)
+    started = time.perf_counter()
+    state = _answer_interview(client, state, value="5")
 
-        visible = client.get(f"/api/interview/{interview_id}").json()
-        assert visible["nextQuestion"]["id"] == "open_question"
-        answered = client.post(
-            f"/api/interview/{interview_id}/answer",
-            json={"questionId": "open_question", "value": "__no_question__"},
-        )
-        assert answered.status_code == 200, answered.text
-        assert answered.json()["nextQuestion"]["id"] == "exclusions"
+    assert time.perf_counter() - started < 0.25
+    assert called is False
+    assert state["nextQuestion"]["id"] == "open_question"
+    assert len(state["nextQuestion"]["options"]) == 4
 
-        release_suggestions.set()
-        assert first_request.result(timeout=5).status_code == 200
 
-    final = client.get(f"/api/interview/{interview_id}").json()
-    assert final["nextQuestion"]["id"] == "exclusions"
-    assert [turn["questionId"] for turn in final["transcript"]].count(
-        "open_question"
-    ) == 1
+def test_curator_replies_keep_dog_and_cobalt_questions_in_context(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app import interview_voice
+
+    original_compose = interview_voice.compose_immediate
+    seen_questions: list[str] = []
+
+    def capture_context(**kwargs: object) -> InterviewVoice:
+        seen_questions.append(str(kwargs["visitor_question"]))
+        return original_compose(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(interview_voice, "compose_immediate", capture_context)
+    examples = (
+        ("狗在各国文化中为什么既是伙伴，又是守护者？", "狗"),
+        (
+            "相似的钴蓝为什么会出现在中国瓷器、伊朗陶器和代尔夫特陶器上？",
+            "钴蓝",
+        ),
+    )
+
+    for question, keyword in examples:
+        before = len(seen_questions)
+        state = client.post("/api/interview/start").json()
+        state = _answer_interview(client, state, freeText=question)
+        assert keyword in state["transcript"][-1]["curatorReply"]
+
+        # Later answers carry no free text of their own. The reply must still
+        # use the complete visitor-authored question as its source context,
+        # rather than falling back to an automatically selected domain.
+        state = _answer_interview(client, state, value="professional")
+        assert keyword in state["transcript"][-1]["curatorReply"]
+        state = _answer_interview(client, state, value="some")
+        assert keyword in state["transcript"][-1]["curatorReply"]
+        assert seen_questions[before:] == [question, question, question]
 
 
 def test_non_explorer_topic_path_keeps_one_later_open_question(

@@ -3,12 +3,12 @@
   "importerVersion": "3.0.0",
   "id": "global_open",
   "name": "卧游·全球开放馆藏（首批）",
-  "institution": "Art Institute of Chicago · Cleveland Museum of Art · The Metropolitan Museum of Art",
+  "institution": "Cleveland Museum of Art · The Metropolitan Museum of Art",
   "scope": "global",
-  "version": "20260808-17245-rights1",
-  "generatedAt": "2026-08-08T19:58:24Z",
-  "objectCount": 17245,
-  "objectsSha256": "8dc087e9d3a25ae075b9710d0ccecf93bff1e1f43341cb9305d1175c42f43cd7",
+  "version": "20260826-17246",
+  "generatedAt": "2026-08-26T20:02:13Z",
+  "objectCount": 17246,
+  "objectsSha256": "8a7cee291acc9e5beedd40cf12e30299049613cbb61b6954e1a4fb9a5758d55e",
   "servingReady": true,
   "rightsSchemaVersion": "1.0",
   "license": {
@@ -21,7 +21,7 @@
   "rightsByInstitution": [
     {
       "institutionId": "cma",
-      "objects": 15199,
+      "objects": 15200,
       "objectGate": "share_license_status=CC0 AND has_image=1",
       "imageLicense": "CC0 1.0",
       "imageRightsUri": "https://creativecommons.org/publicdomain/zero/1.0/",
@@ -62,11 +62,11 @@
   "sourceUrl": "https://openaccess-api.clevelandart.org/",
   "institutionDistribution": {
     "Art Institute of Chicago": 1000,
-    "Cleveland Museum of Art": 15199,
+    "Cleveland Museum of Art": 15200,
     "The Metropolitan Museum of Art": 1046
   },
   "evidenceDepthDistribution": {
-    "thin": 11119,
+    "thin": 11120,
     "full": 6126
   },
   "unroutedObjectCount": 517,
@@ -75,34 +75,28 @@
   "evidenceDomainRoutingRate": 0.97,
   "imageValidation": {
     "mode": "full_remote_check",
-    "validatedObjectCount": 17245
+    "validatedObjectCount": 17246
   },
   "snapshotIds": {
     "cma": "20260808T170042Z",
     "metSeedCollection": "chinese_art_open",
-    "cmaSupplement:Indian and Southeast Asian Art": "20260808T174303Z",
-    "aicGlobal:20260808T191739Z": "20260808T191739Z"
+    "aicGlobal:20260808T191739Z": "20260808T191739Z",
+    "cmaSupplement:Indian and Southeast Asian Art": "20260808T174303Z"
   },
   "sampling": {
-    "strategy": "CMA department water-fill + verified Met seed + AIC department/culture/material stratification",
+    "strategy": "CMA department water-fill + verified Met seed",
     "representativeOfWorldCollections": false,
-    "note": "Serving corpus balances discoverability; it is not a prevalence estimate.",
-    "aicSamplingVersion": "aic-global-strata-v1",
-    "aicTarget": 1000,
-    "aicRequiredArtworkIds": [
-      58075
-    ],
-    "aicSnapshotId": "20260808T191739Z"
+    "note": "Serving corpus balances discoverability; it is not a prevalence estimate."
   },
-  "taxonomyVersion": "1.1.0",
-  "routingVersion": "1.1.0",
+  "taxonomyVersion": "1.1.1",
+  "routingVersion": "1.1.1",
   "culturePacks": [
     {
       "id": "east_asia",
       "label": "东亚",
       "description": "中国、日本、朝鲜半岛及相关文化语境。",
-      "objectCount": 3741,
-      "fullEvidenceCount": 969,
+      "objectCount": 3732,
+      "fullEvidenceCount": 966,
       "meetsMinimum": true,
       "aliases": [
         "东亚",
@@ -118,7 +112,7 @@
       "id": "south_asia",
       "label": "南亚",
       "description": "印度次大陆、斯里兰卡及喜马拉雅相关文化语境。",
-      "objectCount": 692,
+      "objectCount": 694,
       "fullEvidenceCount": 122,
       "meetsMinimum": true,
       "aliases": [
@@ -135,8 +129,8 @@
       "id": "southeast_asia",
       "label": "东南亚",
       "description": "东南亚大陆与岛屿区域的文化语境。",
-      "objectCount": 1309,
-      "fullEvidenceCount": 319,
+      "objectCount": 1314,
+      "fullEvidenceCount": 320,
       "meetsMinimum": true,
       "aliases": [
         "东南亚",
@@ -153,8 +147,8 @@
       "id": "west_asia_north_africa",
       "label": "西亚与北非",
       "description": "西亚、北非及跨区域伊斯兰文化语境。",
-      "objectCount": 1571,
-      "fullEvidenceCount": 625,
+      "objectCount": 1574,
+      "fullEvidenceCount": 627,
       "meetsMinimum": true,
       "aliases": [
         "西亚",
@@ -294,7 +288,7 @@
       "scope": "global",
       "label": "身体与身份",
       "description": "肖像、身体表现、服饰、性别与社会身份。",
-      "objectCount": 2312,
+      "objectCount": 2313,
       "fullEvidenceCount": 962,
       "meetsMinimum": true,
       "offerInInterview": true,
@@ -305,7 +299,7 @@
       "scope": "global",
       "label": "材料与制作",
       "description": "材料、技术、工艺流程与制作者知识。",
-      "objectCount": 12051,
+      "objectCount": 12052,
       "fullEvidenceCount": 4676,
       "meetsMinimum": true,
       "offerInInterview": true,
@@ -824,10 +818,5 @@
     "CulturePack 是语料覆盖分面，不是单一、排他的文化身份结论。",
     "全局证据域用于检索与覆盖审计，不是访客端预设策展主题。",
     "规则只读取机构元数据；未命中规则的合格对象应保留并标记为未路由。"
-  ],
-  "sourceUrls": {
-    "cma": "https://openaccess-api.clevelandart.org/",
-    "met": "https://collectionapi.metmuseum.org/public/collection/v1/",
-    "aic": "https://api.artic.edu/api/v1/artworks/search"
-  }
+  ]
 }

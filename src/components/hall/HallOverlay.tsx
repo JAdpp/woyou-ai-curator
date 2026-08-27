@@ -16,10 +16,10 @@ import { useLanguage } from "@/lib/useLanguage";
 import { getImageLicenseLabel, getLegacyRightsLabel } from "@/lib/rights";
 import { EpilogueConversation } from "../EpilogueConversation";
 import type { HallLayout, TourStop } from "./layout";
+import { exhibitionViewHref } from "./progress";
 import { useAudioGuide } from "./useAudioGuide";
 import styles from "./hall.module.css";
 
-type HallCopy = ReturnType<typeof useLanguage>["t"]["hall"];
 type ViewCopy = ReturnType<typeof useLanguage>["t"]["view"];
 
 function typeLabel(type: LabelSentence["type"], v: ViewCopy): string {
@@ -118,9 +118,11 @@ function LobbyPoster({ exhibition }: { exhibition: Exhibition }) {
 function ArtworkLabel({
   item,
   exhibitionId,
+  contentLang,
 }: {
   item: ExhibitionItem;
   exhibitionId: string;
+  contentLang: string;
 }) {
   const { t: copy } = useLanguage();
   const t = copy.hall;
@@ -292,13 +294,13 @@ function ArtworkLabel({
       {/* Chinese first: institutions catalogue in English, but the exhibition
           is read in Chinese. The original stays visible underneath and in the
           source panel, so nothing is hidden. */}
-      <h2>{item.displayTitle || item.object.titleOriginal || item.object.title}</h2>
+      <h2 lang={contentLang}>{item.displayTitle || item.object.titleOriginal || item.object.title}</h2>
       <p className={styles.originalTitle}>{item.object.title}</p>
       <p className={styles.tombstone}>
         {[item.object.date, item.object.medium, item.object.culture].filter(Boolean).join(" · ")}
       </p>
 
-      <div className={styles.labelBody}>
+      <div className={styles.labelBody} lang={contentLang}>
         {item.labelSentences.map((sentence) => (
           <p key={sentence.id} data-type={sentence.type}>
             {sentence.text}
@@ -381,6 +383,7 @@ export function HallOverlay({
   cameraArrived = true,
   pointerLocked,
   reduceMotion,
+  freeWalkAvailable,
   onGoTo,
   onEnterGuided,
   onEnterFree,
@@ -395,6 +398,7 @@ export function HallOverlay({
   cameraArrived?: boolean;
   pointerLocked: boolean;
   reduceMotion: boolean;
+  freeWalkAvailable: boolean;
   onGoTo: (index: number) => void;
   onEnterGuided: () => void;
   onEnterFree: () => void;
@@ -402,6 +406,8 @@ export function HallOverlay({
 }) {
   const { t: copy } = useLanguage();
   const t = copy.hall;
+  const writtenIn = exhibition.visitorProfile?.language ?? "zh";
+  const contentLang = writtenIn === "en" ? "en" : "zh-CN";
   const itemsById = useMemo(
     () => new Map(exhibition.items.map((item) => [item.id, item])),
     [exhibition.items],
@@ -490,15 +496,26 @@ export function HallOverlay({
         ? "千问 AI 合成 · 专业播音声线"
         : null
   );
+  const accessibleHref = exhibitionViewHref(
+    typeof window === "undefined"
+      ? `https://woyou.invalid/exhibitions/${exhibition.id}`
+      : window.location.href,
+    "text",
+    stopIndex,
+    stop,
+  );
   return (
     <div className={styles.overlay} data-mode={mode}>
+      <p className={styles.srOnly} aria-live="polite" aria-atomic="true" lang={contentLang}>
+        {stop.label}
+      </p>
       {/* ------------------------------------------------------- top bar */}
       <header className={styles.topBar}>
         <button type="button" className={styles.ghostButton} onClick={onExit}>
           {t.leaveHall}
         </button>
         <div className={styles.topRight}>
-          <a className={styles.accessibleLink} href={`/exhibitions/${exhibition.id}?view=text`}>
+          <a className={styles.accessibleLink} href={accessibleHref}>
             {t.accessibleVersion}
           </a>
           <div className={styles.audioControl}>
@@ -532,24 +549,26 @@ export function HallOverlay({
               </span>
             )}
           </div>
-          <div className={styles.modeToggle} role="group" aria-label={t.modeGroup}>
-            <button
-              type="button"
-              aria-pressed={mode === "guided"}
-              onClick={onEnterGuided}
-              className={mode === "guided" ? styles.modeActive : undefined}
-            >
-              {t.guided}
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === "free"}
-              onClick={onEnterFree}
-              className={mode === "free" ? styles.modeActive : undefined}
-            >
-              {t.freeWalk}
-            </button>
-          </div>
+          {freeWalkAvailable && (
+            <div className={styles.modeToggle} role="group" aria-label={t.modeGroup}>
+              <button
+                type="button"
+                aria-pressed={mode === "guided"}
+                onClick={onEnterGuided}
+                className={mode === "guided" ? styles.modeActive : undefined}
+              >
+                {t.guided}
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === "free"}
+                onClick={onEnterFree}
+                className={mode === "free" ? styles.modeActive : undefined}
+              >
+                {t.freeWalk}
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -564,9 +583,9 @@ export function HallOverlay({
               />
               <div>
                 <span className={styles.eyebrow}>{t.curatedBy}</span>
-                <h1>{exhibition.title}</h1>
-                {exhibition.subtitle && <p className={styles.subtitle}>{exhibition.subtitle}</p>}
-                <p className={styles.thesis}>{exhibition.curatorialThesis}</p>
+                <h1 lang={contentLang}>{exhibition.title}</h1>
+                {exhibition.subtitle && <p className={styles.subtitle} lang={contentLang}>{exhibition.subtitle}</p>}
+                <p className={styles.thesis} lang={contentLang}>{exhibition.curatorialThesis}</p>
                 <dl className={styles.lobbyStats}>
                   <div>
                     <dt>{t.segments}</dt>
@@ -593,22 +612,27 @@ export function HallOverlay({
               <span className={styles.eyebrow}>
                 {fill(t.chapterOf, { n: chapter.order + 1, total: exhibition.chapters.length })}
               </span>
-              <h2>{chapter.title}</h2>
-              <p>{chapter.leadIn}</p>
+              <h2 lang={contentLang}>{chapter.title}</h2>
+              <p lang={contentLang}>{chapter.leadIn}</p>
             </section>
           )}
 
           {stop.kind === "artwork" && item && (
             // Keyed by item so the source panel closes when the visitor moves
             // on, without an effect resetting derived state.
-            <ArtworkLabel key={item.id} item={item} exhibitionId={exhibition.id} />
+            <ArtworkLabel
+              key={item.id}
+              item={item}
+              exhibitionId={exhibition.id}
+              contentLang={contentLang}
+            />
           )}
 
           {stop.kind === "epilogue" && (
             <section className={styles.epilogueCard}>
               <span className={styles.eyebrow}>{t.epilogueEyebrow}</span>
               <h2>{t.epilogueTitle}</h2>
-              <p className={styles.epilogueText}>{exhibition.epilogue.text}</p>
+              <p className={styles.epilogueText} lang={contentLang}>{exhibition.epilogue.text}</p>
               <EpilogueConversation
                 exhibitionId={exhibition.id}
                 openQuestions={exhibition.epilogue.openQuestions}

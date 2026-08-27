@@ -30,7 +30,7 @@ export function CurationPipeline({
 }: {
   interviewId: string;
   onComplete: (exhibitionId: string) => void;
-  onError: (message: string) => void;
+  onError: (job: GenerationJob | null) => void;
 }) {
   const { t } = useLanguage();
   const [job, setJob] = useState<GenerationJob | null>(null);
@@ -58,13 +58,15 @@ export function CurationPipeline({
           if (update.status === "completed" && update.exhibitionId) {
             onComplete(update.exhibitionId);
           } else if (update.status === "failed") {
-            onError(update.error || t.pipeline.failed);
+            // The job is retained for a same-interview retry. Its provider
+            // error is deliberately never used as visitor-facing copy.
+            onError(update);
           }
         });
       })
-      .catch((startError) => {
+      .catch(() => {
         if (cancelled) return;
-        onError(startError instanceof Error ? startError.message : t.pipeline.notStarted);
+        onError(null);
       });
 
     return () => {
@@ -78,14 +80,16 @@ export function CurationPipeline({
   return (
     <section className={styles.pipelineShell} aria-label={t.pipeline.ariaLabel}>
       <div className={styles.pipelineLayout}>
-        <div className={styles.pipelineProcess} aria-live="polite" aria-busy={job?.status !== "completed"}>
+        <div className={styles.pipelineProcess} aria-busy={job?.status !== "completed"}>
           <header className={styles.pipelineIdentity}>
             <CuratorAvatar size="lg" />
             <div>
               <h2>{t.pipeline.heading}</h2>
               {/* The stage text comes from the job and is written by the server in
                   the language the interview ran in, so it is not translated here. */}
-              <p className={styles.pipelineStage}>{job?.stage || t.pipeline.starting}</p>
+              <p className={styles.pipelineStage} role="status" aria-live="polite">
+                {job?.stage || t.pipeline.starting}
+              </p>
             </div>
           </header>
 
@@ -103,7 +107,15 @@ export function CurationPipeline({
             ))}
           </ol>
 
-          <div className={styles.progressTrack} role="progressbar" aria-valuenow={job?.progress ?? 0} aria-valuemin={0} aria-valuemax={100}>
+          <div
+            className={styles.progressTrack}
+            role="progressbar"
+            aria-label={t.pipeline.progressLabel}
+            aria-valuenow={job?.progress ?? 0}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={job?.stage || t.pipeline.starting}
+          >
             <div className={styles.progressFill} style={{ width: `${job?.progress ?? 0}%` }} />
           </div>
         </div>

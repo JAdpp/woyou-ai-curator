@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import ssl
 from typing import Any
 
 import httpx
@@ -15,6 +16,19 @@ logger = logging.getLogger(__name__)
 
 class ProviderError(RuntimeError):
     """A provider failed without exposing credentials or response secrets."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "provider_error",
+        public_message: str = (
+            "AI 策展服务暂时不可用。本次问题已保留，请稍后重试。"
+        ),
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_message = public_message
 
 
 class DeepSeekProvider:
@@ -30,7 +44,13 @@ class DeepSeekProvider:
 
     async def generate_json(self, system_prompt: str, user_payload: dict[str, Any]) -> dict[str, Any]:
         if not self.api_key:
-            raise ProviderError("DeepSeek is not configured")
+            raise ProviderError(
+                "DeepSeek is not configured",
+                code="provider_not_configured",
+                public_message=(
+                    "AI 策展服务尚未配置；系统将继续使用馆藏证据生成基础展览。"
+                ),
+            )
 
         request_body = {
             "model": self.model,
@@ -77,10 +97,59 @@ class DeepSeekProvider:
                     content[-160:] if isinstance(content, str) else content,
                 )
                 raise
+        except asyncio.CancelledError:
+            # Cancellation belongs to the calling job. Turning it into a
+            # provider failure would defeat the job deadline and leave work
+            # running after the visitor has moved on.
+            raise
         except asyncio.TimeoutError as exc:
-            raise ProviderError("DeepSeek request exceeded its wall-clock timeout") from exc
-        except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise ProviderError(f"DeepSeek returned an unusable response: {type(exc).__name__}") from exc
+            raise ProviderError(
+                "DeepSeek request exceeded its wall-clock timeout",
+                code="provider_timeout",
+                public_message=(
+                    "AI 策展服务响应超时。系统会继续使用馆藏证据生成基础展览；"
+                    "如仍未完成，请保留当前问题并重试。"
+                ),
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                "DeepSeek transport timed out",
+                code="provider_timeout",
+                public_message=(
+                    "AI 策展服务响应超时。系统会继续使用馆藏证据生成基础展览；"
+                    "如仍未完成，请保留当前问题并重试。"
+                ),
+            ) from exc
+        except (httpx.RequestError, ssl.SSLError, OSError) as exc:
+            # Custom transports and some TLS stacks surface the original
+            # ssl.SSLError/OSError instead of wrapping it in RequestError.
+            # Normalise all of them here so generator fallbacks always run and
+            # raw certificate, proxy or filesystem details never reach a job.
+            raise ProviderError(
+                f"DeepSeek transport failed: {type(exc).__name__}",
+                code="provider_network_error",
+                public_message=(
+                    "AI 策展服务暂时无法连接。系统会继续使用馆藏证据生成基础展览；"
+                    "如仍未完成，请稍后重试。"
+                ),
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise ProviderError(
+                f"DeepSeek returned HTTP {exc.response.status_code}",
+                code="provider_response_error",
+                public_message=(
+                    "AI 策展服务暂时无法响应。系统会继续使用馆藏证据生成基础展览；"
+                    "如仍未完成，请稍后重试。"
+                ),
+            ) from exc
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ProviderError(
+                f"DeepSeek returned an unusable response: {type(exc).__name__}",
+                code="provider_response_error",
+                public_message=(
+                    "AI 策展文本暂时无法使用；系统将改用馆藏证据生成基础展览。"
+                ),
+            ) from exc
 
     @staticmethod
     def _parse_json(content: str | dict[str, Any]) -> dict[str, Any]:

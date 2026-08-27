@@ -133,6 +133,48 @@ def test_colloquial_dog_query_is_answerable_and_cross_culturally_diverse(
     assert check.coverage.matched_object_count >= 5
 
 
+def test_named_cross_cultural_comparison_requires_every_requested_origin(
+    global_repository,
+) -> None:
+    """Do not call a China/Iran/Delft comparison supported without Delft.
+
+    The corpus has enough blue-and-white material for a superficially strong
+    hit count, but the visitor explicitly asked for three comparison legs and
+    excluded the religious Delft tiles.  A count-only gate used to approve this
+    agenda and then silently substitute unrelated objects.
+    """
+
+    repository, _collection = global_repository
+    agenda = AgendaInput(
+        question="蓝色如何连接波斯陶瓷、中国青花与代尔夫特？",
+        priorKnowledge="some",
+        durationMinutes=15,
+        exclusions=["宗教", "墓葬"],
+    )
+
+    check = ExhibitionGenerator.probe_answerability(repository, agenda)
+
+    assert check.status == AnswerabilityStatus.PARTIALLY_SUPPORTED
+    assert check.can_generate is False
+    assert any("代尔夫特" in gap for gap in check.coverage_gaps)
+    assert any("中国" in aspect and "伊朗" in aspect for aspect in check.supported_aspects)
+
+
+def test_generic_across_cultures_request_is_not_mistaken_for_named_obligations(
+    global_repository,
+) -> None:
+    repository, _collection = global_repository
+
+    check = ExhibitionGenerator.probe_answerability(
+        repository,
+        _agenda("狗狗在各国文化是怎么存在"),
+    )
+
+    assert check.status == AnswerabilityStatus.SUPPORTED
+    assert check.can_generate is True
+    assert not any("缺少" in gap for gap in check.coverage_gaps)
+
+
 def test_unmatched_theme_is_refused_instead_of_backfilled_with_objects(
     global_repository,
 ) -> None:

@@ -1236,6 +1236,9 @@ class GenerationJob(ApiModel):
     stage: str = ""
     steps: list[JobStep] = Field(default_factory=list)
     exhibition_id: str | None = None
+    # Stable, machine-readable failure category. ``error`` remains the
+    # visitor-facing Chinese recovery message.
+    error_code: str | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

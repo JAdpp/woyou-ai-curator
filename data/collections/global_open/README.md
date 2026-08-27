@@ -4,15 +4,15 @@
 
 ## 冻结版本
 
-- 版本：`20260808-17245-rights1`
-- 对象：17,245 件
-- 机构：Cleveland Museum of Art 15,199；The Metropolitan Museum of Art 1,046；Art Institute of Chicago 1,000
+- 版本：`20260826-17246`
+- 对象：17,246 件
+- 机构：Cleveland Museum of Art 15,200；The Metropolitan Museum of Art 1,046；Art Institute of Chicago 1,000
 - 证据深度：`full` 6,126；`thin` 11,119
-- 远程图片校验：17,245 / 17,245
+- 远程图片校验：17,246 / 17,246
 - 文化包分配率：98.64%
 - 全球证据域路由率：97.00%
 - 字段许可模式：`rightsSchemaVersion = 1.0`
-- `objects.json` SHA-256：`8dc087e9d3a25ae075b9710d0ccecf93bff1e1f43341cb9305d1175c42f43cd7`
+- `objects.json` SHA-256：`8a7cee291acc9e5beedd40cf12e30299049613cbb61b6954e1a4fb9a5758d55e`
 
 这是一份为个性化策展 Demo 构建的分层语料，不是世界文化或各机构馆藏的代表性样本。文化包和证据域均为可审计的检索分面，不是对文物身份的唯一判断，也不是预设展览主题。
 
@@ -29,9 +29,10 @@
 
 ```powershell
 npm.cmd run data:rebuild:global
-python scripts/supplement_aic_global_collection.py --target 1000 --from-snapshot 20260808T191739Z
 npm.cmd run test
 ```
+
+`data:rebuild:global` 会依次恢复基础快照、CMA 南亚／东南亚补充快照和 AIC 分层切片；不要只运行基础导入器后直接发布，否则会漏掉补充集。
 
 AIC 补库从 1,080 个分层候选中保留了 1,000 个图片可达对象；`description` 记为 CC BY 4.0，`short_description` 与其余作品 API 数据保持 CC0 1.0。未完成或失败的追加快照不会参与离线重建。
 

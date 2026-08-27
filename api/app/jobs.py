@@ -16,11 +16,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import ssl
 from time import perf_counter
 from typing import Awaitable, Callable
 from uuid import uuid4
 
+from .collections import CollectionDataError
 from .models import GenerationJob, JobStep, JobStepStatus, utc_now
+from .providers.deepseek import ProviderError
 
 # Ordered pipeline shown to the visitor. `poster` runs concurrently with the
 # text stages but is listed in narrative order.
@@ -153,7 +156,13 @@ class JobStore:
         job.updated_at = utc_now()
         self._notify(job_id)
 
-    def fail(self, job_id: str, error: str) -> None:
+    def fail(
+        self,
+        job_id: str,
+        error: str,
+        *,
+        error_code: str = "curation_failed",
+    ) -> None:
         job = self._jobs.get(job_id)
         if job is None:
             return
@@ -162,6 +171,7 @@ class JobStore:
                 step.status = JobStepStatus.FAILED
                 step.finished_at = utc_now()
         job.status = "failed"
+        job.error_code = error_code
         job.error = error
         job.stage = "生成未完成"
         job.updated_at = utc_now()
@@ -204,9 +214,50 @@ class JobStore:
                 self.fail(
                     job_id,
                     "策展服务响应过慢，本次任务已安全停止。请重试；这不代表主题不受支持。",
+                    error_code="curation_timeout",
                 )
-            except Exception as error:  # noqa: BLE001 - surfaced to the visitor
-                self.fail(job_id, str(error) or "生成未完成，请重试。")
+            except asyncio.CancelledError:
+                self.fail(
+                    job_id,
+                    "本次策展任务已停止。你的问题仍然保留，可以直接重试。",
+                    error_code="curation_cancelled",
+                )
+                raise
+            except ProviderError as error:
+                self.fail(
+                    job_id,
+                    error.public_message,
+                    error_code=error.code,
+                )
+            except CollectionDataError as error:
+                # Collection errors carry precise internal details, but those
+                # details are not a recovery instruction for a visitor.
+                message = (
+                    "当前馆藏不足以可靠回答这个问题。请保留原问题并选择系统建议的相近方向，"
+                    "或减少必须覆盖的地区后重试。"
+                    if error.code == "QUESTION_UNSUPPORTED"
+                    else "馆藏数据暂时无法完成本次策展。你的问题仍然保留，请稍后重试。"
+                )
+                self.fail(
+                    job_id,
+                    message,
+                    error_code=error.code.casefold(),
+                )
+            except (ssl.SSLError, OSError):
+                # Defence in depth for any future provider that forgets to
+                # normalise its transport errors at its own boundary.
+                self.fail(
+                    job_id,
+                    "策展服务暂时无法连接。你的问题仍然保留，请稍后重试。",
+                    error_code="provider_network_error",
+                )
+            except Exception:  # noqa: BLE001 - intentionally sanitised below
+                logger.exception("curation job %s failed unexpectedly", job_id)
+                self.fail(
+                    job_id,
+                    "生成未完成。你的问题仍然保留，请重试；若再次失败，可先缩短参观时长。",
+                    error_code="curation_failed",
+                )
             finally:
                 job = self._jobs.get(job_id)
                 logger.info(

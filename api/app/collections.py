@@ -627,6 +627,24 @@ def normalize_object(raw: dict[str, Any]) -> MuseumObject | None:
     material = _string(_first(raw, ALIASES["material"]))
     date = _string(_first(raw, ALIASES["date"])) or ""
     culture = culture_display or ("; ".join(culture_values) if culture_values else "")
+    place = _string(_first(raw, ALIASES["place"]))
+    culture_pack_ids = _string_list(_first(raw, ALIASES["culture_pack_ids"], []))
+    # Taxonomy 1.1.0 treated AIC's broad "Arts of Asia" department as a
+    # strong East-Asia signal.  Correct that frozen-data artefact at load time
+    # when controlled origin fields explicitly and exclusively identify Iran;
+    # future imports are fixed at the taxonomy source as well.
+    controlled_origin = " ".join(filter(None, (culture, place, creator))).casefold()
+    if (
+        re.search(r"\b(?:iran|iranian|persia|persian)\b", controlled_origin)
+        and not re.search(
+            r"\b(?:china|chinese|japan|japanese|korea|korean)\b",
+            controlled_origin,
+        )
+    ):
+        culture_pack_ids = [
+            "west_asia_north_africa",
+            *(pack for pack in culture_pack_ids if pack not in {"east_asia", "west_asia_north_africa"}),
+        ]
     evidence = _normalize_evidence(
         _first(raw, ALIASES["evidence"], []),
         object_id,
@@ -670,7 +688,7 @@ def normalize_object(raw: dict[str, Any]) -> MuseumObject | None:
         type=_string(_first(raw, ("type", "objectType", "object_type"))) or "Collection object",
         creator=creator,
         material=material,
-        place=_string(_first(raw, ALIASES["place"])),
+        place=place,
         culture=culture,
         culture_display=culture or None,
         description=_string(_first(raw, ALIASES["description"])),
@@ -690,7 +708,7 @@ def normalize_object(raw: dict[str, Any]) -> MuseumObject | None:
         or "metadata_fallback",
         themes=evidence_domain_ids,
         evidence_domain_ids=evidence_domain_ids,
-        culture_pack_ids=_string_list(_first(raw, ALIASES["culture_pack_ids"], [])),
+        culture_pack_ids=culture_pack_ids,
         relation_facets=_string_list(_first(raw, ALIASES["relation_facets"], [])),
         tags=_string_list(_first(raw, ("tags", "termTitles", "term_titles"), [])),
         evidence=evidence,

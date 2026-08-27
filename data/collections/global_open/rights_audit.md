@@ -1,7 +1,7 @@
-# 权利、来源与图像审计 — global_open 20260808-17245-rights1
+# 权利、来源与图像审计 — global_open 20260826-17246
 
-生成时间：2026-08-08T19:58:24Z
-对象总数：17245
+生成时间：2026-08-26T20:02:13Z
+对象总数：17246
 图片验证：full_remote_check
 
 ## 纳入门槛
@@ -14,16 +14,16 @@
 ## 来源分布
 
 - Art Institute of Chicago: 1000
-- Cleveland Museum of Art: 15199
+- Cleveland Museum of Art: 15200
 - The Metropolitan Museum of Art: 1046
 
 ## 字段级许可分布
 
-- 图像（`imageLicense`）：CC0 1.0=17245
-- 对象元数据（`metadataLicense`）：CC0 1.0=17245
-- 对象描述文本（`curatorialTextLicense`）：CC BY 4.0=219, CC0 1.0=5551, not_present=11475
-- 证据片段许可（`evidence[].license`）：CC BY 4.0=219, CC0 1.0=61398
-- 证据来源类型（`evidence[].sourceKind`）：institution_curatorial_text=9050, institution_metadata=35322, institution_provenance=17245
+- 图像（`imageLicense`）：CC0 1.0=17246
+- 对象元数据（`metadataLicense`）：CC0 1.0=17246
+- 对象描述文本（`curatorialTextLicense`）：CC BY 4.0=219, CC0 1.0=5551, not_present=11476
+- 证据片段许可（`evidence[].license`）：CC BY 4.0=219, CC0 1.0=61401
+- 证据来源类型（`evidence[].sourceKind`）：institution_curatorial_text=9050, institution_metadata=35324, institution_provenance=17246
 
 ## 来源级权利边界
 

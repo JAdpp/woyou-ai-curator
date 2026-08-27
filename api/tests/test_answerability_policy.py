@@ -11,7 +11,7 @@ from app.config import Settings
 from app.generator import ExhibitionGenerator
 from app.main import create_app
 from app.models import AgendaInput, Exhibition
-from app.validator import validate_exhibition
+from app.validator import _institution_fact_is_extractive, validate_exhibition
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -232,3 +232,8 @@ def test_institution_fact_must_be_extractive_and_model_cannot_overwrite_it() -> 
     }
     with pytest.raises(ValueError, match="not allowed"):
         ExhibitionGenerator._apply_model_output(clean_exhibition, malicious_output)
+
+
+def test_short_exact_catalogue_fact_is_valid_but_short_fuzzy_text_is_not() -> None:
+    assert _institution_fact_is_extractive("Dogs", ["Dogs"]) is True
+    assert _institution_fact_is_extractive("Dog", ["Dogs"]) is False

@@ -61,6 +61,20 @@ def test_culture_pack_assignment_covers_initial_global_regions(
     assert expected_pack in assign_culture_packs(metadata)
 
 
+def test_broad_arts_of_asia_department_does_not_override_iranian_origin() -> None:
+    """AIC's broad department name is not an East-Asia provenance claim."""
+
+    obj = {
+        "department": "Arts of Asia",
+        "culture": "Iran",
+        "place": "Iran",
+        "creator": "Iran",
+        "date": "Safavid dynasty (1501–1722), 17th century",
+    }
+
+    assert assign_culture_packs(obj) == ["west_asia_north_africa"]
+
+
 def test_ascii_matching_uses_real_word_boundaries() -> None:
     assert matches_pattern("Wine vessel used at court", "vessel")
     assert matches_pattern("BLUE-AND-WHITE PORCELAIN", "blue-and-white")
