@@ -22,6 +22,7 @@ from .collections import (
     _requests_cross_cultural,
 )
 from .config import Settings
+from .images import ImageCache, ImageFetchError
 from .models import (
     AgendaCheckResponse,
     AgendaInput,
@@ -42,7 +43,7 @@ from .models import (
     VisitorProfile,
     utc_now,
 )
-from .providers.deepseek import DeepSeekProvider, ProviderError
+from .providers.deepseek import DeepSeekProvider, ProviderError, VisionImage
 from .validator import REQUIRED_ROLES, validate_exhibition
 
 
@@ -137,10 +138,12 @@ class ExhibitionGenerator:
         settings: Settings,
         collections: CollectionRepository,
         provider: DeepSeekProvider | None = None,
+        image_cache: ImageCache | None = None,
     ) -> None:
         self.settings = settings
         self.collections = collections
         self.provider = provider or DeepSeekProvider(settings)
+        self.image_cache = image_cache
 
     async def _generate_model_json(
         self,
@@ -149,6 +152,7 @@ class ExhibitionGenerator:
         *,
         stage: str,
         timeout_seconds: float,
+        vision_images: list[VisionImage] | None = None,
     ) -> dict[str, Any]:
         """Run one model stage under a real wall-clock budget.
 
@@ -160,8 +164,19 @@ class ExhibitionGenerator:
         started = perf_counter()
         outcome = "failed"
         try:
+            if vision_images is not None:
+                visual_generate = getattr(
+                    self.provider, "generate_json_with_images", None
+                )
+                operation = (
+                    visual_generate(system_prompt, user_payload, vision_images)
+                    if callable(visual_generate)
+                    else self.provider.generate_json(system_prompt, user_payload)
+                )
+            else:
+                operation = self.provider.generate_json(system_prompt, user_payload)
             result = await asyncio.wait_for(
-                self.provider.generate_json(system_prompt, user_payload),
+                operation,
                 timeout=timeout_seconds,
             )
             outcome = "completed"
@@ -516,7 +531,7 @@ class ExhibitionGenerator:
         synthetic percentage.
 
         ``on_frame_ready`` fires after the model frame has fixed the public title
-        and subtitle, but before the independent chapter-label calls. The caller
+        and subtitle, but before the independent per-object label calls. The caller
         can therefore compose the final title into the poster while labels run
         concurrently, without freezing the deterministic skeleton title.
         """
@@ -590,11 +605,11 @@ class ExhibitionGenerator:
 
         # -- model pass ---------------------------------------------------
         # Two calls, not one. The frame is small and returns quickly, so the
-        # visitor sees a real title within seconds; the per-chapter label calls
+        # visitor sees a real title within seconds; the per-object label calls
         # are independent and run concurrently, so total latency is the slowest
         # chapter rather than the sum of all of them.
         model_applied = False
-        labelled_chapters = 0
+        labelled_items = 0
         if self.provider is not None and self.provider.configured:
             plan = curation.CurationPlan(
                 profile=profile,
@@ -669,15 +684,17 @@ class ExhibitionGenerator:
         )
 
         if model_applied:
-            labelled_chapters = await self._write_labels(exhibition, profile)
+            labelled_items = await self._write_labels(exhibition, profile)
+            if labelled_items:
+                exhibition.versions.labels_model = self.settings.deepseek_labels_model
 
         bound = sum(len(item.label_sentences) for item in exhibition.items)
         named = sum(1 for item in exhibition.items if item.display_title)
-        if model_applied and labelled_chapters:
+        if model_applied and labelled_items:
             detail = (
-                f"{labelled_chapters}/{len(exhibition.chapters)} chapters written by the model"
+                f"{labelled_items}/{len(exhibition.items)} objects written by the visual model"
                 if en
-                else f"{labelled_chapters}/{len(exhibition.chapters)} 章由模型撰写"
+                else f"{labelled_items}/{len(exhibition.items)} 件由视觉模型撰写"
             )
         elif model_applied:
             detail = (
@@ -727,22 +744,62 @@ class ExhibitionGenerator:
     async def _write_labels(
         self, exhibition: Exhibition, profile: "VisitorProfile"
     ) -> int:
-        """Write every chapter's labels concurrently.
+        """Write one image-grounded public label per object, concurrently.
 
-        Each chapter is an independent call, so one chapter failing costs only
-        that chapter's prose — the deterministic label stays in place there and
-        the rest of the exhibition is unaffected.
+        A single-object call prevents a bad image or malformed response from
+        collapsing a whole chapter, and removes ambiguity about which pixels
+        belong to which object.  Curatorial relations remain in the frame; the
+        wall label itself needs only this object's image and catalogue record.
         """
         by_id = {item.id: item for item in exhibition.items}
         prompt = curation.labels_prompt(profile.label_max_chars, profile.language)
+        chapter_by_item = {
+            item_id: chapter
+            for chapter in exhibition.chapters
+            for item_id in chapter.item_ids
+        }
+        visual_provider = callable(
+            getattr(self.provider, "generate_json_with_images", None)
+        )
 
-        async def write(chapter) -> bool:
-            items = [by_id[item_id] for item_id in chapter.item_ids if item_id in by_id]
-            if not items:
+        async def prepare_image(item: ExhibitionItem) -> VisionImage | None:
+            visual = curation.image_evidence(item.object)
+            if not visual_provider or visual is None or self.image_cache is None:
+                return None
+            try:
+                payload, _cached = await asyncio.to_thread(
+                    self.image_cache.get,
+                    visual.source_url,
+                    1024,
+                )
+                return VisionImage(
+                    object_id=item.object.id,
+                    evidence_id=visual.id,
+                    payload=payload,
+                )
+            except ImageFetchError as error:
+                logger.warning(
+                    "visual label image unavailable object=%s code=%s",
+                    item.object.id,
+                    error.code,
+                )
+                return None
+
+        async def write(item: ExhibitionItem) -> bool:
+            chapter = chapter_by_item.get(item.id)
+            if chapter is None:
                 return False
+            vision_image = await prepare_image(item)
+            available_visual_ids = (
+                {vision_image.evidence_id} if vision_image is not None else set()
+            )
             try:
                 payload = curation.labels_payload(
-                    profile, chapter, items, exhibition.curatorial_brief
+                    profile,
+                    chapter,
+                    [item],
+                    exhibition.curatorial_brief,
+                    available_visual_evidence_ids=available_visual_ids,
                 )
                 allowed_evidence_by_object = {
                     str(raw_item["objectId"]): {
@@ -753,32 +810,43 @@ class ExhibitionGenerator:
                     for raw_item in payload.get("items", [])
                     if isinstance(raw_item, dict) and raw_item.get("objectId")
                 }
+                visual_evidence_by_object = (
+                    {item.object.id: vision_image.evidence_id}
+                    if vision_image is not None
+                    else {}
+                )
                 output = await self._generate_model_json(
                     prompt,
                     payload,
-                    stage=f"labels:{chapter.id}",
+                    stage=f"labels:{item.id}",
                     timeout_seconds=min(
                         self.settings.deepseek_timeout_seconds,
                         self.settings.deepseek_labels_timeout_seconds,
                     ),
+                    vision_images=(
+                        [vision_image]
+                        if visual_provider and vision_image is not None
+                        else ([] if visual_provider else None)
+                    ),
                 )
                 return curation.apply_labels(
-                    items,
+                    [item],
                     output,
                     profile.label_max_chars,
                     allowed_evidence_by_object=allowed_evidence_by_object,
+                    visual_evidence_by_object=visual_evidence_by_object,
                 ) > 0
             except (ProviderError, ValueError, TypeError, KeyError) as error:
                 logger.warning(
-                    "labels for chapter '%s' failed (%s: %s); keeping template text",
-                    chapter.title,
+                    "visual label for object '%s' failed (%s: %s); keeping catalogue fallback",
+                    item.object.id,
                     type(error).__name__,
                     error,
                 )
                 return False
 
         results = await asyncio.gather(
-            *(write(chapter) for chapter in exhibition.chapters)
+            *(write(item) for item in by_id.values())
         )
         return sum(1 for ok in results if ok)
 
@@ -807,23 +875,25 @@ class ExhibitionGenerator:
         items: list[ExhibitionItem] = []
         sub_questions = self._sub_questions(agenda.question)
         for index, (obj, role) in enumerate(zip(objects, roles, strict=True)):
+            exhibition_obj = curation.with_collection_image_evidence(obj)
             item_id = str(uuid4())
             role_label = ROLE_LABELS[role]
             rotated = alternatives_pool[index * 3 :] + alternatives_pool[: index * 3]
             items.append(
                 ExhibitionItem(
                     id=item_id,
-                    object=obj,
+                    object=exhibition_obj,
                     role=role,
                     role_label=role_label,
-                    display_title=curation.display_title(obj),
+                    display_title=curation.display_title(exhibition_obj),
                     sub_question=sub_questions[index % len(sub_questions)],
                     why_selected=(
-                        f"它带有可定位的机构记录，并在“{role_label}”的位置支撑这条线索。"
+                        "馆方记录提供了可核对的题名、年代或材料信息，"
+                        f"可用来追问：{sub_questions[index % len(sub_questions)]}"
                     ),
                     relation=self._relation(index, role_label),
                     label_sentences=curation.label_sentences(
-                        obj, item_id, role_label, profile.label_max_chars
+                        exhibition_obj, item_id, role_label, profile.label_max_chars
                     ),
                     alternatives=rotated[:3],
                     order=index,
@@ -860,7 +930,7 @@ class ExhibitionGenerator:
             versions=VersionInfo(
                 model=self.settings.deepseek_model if self.settings else "deterministic",
                 provider="deterministic",
-                prompt="v3-curatorial-brief-2026-08-09",
+                prompt="v4-vision-public-copy-2026-08-28",
                 collection=collection.version,
                 validator="p0-2",
             ),
@@ -1490,36 +1560,25 @@ class ExhibitionGenerator:
 
     @staticmethod
     def _why_selected(role_label: str, sub_question: str) -> str:
-        return f"该藏品具有可定位的机构证据，并在“{role_label}”位置回应子问题“{sub_question}”。"
+        del role_label
+        return (
+            "馆方记录提供了可核对的题名、年代或材料信息，"
+            f"可用来追问：{sub_question}"
+        )
 
     @staticmethod
     def _relation(index: int, role_label: str) -> str:
+        del role_label
         if index == 0:
-            return f"以“{role_label}”建立问题入口。"
-        return f"承接前一件藏品，并以“{role_label}”推进或限制论证。"
+            return "先从一件有明确馆方记录的实物开始，确认我们究竟在比较什么。"
+        return "与前一件并看时，先比较年代、材料、用途或形象是否真的相同。"
 
     @staticmethod
     def _label_sentences(
         obj: MuseumObject, item_id: str, role_label: str, sub_question: str
     ) -> list[LabelSentence]:
-        evidence = obj.evidence[0]
-        original = re.sub(r"\s+", " ", evidence.text).strip()
-        if len(original) > 240:
-            original = original[:237].rstrip() + "…"
-        return [
-            LabelSentence(
-                id=f"{item_id}-s1",
-                text=f"馆方原始记录（保留原文）：{original}",
-                type=SentenceType.INSTITUTION_FACT,
-                evidence_ids=[evidence.id],
-            ),
-            LabelSentence(
-                id=f"{item_id}-s2",
-                text=f"基于上述馆方材料，本展把这件藏品置于“{role_label}”位置，用来回应“{sub_question}”。",
-                type=SentenceType.SYSTEM_INFERENCE,
-                evidence_ids=[evidence.id],
-            ),
-        ]
+        del sub_question
+        return curation.label_sentences(obj, item_id, role_label, 140)
 
     @staticmethod
     def _system_prompt() -> str:

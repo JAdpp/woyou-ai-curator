@@ -359,8 +359,8 @@ const COPY = {
     ),
     agentStageCompose: line("分阶段写作", "Staged composition"),
     agentStageComposeBody: line(
-      "DeepSeek 先形成展览框架，再按章节并发展签；最终题名确定后，海报走独立旁路。",
-      "DeepSeek forms the exhibition frame first, then writes chapter labels in parallel; once the title settles, the poster runs as a separate sidecar.",
+      "DeepSeek 先形成展览框架，再由视觉模型逐件看图、并发撰写展签；最终题名确定后，海报走独立旁路。",
+      "DeepSeek forms the exhibition frame first; a vision model then reads each object image and writes labels in parallel, while the settled title starts the poster sidecar.",
     ),
     agentStageValidate: line("验证后入场", "Validate before entry"),
     agentStageValidateBody: line(
@@ -571,10 +571,10 @@ const COPY = {
     materialLimits: line("这场展览的材料边界", "What this exhibition's material cannot do"),
     replay: line("从头再看", "Watch again"),
     endVisit: line("结束参观", "End the visit"),
-    clickToWalk: line("点击画面开始自由行走", "Click the view to start walking"),
-    walkHint: line(
-      "桌面用 WASD 或方向键，触屏用左下角摇杆；随时可以切回导览",
-      "WASD or arrow keys on desktop, the stick at bottom left on touch; you can switch back to guided at any time",
+    dragToLook: line("按住画面拖动即可转向", "Drag on the view to look around"),
+    dragWalkHint: line(
+      "WASD 或方向键移动；支持的浏览器也可单击画面捕获鼠标，按 Esc 释放",
+      "Move with WASD or the arrow keys; supported browsers can also capture the pointer on click, released with Esc",
     ),
     progressNav: line("参观进度", "Visit progress"),
     previous: line("← 上一处", "← Previous"),
@@ -681,11 +681,17 @@ const COPY = {
   },
   view: {
     sentenceInstitutionFact: line("机构记录", "Institutional record"),
+    sentenceVisualObservation: line("图像观察", "Image observation"),
     sentenceSystemInference: line("系统推断", "System inference"),
     sentenceUncertain: line("仍不确定", "Still uncertain"),
     sourceMetadata: line("机构元数据", "Institutional metadata"),
     sourceCuratorialText: line("机构说明", "Institutional description"),
     sourceProvenance: line("机构来源记录", "Institutional provenance record"),
+    sourceCollectionImage: line("馆藏图像", "Collection image"),
+    sourceCollectionImageDescription: line(
+      "这一来源记录对应送入视觉模型的馆藏图像，只支持颜色、形制、构图与表面状态等可见观察。",
+      "This source is the collection image supplied to the vision model. It supports visible colour, form, composition and surface condition only.",
+    ),
     sourceFieldFallback: line("字段来源", "Field source"),
     noEvidence: line("尚未绑定可定位的馆藏记录", "No locatable collection record attached yet"),
     linkedRecords: line("关联的馆藏记录", "Linked collection records"),
@@ -758,7 +764,8 @@ const COPY = {
     materialLimits: line("这场展览的材料边界", "What this exhibition's material cannot do"),
     generationRecord: line("生成记录", "Generation record"),
     actualPath: line("实际路径", "Actual path"),
-    configuredModel: line("配置模型", "Configured model"),
+    configuredModel: line("展览框架模型", "Exhibition frame model"),
+    configuredLabelsModel: line("展签视觉模型", "Visual label model"),
     promptVersion: line("提示", "Prompt"),
     collection: line("馆藏", "Collection"),
     validator: line("检查器", "Validator"),

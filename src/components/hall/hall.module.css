@@ -17,6 +17,10 @@
   touch-action: none;
 }
 
+.hallRoot[data-mode="free"] canvas { cursor: grab; }
+.hallRoot[data-mode="free"] canvas:active { cursor: grabbing; }
+.hallRoot[data-mode="free"][data-pointer-locked="true"] canvas { cursor: none; }
+
 .overlay {
   position: absolute;
   inset: 0;
@@ -461,6 +465,12 @@
   background: rgb(143 185 150 / 12%);
 }
 
+.labelBody p[data-type="visual_observation"] .sentenceType {
+  color: #8fb996;
+  border-color: rgb(143 185 150 / 55%);
+  background: rgb(143 185 150 / 12%);
+}
+
 .labelBody p[data-type="system_inference"] .sentenceType {
   color: #e8c98a;
   border-color: rgb(232 201 138 / 55%);
@@ -661,6 +671,7 @@
   border-radius: 0.42rem;
   padding: 1rem 1.4rem;
   z-index: 4;
+  pointer-events: none !important;
 }
 
 .freeWalkPrompt { top: 50%; transform: translate(-50%, -50%); }

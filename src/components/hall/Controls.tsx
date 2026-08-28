@@ -3,9 +3,12 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
-import { PointerLockControls } from "@react-three/drei";
-import type { PointerLockControls as PointerLockControlsImpl } from "three-stdlib";
 import { EYE_HEIGHT, flightDuration, walkableBounds, type HallLayout, type TourStop } from "./layout";
+import {
+  accumulatePointerTravel,
+  DRAG_GESTURE_DISTANCE,
+  nextLookAngles,
+} from "./look";
 import {
   buildGuidedRoute,
   routeFlightDuration,
@@ -148,14 +151,18 @@ export function FreeWalkCamera({
   joystick,
   enabled,
   onLockChange,
+  onLookInteraction,
 }: {
   layout: HallLayout;
   joystick: React.RefObject<JoystickState>;
   enabled: boolean;
   onLockChange: (locked: boolean) => void;
+  onLookInteraction: () => void;
 }) {
-  const { camera } = useThree();
-  const controls = useRef<PointerLockControlsImpl>(null);
+  const camera = useThree((state) => state.camera);
+  const gl = useThree((state) => state.gl);
+  const get = useThree((state) => state.get);
+  const setEvents = useThree((state) => state.setEvents);
   const pressed = useRef<Set<string>>(new Set());
   // Scratch vectors reused every frame. They live in refs rather than memos
   // because they are mutated in the render loop, and allocating three vectors
@@ -165,6 +172,7 @@ export function FreeWalkCamera({
     forward: new THREE.Vector3(),
     right: new THREE.Vector3(),
     up: new THREE.Vector3(0, 1, 0),
+    lookEuler: new THREE.Euler(0, 0, 0, "YXZ"),
   });
 
   useEffect(() => {
@@ -189,6 +197,154 @@ export function FreeWalkCamera({
       held.clear();
     };
   }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const canvas = gl.domElement;
+    const ownerDocument = canvas.ownerDocument;
+    const pointerLockAvailable =
+      typeof canvas.requestPointerLock === "function"
+      && typeof ownerDocument.exitPointerLock === "function";
+    let activePointer: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+    let pointerTravel = 0;
+    let dragged = false;
+    let raycasterCentered = false;
+    const previousCompute = get().events.compute;
+
+    const restoreRaycaster = () => {
+      if (!raycasterCentered) return;
+      setEvents({ compute: previousCompute });
+      raycasterCentered = false;
+    };
+
+    const centerRaycaster = () => {
+      if (raycasterCentered) return;
+      setEvents({
+        compute(event, state) {
+          const offsetX = state.size.width / 2;
+          const offsetY = state.size.height / 2;
+          state.pointer.set(
+            offsetX / state.size.width * 2 - 1,
+            -(offsetY / state.size.height) * 2 + 1,
+          );
+          state.raycaster.setFromCamera(state.pointer, state.camera);
+        },
+      });
+      raycasterCentered = true;
+    };
+
+    const rotate = (deltaX: number, deltaY: number) => {
+      if (deltaX === 0 && deltaY === 0) return;
+      const euler = scratch.current.lookEuler;
+      euler.setFromQuaternion(camera.quaternion, "YXZ");
+      const next = nextLookAngles(
+        { yaw: euler.y, pitch: euler.x },
+        deltaX,
+        deltaY,
+      );
+      euler.set(next.pitch, next.yaw, 0, "YXZ");
+      camera.quaternion.setFromEuler(euler);
+    };
+
+    const finishDrag = (event?: PointerEvent) => {
+      if (event && activePointer !== event.pointerId) return;
+      const pointerId = activePointer;
+      activePointer = null;
+      if (pointerId !== null && canvas.hasPointerCapture?.(pointerId)) {
+        canvas.releasePointerCapture(pointerId);
+      }
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || ownerDocument.pointerLockElement === canvas) return;
+      activePointer = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      pointerTravel = 0;
+      dragged = false;
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (activePointer !== event.pointerId || ownerDocument.pointerLockElement === canvas) return;
+      const deltaX = event.clientX - lastX;
+      const deltaY = event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      pointerTravel = accumulatePointerTravel(pointerTravel, deltaX, deltaY);
+      if (pointerTravel >= DRAG_GESTURE_DISTANCE) {
+        dragged = true;
+        onLookInteraction();
+      }
+      rotate(deltaX, deltaY);
+      event.preventDefault();
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      const shouldLock =
+        activePointer === event.pointerId
+        && !dragged
+        && event.pointerType !== "touch"
+        && pointerLockAvailable;
+      finishDrag(event);
+      if (!shouldLock) return;
+      try {
+        const lockResult = canvas.requestPointerLock();
+        if (lockResult && typeof lockResult.catch === "function") {
+          void lockResult.catch(() => onLockChange(false));
+        }
+      } catch {
+        onLockChange(false);
+      }
+    };
+
+    const onMouseMove = (event: MouseEvent) => {
+      if (ownerDocument.pointerLockElement !== canvas) return;
+      rotate(event.movementX, event.movementY);
+      if (event.movementX !== 0 || event.movementY !== 0) onLookInteraction();
+    };
+
+    const onPointerLockChange = () => {
+      const locked = ownerDocument.pointerLockElement === canvas;
+      if (locked) centerRaycaster();
+      else restoreRaycaster();
+      onLockChange(locked);
+      if (locked) activePointer = null;
+    };
+
+    const onPointerLockError = () => {
+      restoreRaycaster();
+      onLockChange(false);
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", finishDrag);
+    canvas.addEventListener("lostpointercapture", finishDrag);
+    ownerDocument.addEventListener("mousemove", onMouseMove);
+    ownerDocument.addEventListener("pointerlockchange", onPointerLockChange);
+    ownerDocument.addEventListener("pointerlockerror", onPointerLockError);
+
+    return () => {
+      finishDrag();
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", finishDrag);
+      canvas.removeEventListener("lostpointercapture", finishDrag);
+      ownerDocument.removeEventListener("mousemove", onMouseMove);
+      ownerDocument.removeEventListener("pointerlockchange", onPointerLockChange);
+      ownerDocument.removeEventListener("pointerlockerror", onPointerLockError);
+      if (ownerDocument.pointerLockElement === canvas) ownerDocument.exitPointerLock?.();
+      restoreRaycaster();
+      onLockChange(false);
+    };
+  }, [camera, enabled, get, gl, onLockChange, onLookInteraction, setEvents]);
 
   useFrame((_state, delta) => {
     if (!enabled) return;
@@ -227,13 +383,5 @@ export function FreeWalkCamera({
     camera.position.copy(next);
   });
 
-  if (!enabled) return null;
-
-  return (
-    <PointerLockControls
-      ref={controls}
-      onLock={() => onLockChange(true)}
-      onUnlock={() => onLockChange(false)}
-    />
-  );
+  return null;
 }

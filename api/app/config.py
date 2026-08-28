@@ -77,6 +77,10 @@ class Settings:
     rag_max_results: int = 250
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-v4-flash"
+    # The public wall-label pass is visual.  Keeping its model separate means
+    # interview, frame and epilogue text stay on the stable text model while
+    # only the stage that actually needs pixels uses the experimental model.
+    deepseek_labels_model: str = "deepseek-v4-flash-vision-exp"
     deepseek_base_url: str = "https://api.deepseek.com"
     # Curation asks a reasoning model for a whole exhibition in one call, so
     # the ceiling is well above a typical chat round-trip.
@@ -198,6 +202,9 @@ class Settings:
             rag_max_results=_positive_int_env("RAG_MAX_RESULTS", 250),
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
             deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            deepseek_labels_model=os.getenv(
+                "DEEPSEEK_LABELS_MODEL", "deepseek-v4-flash-vision-exp"
+            ),
             deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
             deepseek_timeout_seconds=deepseek_timeout_seconds,
             deepseek_frame_timeout_seconds=deepseek_frame_timeout_seconds,

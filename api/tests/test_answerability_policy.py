@@ -10,7 +10,7 @@ from app.collections import CollectionRepository
 from app.config import Settings
 from app.generator import ExhibitionGenerator
 from app.main import create_app
-from app.models import AgendaInput, Exhibition
+from app.models import AgendaInput, Exhibition, SentenceType
 from app.validator import _institution_fact_is_extractive, validate_exhibition
 
 
@@ -198,6 +198,10 @@ def test_institution_fact_must_be_extractive_and_model_cannot_overwrite_it() -> 
     )
     exhibition = Exhibition.model_validate(generated.json())
     first_fact = exhibition.items[0].label_sentences[0]
+    # The public deterministic floor is now a system-authored catalogue
+    # summary; construct an institution-fact claim explicitly to keep testing
+    # the validator's extractive-source boundary.
+    first_fact.type = SentenceType.INSTITUTION_FACT
     first_fact.text = "这是一条没有被引用材料直接支持的任意馆方事实。"
     validation = validate_exhibition(exhibition)
     assert validation.passed is False

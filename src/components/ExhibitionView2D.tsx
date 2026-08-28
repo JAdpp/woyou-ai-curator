@@ -35,6 +35,7 @@ type ViewCopy = ReturnType<typeof useLanguage>["t"]["view"];
 
 function typeLabel(type: LabelSentence["type"], t: ViewCopy): string {
   if (type === "institution_fact") return t.sentenceInstitutionFact;
+  if (type === "visual_observation") return t.sentenceVisualObservation;
   if (type === "uncertain") return t.sentenceUncertain;
   return t.sentenceSystemInference;
 }
@@ -43,6 +44,7 @@ function sourceKindLabel(kind: string, t: ViewCopy): string {
   if (kind === "institution_metadata") return t.sourceMetadata;
   if (kind === "institution_curatorial_text") return t.sourceCuratorialText;
   if (kind === "institution_provenance") return t.sourceProvenance;
+  if (kind === "collection_image") return t.sourceCollectionImage;
   return "";
 }
 
@@ -314,7 +316,7 @@ function ItemBlock({
             {item.object.evidence.map((chunk) => (
               <div key={chunk.id}>
                 <h4>{chunk.sourceLocation}</h4>
-                <p>{chunk.text}</p>
+                <p>{chunk.sourceKind === "collection_image" ? t.sourceCollectionImageDescription : chunk.text}</p>
                 <small>{chunk.sourceTitle}</small>
                 {(chunk.license || chunk.sourceKind) && (
                   <p className={styles.sourceRights}>
@@ -682,6 +684,12 @@ export function ExhibitionView2D({
               <dt>{t.configuredModel}</dt>
               <dd>{exhibition.versions.model}</dd>
             </div>
+            {exhibition.versions.labelsModel && (
+              <div>
+                <dt>{t.configuredLabelsModel}</dt>
+                <dd>{exhibition.versions.labelsModel}</dd>
+              </div>
+            )}
             <div>
               <dt>{t.promptVersion}</dt>
               <dd>{exhibition.versions.prompt}</dd>

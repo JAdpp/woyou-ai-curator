@@ -575,6 +575,12 @@
   align-items: center;
   flex-wrap: wrap;
 }
+
+.label p[data-type="visual_observation"] .sentenceType {
+  color: #4f7357;
+  border-color: #6f8f74;
+  background: rgb(111 143 116 / 10%);
+}
 .why p { line-height: 1.75; margin: 0.6rem 0 0; }
 .relation { color: var(--muted); font-size: 0.85rem; }
 

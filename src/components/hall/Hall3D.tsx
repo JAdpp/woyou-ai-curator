@@ -41,6 +41,7 @@ export function Hall3D({
   );
   const [mode, setMode] = useState<HallMode>("guided");
   const [pointerLocked, setPointerLocked] = useState(false);
+  const [freeLookUsed, setFreeLookUsed] = useState(false);
   const reduceMotion = usePrefersReducedMotion();
   const touchPrimary = useIsTouchPrimary();
   const [cameraArrived, setCameraArrived] = useState(reduceMotion);
@@ -80,15 +81,22 @@ export function Hall3D({
     if (mode === "guided") return;
     setMode("guided");
     setPointerLocked(false);
+    setFreeLookUsed(false);
     setCameraArrived(false);
   }, [mode]);
 
   const enterFree = useCallback(() => {
     if (touchPrimary) return;
+    setPointerLocked(false);
+    setFreeLookUsed(false);
     setMode("free");
     setCameraArrived(false);
     logEvent("free_walk_entered", exhibition.id);
   }, [exhibition.id, touchPrimary]);
+
+  const handleLookInteraction = useCallback(() => {
+    setFreeLookUsed(true);
+  }, []);
 
   useEffect(() => () => canvasCleanupRef.current?.(), []);
 
@@ -137,7 +145,11 @@ export function Hall3D({
   const activeItemId = stop.kind === "artwork" ? stop.itemId ?? null : null;
 
   return (
-    <div className={styles.hallRoot}>
+    <div
+      className={styles.hallRoot}
+      data-mode={effectiveMode}
+      data-pointer-locked={pointerLocked ? "true" : "false"}
+    >
       <Canvas
         className={styles.canvas}
         aria-hidden="true"
@@ -173,6 +185,7 @@ export function Hall3D({
               joystick={joystick}
               enabled
               onLockChange={setPointerLocked}
+              onLookInteraction={handleLookInteraction}
             />
           )}
         </Suspense>
@@ -186,6 +199,7 @@ export function Hall3D({
         mode={effectiveMode}
         cameraArrived={cameraArrived}
         pointerLocked={pointerLocked}
+        freeLookUsed={freeLookUsed}
         reduceMotion={reduceMotion}
         freeWalkAvailable={!touchPrimary}
         onGoTo={goTo}

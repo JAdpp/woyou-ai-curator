@@ -51,6 +51,7 @@ ROLE_LABELS: dict[str, str] = {
 
 class SentenceType(str, Enum):
     INSTITUTION_FACT = "institution_fact"
+    VISUAL_OBSERVATION = "visual_observation"
     SYSTEM_INFERENCE = "system_inference"
     UNCERTAIN = "uncertain"
 
@@ -314,6 +315,7 @@ class ExhibitionItem(ApiModel):
 
 class VersionInfo(ApiModel):
     model: str
+    labels_model: str | None = None
     provider: str
     prompt: str = "p0-2026-08-06"
     collection: str
@@ -735,6 +737,7 @@ class PublicExhibitionItem(ApiModel):
 
 class PublicVersionInfo(ApiModel):
     model: str
+    labels_model: str | None = None
     prompt: str
     collection: str
     validator: str
@@ -905,6 +908,7 @@ class PublicExhibition(ApiModel):
             coverage_limits=exhibition.coverage_limits,
             versions=PublicVersionInfo(
                 model=exhibition.versions.model,
+                labels_model=exhibition.versions.labels_model,
                 prompt=exhibition.versions.prompt,
                 collection=exhibition.versions.collection,
                 validator=exhibition.versions.validator,

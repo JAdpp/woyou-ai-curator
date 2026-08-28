@@ -24,6 +24,7 @@ type ViewCopy = ReturnType<typeof useLanguage>["t"]["view"];
 
 function typeLabel(type: LabelSentence["type"], v: ViewCopy): string {
   if (type === "institution_fact") return v.sentenceInstitutionFact;
+  if (type === "visual_observation") return v.sentenceVisualObservation;
   if (type === "uncertain") return v.sentenceUncertain;
   return v.sentenceSystemInference;
 }
@@ -32,6 +33,7 @@ function sourceKindLabel(kind: string, v: ViewCopy): string {
   if (kind === "institution_metadata") return v.sourceMetadata;
   if (kind === "institution_curatorial_text") return v.sourceCuratorialText;
   if (kind === "institution_provenance") return v.sourceProvenance;
+  if (kind === "collection_image") return v.sourceCollectionImage;
   return "";
 }
 
@@ -335,7 +337,7 @@ function ArtworkLabel({
           {item.object.evidence.map((chunk) => (
             <article key={chunk.id}>
               <h3>{chunk.sourceLocation}</h3>
-              <p>{chunk.text}</p>
+              <p>{chunk.sourceKind === "collection_image" ? v.sourceCollectionImageDescription : chunk.text}</p>
               <small>{chunk.sourceTitle}</small>
               {(chunk.license || chunk.sourceKind) && (
                 <p className={styles.sourceRights}>
@@ -382,6 +384,7 @@ export function HallOverlay({
   mode,
   cameraArrived = true,
   pointerLocked,
+  freeLookUsed,
   reduceMotion,
   freeWalkAvailable,
   onGoTo,
@@ -397,6 +400,7 @@ export function HallOverlay({
   /** Narration waits until the guided camera has reached this stop. */
   cameraArrived?: boolean;
   pointerLocked: boolean;
+  freeLookUsed: boolean;
   reduceMotion: boolean;
   freeWalkAvailable: boolean;
   onGoTo: (index: number) => void;
@@ -659,10 +663,10 @@ export function HallOverlay({
         </>
       )}
 
-      {mode === "free" && !pointerLocked && (
+      {mode === "free" && !pointerLocked && !freeLookUsed && (
         <div className={styles.freeWalkPrompt}>
-          <p>{t.clickToWalk}</p>
-          <small>{t.walkHint}</small>
+          <p>{t.dragToLook}</p>
+          <small>{t.dragWalkHint}</small>
         </div>
       )}
 

@@ -22,6 +22,7 @@ MAX_ITEMS = 12
 
 MIN_EVIDENCE_CHUNKS_FULL = 3
 MIN_EVIDENCE_CHUNKS_THIN = 2
+COLLECTION_IMAGE_SOURCE_KIND = "collection_image"
 
 
 def _normalized_source_text(value: str) -> str:
@@ -58,7 +59,9 @@ def _validate_curatorial_brief(
     warnings: list[ValidationIssue] = []
     brief = exhibition.curatorial_brief
     if brief is None:
-        if exhibition.versions.prompt.startswith("v3-curatorial-brief"):
+        if exhibition.versions.prompt.startswith(
+            ("v3-curatorial-brief", "v4-vision-public-copy")
+        ):
             errors.append(
                 ValidationIssue(
                     code="CURATORIAL_BRIEF_REQUIRED",
@@ -361,7 +364,14 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
     evidence_binding_ok = True
     publication_metadata_ok = True
     for item in exhibition.items:
-        valid_evidence_ids = {evidence.id for evidence in item.object.evidence}
+        evidence_by_id = {
+            evidence.id: evidence for evidence in item.object.evidence
+        }
+        valid_evidence_ids = set(evidence_by_id)
+        textual_evidence_count = sum(
+            evidence.source_kind != COLLECTION_IMAGE_SOURCE_KIND
+            for evidence in item.object.evidence
+        )
         # Institutions differ in how much they publish; the Met has no
         # curatorial description field at all. Two locatable chunks is the
         # floor, and thin objects are already role-restricted above.
@@ -370,13 +380,13 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
             if item.object.evidence_depth == EvidenceDepth.FULL.value
             else MIN_EVIDENCE_CHUNKS_THIN
         )
-        if len(valid_evidence_ids) < minimum_chunks:
+        if textual_evidence_count < minimum_chunks:
             publication_metadata_ok = False
             errors.append(
                 ValidationIssue(
                     code="INSUFFICIENT_EVIDENCE_CHUNKS",
                     message=(
-                        f"This object has {len(valid_evidence_ids)} evidence chunks; "
+                        f"This object has {textual_evidence_count} textual evidence chunks; "
                         f"{minimum_chunks} are required for its evidence depth."
                     ),
                     item_id=item.id,
@@ -432,11 +442,44 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
                         sentence_id=sentence.id,
                     )
                 )
+            referenced_chunks = [
+                evidence_by_id[evidence_id]
+                for evidence_id in sentence.evidence_ids
+                if evidence_id in evidence_by_id
+            ]
+            references_image = any(
+                chunk.source_kind == COLLECTION_IMAGE_SOURCE_KIND
+                for chunk in referenced_chunks
+            )
+            if sentence.type == SentenceType.VISUAL_OBSERVATION.value:
+                if not referenced_chunks or not all(
+                    chunk.source_kind == COLLECTION_IMAGE_SOURCE_KIND
+                    for chunk in referenced_chunks
+                ):
+                    evidence_binding_ok = False
+                    errors.append(
+                        ValidationIssue(
+                            code="VISUAL_OBSERVATION_SOURCE_INVALID",
+                            message="A visual observation must cite only this object's collection image evidence.",
+                            item_id=item.id,
+                            sentence_id=sentence.id,
+                        )
+                    )
+            elif references_image:
+                evidence_binding_ok = False
+                errors.append(
+                    ValidationIssue(
+                        code="IMAGE_EVIDENCE_TYPE_MISMATCH",
+                        message="Only a visual observation may cite collection image evidence.",
+                        item_id=item.id,
+                        sentence_id=sentence.id,
+                    )
+                )
             if sentence.type == SentenceType.INSTITUTION_FACT.value:
                 referenced_evidence = [
                     evidence.text
-                    for evidence in item.object.evidence
-                    if evidence.id in sentence.evidence_ids
+                    for evidence in referenced_chunks
+                    if evidence.source_kind != COLLECTION_IMAGE_SOURCE_KIND
                 ]
                 if not referenced_evidence:
                     evidence_binding_ok = False

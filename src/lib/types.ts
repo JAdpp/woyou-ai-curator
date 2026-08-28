@@ -1,6 +1,10 @@
 export type PriorKnowledge = "none" | "some" | "familiar";
 export type AnswerabilityStatus = "supported" | "partially_supported" | "unsupported";
-export type SentenceType = "institution_fact" | "system_inference" | "uncertain";
+export type SentenceType =
+  | "institution_fact"
+  | "visual_observation"
+  | "system_inference"
+  | "uncertain";
 export type ExhibitionStatus =
   | "draft"
   | "generating"
@@ -467,6 +471,8 @@ export interface Exhibition {
   status: ExhibitionStatus;
   versions: {
     model: string;
+    /** Image-grounded wall-label model; absent on pre-v4 exhibitions. */
+    labelsModel?: string | null;
     /** Actual text-generation route; absent only on legacy client fixtures. */
     provider?: string;
     prompt: string;

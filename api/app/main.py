@@ -224,7 +224,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         mode=settings.store_mode,
         path=settings.store_path if settings.store_mode == "json" else None,
     )
-    generator = ExhibitionGenerator(settings=settings, collections=collections)
+    image_cache = ImageCache(
+        settings.store_path.parent / "cache" / "objects",
+        limit_bytes=settings.image_cache_limit_mb * 1024 * 1024,
+    )
+    generator = ExhibitionGenerator(
+        settings=settings,
+        collections=collections,
+        image_cache=image_cache,
+    )
     epilogue_chat_service = EpilogueChatService(generator.provider)
     image_provider: AliyunImageProvider | None = None
     image_provider_error: AliyunImageProviderError | None = None
@@ -304,11 +312,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     jobs = JobStore(max_job_seconds=settings.generation_job_timeout_seconds)
     poster_background_tasks: set[asyncio.Task[bool]] = set()
     audio_prewarm_tasks: set[asyncio.Task[None]] = set()
-    image_cache = ImageCache(
-        settings.store_path.parent / "cache" / "objects",
-        limit_bytes=settings.image_cache_limit_mb * 1024 * 1024,
-    )
-
     app.state.settings = settings
     app.state.collections = collections
     app.state.store = store
@@ -746,7 +749,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async def start_final_poster(exhibition: Exhibition) -> None:
                 """Start the poster after the frame pass fixes its final title.
 
-                It can still run alongside the independent per-chapter label
+                It can still run alongside the independent per-object label
                 calls, without freezing a deterministic pre-frame title into
                 the composed image.
                 """

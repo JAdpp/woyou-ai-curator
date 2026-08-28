@@ -993,6 +993,157 @@ def test_labels_payload_is_bounded_and_carries_both_titles(client: TestClient) -
             assert len(chunk["text"]) <= curation.MAX_EVIDENCE_CHARS
 
 
+def test_labels_payload_separates_collection_image_from_catalogue_evidence(
+    client: TestClient,
+) -> None:
+    curation, exhibition, _plan, profile = _plan_and_items(client)
+    item = exhibition.items[0]
+    chapter = next(
+        chapter for chapter in exhibition.chapters if item.id in chapter.item_ids
+    )
+    visual = curation.image_evidence(item.object)
+    assert visual is not None
+
+    payload = curation.labels_payload(
+        profile,
+        chapter,
+        [item],
+        exhibition.curatorial_brief,
+        available_visual_evidence_ids={visual.id},
+    )
+    raw_item = payload["items"][0]
+    assert raw_item["imageEvidence"] == {
+        "id": visual.id,
+        "sourceKind": "collection_image",
+        "supports": visual.supports,
+    }
+    assert visual.id not in {chunk["id"] for chunk in raw_item["evidence"]}
+    assert all(
+        chunk.source_kind != "collection_image"
+        for chunk in curation.catalogue_evidence(item.object)
+    )
+
+
+def test_visual_label_binds_pixels_and_catalogue_claims_to_separate_sources(
+    client: TestClient,
+) -> None:
+    import pytest
+
+    curation, exhibition, _plan, profile = _plan_and_items(client)
+    item = exhibition.items[0]
+    visual = curation.image_evidence(item.object)
+    assert visual is not None
+    text_evidence = curation.catalogue_evidence(item.object)[0]
+    valid_output = {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "displayTitle": "山水册页",
+                "labelSentences": [
+                    {
+                        "text": "画面上方留白较多，墨色集中在下半部。",
+                        "type": "visual_observation",
+                        "evidenceIds": [visual.id],
+                    },
+                    {
+                        "text": "馆方将它著录为纸本水墨画。",
+                        "type": "system_inference",
+                        "evidenceIds": [text_evidence.id],
+                    },
+                ],
+            }
+        ]
+    }
+
+    applied = curation.apply_labels(
+        [item],
+        valid_output,
+        profile.label_max_chars,
+        allowed_evidence_by_object={item.object.id: {text_evidence.id}},
+        visual_evidence_by_object={item.object.id: visual.id},
+    )
+    assert applied == 1
+    assert [sentence.type for sentence in item.label_sentences] == [
+        "visual_observation",
+        "system_inference",
+    ]
+
+    wrong_source = {
+        "items": [
+            {
+                **valid_output["items"][0],
+                "labelSentences": [
+                    {
+                        "text": "这句把图像观察错误地绑定到文字记录。",
+                        "type": "visual_observation",
+                        "evidenceIds": [text_evidence.id],
+                    },
+                    valid_output["items"][0]["labelSentences"][1],
+                ],
+            }
+        ]
+    }
+    before = item.model_dump(mode="json")
+    with pytest.raises(ValueError, match="collection image"):
+        curation.apply_labels(
+            [item],
+            wrong_source,
+            profile.label_max_chars,
+            allowed_evidence_by_object={item.object.id: {text_evidence.id}},
+            visual_evidence_by_object={item.object.id: visual.id},
+        )
+    assert item.model_dump(mode="json") == before
+
+
+def test_visual_label_keeps_both_source_layers_when_model_exceeds_budget(
+    client: TestClient,
+) -> None:
+    curation, exhibition, _plan, profile = _plan_and_items(client)
+    item = exhibition.items[0]
+    visual = curation.image_evidence(item.object)
+    assert visual is not None
+    text_evidence = curation.catalogue_evidence(item.object)[0]
+    output = {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "displayTitle": "山水册页",
+                "labelSentences": [
+                    {
+                        "text": "画面上方留出大片空白，墨色集中在下半部，近处树干向左倾斜，远山只用淡墨勾出轮廓，右侧还有一条狭窄水道穿过坡脚。",
+                        "type": "visual_observation",
+                        "evidenceIds": [visual.id],
+                    },
+                    {
+                        "text": "馆方将它著录为十九世纪的纸本水墨画，并记录其来自中国，现由克利夫兰艺术博物馆收藏。",
+                        "type": "system_inference",
+                        "evidenceIds": [text_evidence.id],
+                    },
+                ],
+            }
+        ]
+    }
+
+    assert sum(
+        len(sentence["text"])
+        for sentence in output["items"][0]["labelSentences"]
+    ) > profile.label_max_chars
+    assert curation.apply_labels(
+        [item],
+        output,
+        profile.label_max_chars,
+        allowed_evidence_by_object={item.object.id: {text_evidence.id}},
+        visual_evidence_by_object={item.object.id: visual.id},
+    ) == 1
+    assert sum(len(sentence.text) for sentence in item.label_sentences) <= (
+        profile.label_max_chars
+    )
+    assert [sentence.type for sentence in item.label_sentences] == [
+        "visual_observation",
+        "system_inference",
+    ]
+
+
 def test_labels_reject_hidden_evidence_without_partial_chapter_mutation(
     client: TestClient,
 ) -> None:
@@ -1167,10 +1318,11 @@ def test_model_output_supplies_chinese_titles_and_multi_sentence_labels(
     ]
     for item in applied.items:
         assert item.display_title.startswith("青瓷小瓶")
-        # Institution sentence survives, and the model's three are appended.
+        # Public labels contain only the model's bounded visitor-facing prose;
+        # the full institution record remains in the source drawer.
         kinds = [sentence.type for sentence in item.label_sentences]
-        assert kinds.count("institution_fact") == 1
-        assert len(item.label_sentences) >= 4, "labels should be a paragraph, not one line"
+        assert "institution_fact" not in kinds
+        assert 2 <= len(item.label_sentences) <= 3
     assert applied.epilogue.text == "结语。"
     assert applied.space_design.wall_color == "#e0dccc"
 

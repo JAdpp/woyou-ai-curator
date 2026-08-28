@@ -1,17 +1,34 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import re
 import ssl
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Sequence
 
 import httpx
 
 from ..config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class VisionImage:
+    """One trusted museum image supplied to the visual label model.
+
+    ``payload`` is deliberately transient.  It is encoded only while building
+    the provider request and is never copied into an exhibition record or log.
+    The marker fields keep a multimodal response bound to the correct object.
+    """
+
+    object_id: str
+    evidence_id: str
+    payload: bytes
+    mime_type: str = "image/webp"
 
 
 class ProviderError(RuntimeError):
@@ -35,6 +52,7 @@ class DeepSeekProvider:
     def __init__(self, settings: Settings) -> None:
         self.api_key = settings.deepseek_api_key
         self.model = settings.deepseek_model
+        self.labels_model = settings.deepseek_labels_model
         self.base_url = settings.deepseek_base_url
         self.timeout_seconds = settings.deepseek_timeout_seconds
 
@@ -43,6 +61,77 @@ class DeepSeekProvider:
         return bool(self.api_key)
 
     async def generate_json(self, system_prompt: str, user_payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._generate_json(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            # These calls return a constrained JSON contract rather than an
+            # open-ended reasoning trace. Disabling thinking keeps the body
+            # bounded and avoids a long streamed response consuming the whole
+            # visitor-facing generation deadline.
+            thinking={"type": "disabled"},
+            max_tokens=4096,
+        )
+
+    async def generate_json_with_images(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+        images: Sequence[VisionImage],
+    ) -> dict[str, Any]:
+        """Generate JSON from text plus object-bound museum images.
+
+        Images are sent as 1024px WebP data URLs prepared by the application's
+        existing bounded image cache.  That route is important for institutions
+        such as AIC, whose image host requires an identifying request header
+        that a remote model-side fetch cannot provide.
+        """
+
+        content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": json.dumps(user_payload, ensure_ascii=False),
+            }
+        ]
+        for image in images:
+            marker = (
+                "以下馆藏图像仅属于 "
+                f"objectId={image.object_id}；imageEvidenceId={image.evidence_id}。"
+            )
+            encoded = base64.b64encode(image.payload).decode("ascii")
+            content.extend(
+                [
+                    {"type": "text", "text": marker},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image.mime_type};base64,{encoded}",
+                            "detail": "original",
+                        },
+                    },
+                ]
+            )
+
+        return await self._generate_json(
+            model=self.labels_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            thinking={"type": "disabled"},
+            max_tokens=1600,
+        )
+
+    async def _generate_json(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        thinking: dict[str, str] | None = None,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
         if not self.api_key:
             raise ProviderError(
                 "DeepSeek is not configured",
@@ -53,14 +142,16 @@ class DeepSeekProvider:
             )
 
         request_body = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
+            "model": model,
+            "messages": messages,
             "response_format": {"type": "json_object"},
             "temperature": 0.2,
         }
+        if thinking is not None:
+            request_body["thinking"] = thinking
+        if max_tokens is not None:
+            request_body["max_tokens"] = max_tokens
+
         async def request() -> httpx.Response:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 return await client.post(
