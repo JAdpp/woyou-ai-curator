@@ -1,5 +1,6 @@
 "use client";
 
+import { Component, Suspense, type ReactNode } from "react";
 import * as THREE from "three";
 import { useTexture } from "@react-three/drei";
 import { resolveObjectImageUrl } from "@/lib/api";
@@ -47,6 +48,66 @@ function kelvinToColor(kelvin: number): THREE.Color {
   );
 }
 
+/**
+ * A museum CDN failure must not tear down the entire hall. Texture hooks throw
+ * through Suspense after a rejected request, so each object gets its own error
+ * boundary and can fall back to an honest neutral surface while the route
+ * remains walkable. The HTML overlay still exposes the title and metadata.
+ */
+class ArtworkTextureBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode; textureUrl: string },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    // suspend-react retains rejected loader entries. Clear only this image so
+    // leaving and re-entering the hall can try the institution CDN again.
+    useTexture.clear(this.props.textureUrl);
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function ArtworkUnavailableMaterial({
+  design,
+}: {
+  design: SpaceDesignSpec;
+}) {
+  return (
+    <meshStandardMaterial
+      name="museum-image-unavailable"
+      color={design.wallColor}
+      emissive={design.accentColor}
+      emissiveIntensity={0.08}
+      roughness={1}
+    />
+  );
+}
+
+function ArtworkImageMaterial({ textureUrl }: { textureUrl: string }) {
+  // Configured in the load callback rather than by mutating the returned
+  // texture: drei caches textures across components, so this runs once per
+  // image instead of on every render of every artwork that shares it.
+  const texture = useTexture(textureUrl, (loaded) => {
+    const applyTo = (candidate: THREE.Texture) => {
+      candidate.colorSpace = THREE.SRGBColorSpace;
+      candidate.anisotropy = 4;
+      candidate.needsUpdate = true;
+    };
+    if (Array.isArray(loaded)) loaded.forEach(applyTo);
+    else applyTo(loaded);
+  });
+
+  return <meshBasicMaterial map={texture} toneMapped={false} />;
+}
+
 function Artwork({
   placement,
   design,
@@ -62,24 +123,9 @@ function Artwork({
   const style = vitrine ? "vitrine" : design.frameStyle;
   const profile = FRAME_PROFILE[style];
   const { width, height } = placement;
-
   // Textures come from our own proxy: institution CDNs do not all send CORS
   // headers, and WebGL cannot sample a tainted image.
-  // Configured in the load callback rather than by mutating the returned
-  // texture: drei caches textures across components, so this runs once per
-  // image instead of on every render of every artwork that shares it.
-  const texture = useTexture(
-    resolveObjectImageUrl(placement.item.object.id, 1024),
-    (loaded) => {
-      const applyTo = (candidate: THREE.Texture) => {
-        candidate.colorSpace = THREE.SRGBColorSpace;
-        candidate.anisotropy = 4;
-        candidate.needsUpdate = true;
-      };
-      if (Array.isArray(loaded)) loaded.forEach(applyTo);
-      else applyTo(loaded);
-    },
-  );
+  const textureUrl = resolveObjectImageUrl(placement.item.object.id, 1024);
 
   return (
     <group position={placement.position} rotation={[0, placement.rotationY, 0]}>
@@ -109,7 +155,15 @@ function Artwork({
         }}
       >
         <planeGeometry args={[width, height]} />
-        <meshBasicMaterial map={texture} toneMapped={false} />
+        <ArtworkTextureBoundary
+          key={textureUrl}
+          textureUrl={textureUrl}
+          fallback={<ArtworkUnavailableMaterial design={design} />}
+        >
+          <Suspense fallback={<ArtworkUnavailableMaterial design={design} />}>
+            <ArtworkImageMaterial textureUrl={textureUrl} />
+          </Suspense>
+        </ArtworkTextureBoundary>
       </mesh>
 
       {/* Highlight ring when the item is the current tour stop. */}
