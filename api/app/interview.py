@@ -104,6 +104,7 @@ EXCLUSION_CHOICES = (
 )
 
 NO_OPEN_QUESTION_VALUE = "__no_question__"
+RECOMMENDED_QUESTION_PREFIX = "__recommended_question__:"
 
 # Shown when the model is unavailable. Deliberately about how one looks at
 # objects rather than about any particular subject, so they stay true whatever
@@ -123,8 +124,14 @@ class InterviewService:
     Sessions live in the injected store dict; the caller decides persistence.
     """
 
-    def __init__(self, collections: CollectionRepository) -> None:
+    def __init__(
+        self,
+        collections: CollectionRepository,
+        *,
+        audit_available: bool = False,
+    ) -> None:
         self.collections = collections
+        self.audit_available = audit_available
 
     # -- helpers ---------------------------------------------------------
 
@@ -407,56 +414,145 @@ class InterviewService:
 
         agenda = state.profile.to_agenda(collection.id)
         try:
-            check = ExhibitionGenerator.probe_answerability(self.collections, agenda)
+            check = ExhibitionGenerator.probe_answerability(
+                self.collections,
+                agenda,
+                audit_available=self.audit_available,
+            )
         except Exception:  # noqa: BLE001 - probing must never break the interview
             return None
-        if check.status == AnswerabilityStatus.SUPPORTED.value:
+        provisional = bool(check.requires_runtime_audit)
+        if check.status == AnswerabilityStatus.SUPPORTED.value and not provisional:
             return None
 
-        available = self._available_domains(collection, language)[:3]
-        if not available:
-            return None
-        if language == "en":
-            covered = " and ".join(label for _id, label, _hint in available[:2])
-            state.negotiation_note = (
-                f"On “{question_text}”, what this collection can actually speak to "
-                f"clusters around {covered}. Taken exactly as you put it, the "
-                "material would be too thin to stand on."
+        # A negotiation may only offer domains that overlap this question's
+        # actual evidence candidates.  Falling back to the three richest
+        # collection domains would silently replace an out-of-domain question
+        # with an unrelated one while claiming it was a supported part.
+        evidence_domain_ids = set(check.coverage.evidence_domain_ids)
+        available = [
+            domain
+            for domain in self._available_domains(collection, language)
+            if domain[0] in evidence_domain_ids
+        ][:3]
+        reviewed_alternatives = [
+            question
+            for question in check.recommended_questions
+            if question.strip() and question.strip() != question_text
+        ][:2]
+
+        alternative_options = [
+            InterviewOption(
+                value=f"{RECOMMENDED_QUESTION_PREFIX}{question}",
+                label=i18n.pick(
+                    language,
+                    f"换成已审定问题：{question}",
+                    f"Switch to a reviewed question: {question}",
+                ),
+                hint=i18n.pick(
+                    language,
+                    "这是另一个可回答的问题，不是原问题的替代证据",
+                    "This is a different answerable question, not evidence for the original",
+                ),
             )
+            for question in reviewed_alternatives
+        ]
+        if language == "en" and provisional:
+            state.negotiation_note = (
+                f"For “{question_text}”, semantic search found promising collection "
+                "candidates, but similarity is only recall: Yan Yuan still needs "
+                "to verify each object against its institution record."
+            )
+            options = [
+                InterviewOption(
+                    value=FREE_TEXT_VALUE,
+                    label="Audit my question as written",
+                    hint="Keep the wording; reject weak nearest neighbours before curation",
+                ),
+                *[
+                    InterviewOption(
+                        value=domain_id,
+                        label=f"Narrow to “{label}”",
+                        hint=hint,
+                    )
+                    for domain_id, label, hint in available
+                ],
+            ]
+            prompt = f"{state.negotiation_note}\nWould you like the audit or a narrower route?"
+        elif language == "en":
+            if available:
+                covered = " and ".join(label for _id, label, _hint in available[:2])
+                state.negotiation_note = (
+                    f"For “{question_text}”, the evidence directly retrieved so far "
+                    f"overlaps with {covered}, but does not support the whole question."
+                )
+            else:
+                state.negotiation_note = (
+                    f"For “{question_text}”, the collection does not currently yield "
+                    "a defensible evidence chain. I will not substitute an unrelated "
+                    "high-volume category."
+                )
             options = [
                 InterviewOption(value=domain_id, label=f"Go in through “{label}”", hint=hint)
                 for domain_id, label, hint in available
-            ]
-            options.append(
+            ] + alternative_options
+            prompt = (
+                f"{state.negotiation_note}\nChoose an explicitly different reviewed "
+                "question, a related evidence route, or rewrite your question."
+            )
+        elif provisional:
+            state.negotiation_note = (
+                f"关于“{question_text}”，语义检索已经找到一批可能相关的馆藏候选；"
+                "但相似度只负责召回，彦远还需要逐件核对馆方证据，不能把近邻直接当成答案。"
+            )
+            options = [
                 InterviewOption(
                     value=FREE_TEXT_VALUE,
-                    label="Keep my question as it is",
-                    hint="Thinner material; the labels will name the gap",
-                )
-            )
-            prompt = f"{state.negotiation_note}\nWhich way would you like to go?"
+                    label="按原问题做语义核查",
+                    hint="保留原问法；策展前逐件审核，弱相关近邻会被剔除",
+                ),
+                *[
+                    InterviewOption(
+                        value=domain_id,
+                        label=f"收窄到「{label}」",
+                        hint=hint,
+                    )
+                    for domain_id, label, hint in available
+                ],
+            ]
+            prompt = f"{state.negotiation_note}\n你想先核查原问题，还是收窄方向？"
         else:
-            covered = "、".join(label for _id, label, _hint in available[:2])
-            state.negotiation_note = (
-                f"关于“{question_text}”，我们手上的馆藏能讲清的部分集中在{covered}；"
-                "完全按你原来的问法来，材料会不够扎实。"
-            )
+            if available:
+                covered = "、".join(label for _id, label, _hint in available[:2])
+                state.negotiation_note = (
+                    f"关于“{question_text}”，当前直接召回的证据与{covered}有交集，"
+                    "但还不能支撑完整问题。"
+                )
+            else:
+                state.negotiation_note = (
+                    f"关于“{question_text}”，当前馆藏还没有形成可靠的证据链；"
+                    "我不会拿馆藏量大的无关门类替代你的问题。"
+                )
             options = [
                 InterviewOption(value=domain_id, label=f"从「{label}」进去", hint=hint)
                 for domain_id, label, hint in available
-            ]
-            options.append(
-                InterviewOption(
-                    value=FREE_TEXT_VALUE,
-                    label="还是按我原来的问题来",
-                    hint="材料会更薄，展签会明确标出缺口",
-                )
+            ] + alternative_options
+            prompt = (
+                f"{state.negotiation_note}\n你可以明确换成另一个已审定问题、"
+                "选择有证据交集的方向，或直接改写问题。"
             )
-            prompt = f"{state.negotiation_note}\n你想怎么走？"
         return InterviewQuestion(
             id=InterviewQuestionId.NEGOTIATION,
             prompt=prompt,
             options=options,
+            allow_free_text=not provisional,
+            free_text_placeholder=(
+                "Rewrite the question you want audited…"
+                if language == "en"
+                else "换一种更具体的问法……"
+            )
+            if not provisional
+            else None,
             step=4,
             total_steps=TOTAL_STEPS,
         )
@@ -569,13 +665,36 @@ class InterviewService:
                 )
 
         elif question_id == InterviewQuestionId.NEGOTIATION:
-            if answer.value and answer.value != FREE_TEXT_VALUE:
+            if free_text:
+                profile.open_question = free_text[:300]
+                matched = self._match_domain(free_text, collection)
+                profile.curiosity_domain_id = matched
+                profile.curiosity_label = (
+                    domain_choices_for(collection, language)[matched][0]
+                    if matched
+                    else ""
+                )
+                turn.answer_label = free_text[:60]
+            elif answer.value and answer.value.startswith(
+                RECOMMENDED_QUESTION_PREFIX
+            ):
+                reviewed_question = answer.value[
+                    len(RECOMMENDED_QUESTION_PREFIX) :
+                ].strip()[:300]
+                profile.open_question = reviewed_question
+                profile.curiosity_domain_id = None
+                profile.curiosity_label = ""
+                turn.answer_label = reviewed_question[:60]
+            elif answer.value and answer.value != FREE_TEXT_VALUE:
                 profile.curiosity_domain_id = answer.value
                 profile.curiosity_label = domain_choices_for(collection, language).get(
                     answer.value, (answer.value, "")
                 )[0]
-                # The visitor accepted a narrower route, so the original
-                # free-form wording is kept only as context, not as the query.
+                # The visitor accepted a narrower route. Make that route the
+                # actual retrieval query; merely setting a filter while leaving
+                # the original unsupported question active would be a false
+                # negotiation because VisitorProfile.to_agenda prioritises it.
+                profile.open_question = profile.curiosity_label
                 turn.answer_label = i18n.pick(
                     language,
                     f"从「{profile.curiosity_label}」进去",

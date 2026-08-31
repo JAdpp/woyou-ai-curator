@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
@@ -103,6 +104,39 @@ def test_agenda_check_uses_camel_case_contract(
     assert "prior_knowledge" not in response.text
 
 
+@pytest.mark.parametrize(
+    "duration_minutes,expected_status,expected_basis",
+    [
+        (5, "supported", "reviewed_question_card"),
+        (10, "unsupported", "audit_unavailable"),
+        (15, "unsupported", "audit_unavailable"),
+    ],
+)
+def test_reviewed_card_never_promises_fewer_objects_than_the_visit_requires(
+    client: TestClient,
+    agenda_payload: dict[str, object],
+    duration_minutes: int,
+    expected_status: str,
+    expected_basis: str,
+) -> None:
+    agenda = {**agenda_payload, "durationMinutes": duration_minutes}
+    checked = client.post("/api/agenda/check", json=agenda)
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["status"] == expected_status
+    assert checked.json()["decisionBasis"] == expected_basis
+
+    # The agenda check must never promise that a five-object reviewed spine can
+    # fill an 8/12-object visit while the audit service is unavailable. The
+    # legacy sync endpoint itself always builds a five-object micro-exhibition;
+    # profile generation has separate variable-duration coverage.
+    if duration_minutes == 5:
+        generated = client.post(
+            "/api/exhibitions/generate-sync", json={"agenda": agenda}
+        )
+        assert generated.status_code == 200, generated.text
+        assert len(generated.json()["items"]) == 5
+
+
 def test_generation_edit_validation_and_review_workflow(
     client: TestClient, agenda_payload: dict[str, object]
 ) -> None:
@@ -148,9 +182,8 @@ def test_generation_edit_validation_and_review_workflow(
         f"/api/exhibitions/{exhibition_id}/focus",
         json={"focus": "山水图像中的移动视点如何被馆藏材料呈现？"},
     )
-    assert focus.status_code == 200
-    assert focus.json()["question"].startswith("山水图像")
-    assert focus.json()["exhibitionTheme"] == "山水图像中的移动视点如何被馆藏材料呈现"
+    assert focus.status_code == 422
+    assert focus.json()["error"]["code"] == "FOCUS_REQUIRES_NEW_EXHIBITION"
 
     validated = client.post(f"/api/exhibitions/{exhibition_id}/validate")
     assert validated.status_code == 200

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 from app.audio_guide import AudioGuideService, build_audio_guide_text
-from app.models import Chapter, Exhibition, LabelSentence, SentenceType
+from app.models import (
+    Chapter,
+    Exhibition,
+    LabelSentence,
+    LocalizedObjectMetadata,
+    SentenceType,
+)
 from app.providers.aliyun_tts import AliyunTtsProviderError, GeneratedSpeech
 
 
@@ -122,7 +129,13 @@ def test_each_stop_kind_uses_only_the_requested_exhibition_record(
     assert "展后题笺里还留着2则问题" in provider.calls[2]
     assert "问题甲应该怎样回答" not in provider.calls[2]
     spoken_title = exhibition.items[0].display_title or exhibition.items[0].object.title
-    assert spoken_title in provider.calls[1]
+    if re.search(r"[\u3400-\u9fff]", spoken_title) and not re.search(
+        r"[A-Za-z]", spoken_title
+    ):
+        assert spoken_title in provider.calls[1]
+    else:
+        assert spoken_title not in provider.calls[1]
+        assert "请看这件展品" in provider.calls[1]
 
 
 def test_audio_refs_are_required_and_scoped_to_the_exhibition(
@@ -250,4 +263,119 @@ def test_artwork_builder_avoids_duplicate_selection_copy_and_long_english_fact(
     assert "This long institution catalogue paragraph" not in spoken
     assert "机构记录指出作品以水墨绘于纸本" in spoken
     assert "可以注意画面中视线停顿的变化" in spoken
-    assert item.relation in spoken
+    assert item.relation not in spoken
+
+
+def test_chinese_artwork_audio_never_falls_back_to_raw_english_metadata(
+    client, agenda_payload: dict[str, object]
+) -> None:
+    exhibition = Exhibition.model_validate(_generate(client, agenda_payload))
+    item = exhibition.items[0]
+    item.display_title = "Woman with a Dog"
+    item.object.title = "Woman with a Dog"
+    item.object.title_original = None
+    item.object.maker = "Unknown artist"
+    item.object.creator = "Unknown artist"
+    item.object.date = "1710-1720 CE"
+    item.object.medium = "watercolor on ivory"
+    item.object.material = "watercolor on ivory"
+    item.object.culture = "Italy"
+    item.object.institution = "Cleveland Museum of Art"
+    item.localized_metadata = LocalizedObjectMetadata()
+    item.label_sentences = [
+        LabelSentence(
+            id="zh-only",
+            text="女子身旁站着一只小犬，两者都面向画面左侧。",
+            type=SentenceType.VISUAL_OBSERVATION,
+            evidence_ids=["image-1"],
+        )
+    ]
+
+    spoken = build_audio_guide_text(exhibition, "artwork", item.id)
+
+    for raw in (
+        "Woman with a Dog",
+        "Unknown artist",
+        "1710-1720 CE",
+        "watercolor on ivory",
+        "Italy",
+        "Cleveland Museum of Art",
+    ):
+        assert raw not in spoken
+    assert "请看这件展品" in spoken
+    assert "女子身旁站着一只小犬" in spoken
+    assert re.search(r"[A-Za-z]", spoken) is None
+
+
+def test_chinese_audio_extracts_bracketed_han_title_and_rejects_other_scripts(
+    client, agenda_payload: dict[str, object]
+) -> None:
+    exhibition = Exhibition.model_validate(_generate(client, agenda_payload))
+    item = exhibition.items[0]
+    item.display_title = ""
+    item.object.title = "산시청람도 [山市晴嵐圖]"
+    item.object.title_original = "산시청람도 [山市晴嵐圖]"
+    item.localized_metadata = LocalizedObjectMetadata(
+        creator="作者かな",
+        date="١٨世纪",
+        medium="青铜",
+    )
+
+    spoken = build_audio_guide_text(exhibition, "artwork", item.id)
+
+    assert "请看《山市晴嵐圖》" in spoken
+    assert "산시청람도" not in spoken
+    assert "かな" not in spoken
+    assert "١٨" not in spoken
+    assert "材料与技法：青铜" in spoken
+
+
+def test_chinese_artwork_audio_reads_validated_localized_metadata(
+    client, agenda_payload: dict[str, object]
+) -> None:
+    exhibition = Exhibition.model_validate(_generate(client, agenda_payload))
+    item = exhibition.items[0]
+    item.display_title = "女子与犬"
+    item.object.title = "Woman with a Dog"
+    item.object.date = "1710-1720"
+    item.object.medium = "watercolor on ivory"
+    item.object.culture = "Italy"
+    item.object.institution = "Cleveland Museum of Art"
+    item.localized_metadata = LocalizedObjectMetadata(
+        creator="佚名",
+        date="1710年至1720年",
+        medium="象牙水彩",
+        culture="十八世纪意大利",
+        institution="克利夫兰艺术博物馆",
+    )
+
+    spoken = build_audio_guide_text(exhibition, "artwork", item.id)
+
+    for translated in (
+        "女子与犬",
+        "1710年至1720年",
+        "象牙水彩",
+        "十八世纪意大利",
+        "克利夫兰艺术博物馆",
+    ):
+        assert translated in spoken
+    assert "Woman with a Dog" not in spoken
+    assert "watercolor on ivory" not in spoken
+
+
+def test_english_artwork_audio_keeps_institution_metadata(
+    client, agenda_payload: dict[str, object]
+) -> None:
+    exhibition = Exhibition.model_validate(_generate(client, agenda_payload))
+    exhibition.agenda.language = "en"
+    item = exhibition.items[0]
+    item.display_title = "Woman with a Dog"
+    item.object.title = "Woman with a Dog"
+    item.object.medium = "watercolor on ivory"
+    item.object.institution = "Cleveland Museum of Art"
+
+    spoken = build_audio_guide_text(exhibition, "artwork", item.id)
+
+    assert "Woman with a Dog" in spoken
+    assert "watercolor on ivory" in spoken
+    assert "Cleveland Museum of Art" in spoken

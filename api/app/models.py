@@ -277,6 +277,20 @@ class CoverageSummary(ApiModel):
 class AgendaCheckResponse(ApiModel):
     status: AnswerabilityStatus
     can_generate: bool
+    # A deterministic count is only a recall-stage signal for an open semantic
+    # query.  The visitor-facing interview uses this flag to avoid presenting
+    # unreviewed vector neighbours as a final evidence decision.
+    requires_runtime_audit: bool = False
+    decision_basis: Literal[
+        "reviewed_question_card",
+        "reviewed_policy",
+        "predicate_boundary",
+        "open_dense_provisional",
+        "runtime_audit_provisional",
+        "audit_unavailable",
+        "lexical_retrieval",
+        "browse",
+    ] = "lexical_retrieval"
     exhibition_theme: str = Field(min_length=1, max_length=120)
     answerable_part: str | None = None
     gaps: list[str] = Field(default_factory=list)
@@ -295,6 +309,22 @@ class LabelSentence(ApiModel):
     evidence_ids: list[str] = Field(min_length=1)
 
 
+class LocalizedObjectMetadata(ApiModel):
+    """Visitor-language renderings of institution catalogue fields.
+
+    The source record on :class:`MuseumObject` remains untouched and is still
+    the auditable value shown in the source drawer. These fields exist only so
+    a Chinese exhibition and its audio guide do not unexpectedly switch to
+    English for the tombstone metadata.
+    """
+
+    creator: str = ""
+    date: str = ""
+    medium: str = ""
+    culture: str = ""
+    institution: str = ""
+
+
 class ExhibitionItem(ApiModel):
     id: str
     object: MuseumObject
@@ -305,6 +335,9 @@ class ExhibitionItem(ApiModel):
     # Chinese title or a model translation. The English original stays on the
     # object record and in the source panel.
     display_title: str = ""
+    localized_metadata: LocalizedObjectMetadata = Field(
+        default_factory=LocalizedObjectMetadata
+    )
     sub_question: str
     why_selected: str
     relation: str
@@ -729,6 +762,10 @@ class PublicExhibitionItem(ApiModel):
     object: PublicMuseumObject
     role: CuratorialRole
     role_label: str
+    display_title: str = ""
+    localized_metadata: LocalizedObjectMetadata = Field(
+        default_factory=LocalizedObjectMetadata
+    )
     sub_question: str
     why_selected: str
     relation: str
@@ -869,6 +906,8 @@ class PublicExhibition(ApiModel):
                     object=public_object,
                     role=item.role,
                     role_label=item.role_label,
+                    display_title=item.display_title,
+                    localized_metadata=item.localized_metadata,
                     sub_question=item.sub_question,
                     why_selected=item.why_selected,
                     relation=item.relation,

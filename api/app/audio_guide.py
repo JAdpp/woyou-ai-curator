@@ -57,6 +57,44 @@ def _join(*parts: object) -> str:
     return "".join(segment for part in parts if (segment := _sentence(part)))
 
 
+def _language(exhibition: Exhibition) -> str:
+    if exhibition.visitor_profile is not None:
+        return exhibition.visitor_profile.language
+    return exhibition.agenda.language
+
+
+def _safe_chinese(value: object) -> str:
+    """Return narration-safe Chinese or omit the whole unlocalised field."""
+
+    text = _clean_spoken_text(value)
+    forbidden_script = re.compile(
+        r"[A-Za-z\u0400-\u052f\u0600-\u06ff\u1100-\u11ff"
+        r"\u3040-\u30ff\u3130-\u318f\u31f0-\u31ff\uac00-\ud7af]"
+    )
+    if forbidden_script.search(text):
+        # Some institutions publish a local-script title followed by a
+        # catalogue-supplied Chinese title in brackets. Prefer that explicit
+        # Han segment instead of sending Hangul/Kana/etc. to a Chinese voice.
+        for candidate in re.findall(r"[\[【（(]([^\]】）)]+)[\]】）)]", text):
+            candidate = _clean_spoken_text(candidate)
+            if re.search(r"[\u3400-\u9fff]", candidate) and not forbidden_script.search(
+                candidate
+            ):
+                return candidate
+        return ""
+    if not re.search(r"[\u3400-\u9fff]", text):
+        return ""
+    return text
+
+
+def _chinese_title(item: ExhibitionItem) -> str:
+    return (
+        _safe_chinese(item.display_title)
+        or _safe_chinese(item.object.title_original)
+        or "这件展品"
+    )
+
+
 def _find_chapter(exhibition: Exhibition, reference: str | None) -> Chapter:
     if not reference or not reference.strip():
         raise AudioGuideReferenceError(
@@ -127,11 +165,22 @@ def build_audio_guide_text(
     if kind == "chapter":
         chapter = _find_chapter(exhibition, reference)
         item_lookup = {item.id: item for item in exhibition.items}
-        titles = [
-            _clean_spoken_text(item_lookup[item_id].display_title or item_lookup[item_id].object.title_original or item_lookup[item_id].object.title)
-            for item_id in chapter.item_ids
-            if item_id in item_lookup
-        ]
+        if _language(exhibition) == "zh":
+            titles = [
+                _chinese_title(item_lookup[item_id])
+                for item_id in chapter.item_ids
+                if item_id in item_lookup
+            ]
+        else:
+            titles = [
+                _clean_spoken_text(
+                    item_lookup[item_id].display_title
+                    or item_lookup[item_id].object.title_original
+                    or item_lookup[item_id].object.title
+                )
+                for item_id in chapter.item_ids
+                if item_id in item_lookup
+            ]
         return _join(
             f"现在来到第{chapter.order + 1}个叙事区段，《{_clean_spoken_text(chapter.title)}》。",
             chapter.lead_in,
@@ -141,26 +190,47 @@ def build_audio_guide_text(
     if kind == "artwork":
         item = _find_artwork(exhibition, reference)
         obj = item.object
+        if _language(exhibition) == "zh":
+            localized = item.localized_metadata
+            title = _chinese_title(item)
+            creator = _safe_chinese(localized.creator)
+            date = _safe_chinese(localized.date)
+            medium = _safe_chinese(localized.medium)
+            culture = _safe_chinese(localized.culture)
+            institution = _safe_chinese(localized.institution)
+            metadata_parts = [
+                f"作者或制作者：{creator}" if creator else "",
+                f"年代：{date}" if date else "",
+                f"材料与技法：{medium}" if medium else "",
+                f"文化或地域：{culture}" if culture else "",
+                f"现藏于{institution}" if institution else "",
+            ]
+            labels = "".join(
+                _sentence(text)
+                for sentence in item.label_sentences
+                if (text := _safe_chinese(sentence.text))
+            )
+            return _join(
+                "请看这件展品。" if title == "这件展品" else f"请看《{title}》。",
+                "，".join(part for part in metadata_parts if part),
+                labels,
+            )
+
         title = _clean_spoken_text(item.display_title or obj.title_original or obj.title)
         metadata_parts = [
-            f"作者或制作者：{_clean_spoken_text(obj.maker or obj.creator)}"
+            f"Maker: {_clean_spoken_text(obj.maker or obj.creator)}"
             if obj.maker or obj.creator
             else "",
-            f"年代：{_clean_spoken_text(obj.date)}" if obj.date else "",
-            f"材料与技法：{_clean_spoken_text(obj.medium or obj.material)}"
+            f"Date: {_clean_spoken_text(obj.date)}" if obj.date else "",
+            f"Material and technique: {_clean_spoken_text(obj.medium or obj.material)}"
             if obj.medium or obj.material
             else "",
-            f"现藏于{_clean_spoken_text(obj.institution)}" if obj.institution else "",
+            f"Collection: {_clean_spoken_text(obj.institution)}" if obj.institution else "",
         ]
-        labels = "".join(
-            _sentence(sentence.text)
-            for sentence in item.label_sentences
-            if sentence.type != "institution_fact"
-            or re.search(r"[\u3400-\u9fff]", sentence.text)
-        )
+        labels = "".join(_sentence(sentence.text) for sentence in item.label_sentences)
         return _join(
-            f"请看《{title}》。",
-            "，".join(part for part in metadata_parts if part),
+            f"Please look at {title}.",
+            ", ".join(part for part in metadata_parts if part),
             labels,
             item.relation,
         )

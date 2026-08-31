@@ -1,0 +1,132 @@
+{
+  "version": "2026-08-30-semantic-audit-v4",
+  "description": "Fixed live semantic-audit regression questions kept outside exact collection policies. Most cases use unreviewed open vocabulary; the ruler case covers a reviewed but title-ambiguous anchor, while the visitor cat and dog cases verify that reviewed concrete aliases still receive an LLM evidence audit. This set has already been executed and is not an unseen benchmark; expected labels are evidence hypotheses that must be corrected when live institution-record review shows a narrower boundary.",
+  "cases": [
+    {
+      "id": "visitor-cat-cultures",
+      "category": "animal-user-wording",
+      "question": "有没有各文化地区的猫的藏品",
+      "expectedAnswerability": "supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3,
+      "retrievalRoute": "known_concrete"
+    },
+    {
+      "id": "visitor-dog-cultures",
+      "category": "animal-user-wording",
+      "question": "狗狗在各国文化是怎么存在",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3,
+      "retrievalRoute": "known_concrete"
+    },
+    {
+      "id": "mother-child-distance",
+      "category": "figure-symbolism",
+      "question": "母亲抱着孩子的形象，在相隔很远的社会里分别被用来表达什么？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3,
+      "hardNegativeTitlePatterns": ["mother.of.pearl", "珍珠母"]
+    },
+    {
+      "id": "children-activities",
+      "category": "everyday-life",
+      "question": "来自远隔重洋的作品里，小孩子都在做什么、和谁在一起？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3
+    },
+    {
+      "id": "lacquer-surfaces",
+      "category": "material-technique",
+      "question": "相隔很远的漆器，在做法、表面光泽和装饰上有什么差别？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 1,
+      "hardNegativeTitlePatterns": ["place pigalle"]
+    },
+    {
+      "id": "shell-inlay",
+      "category": "material-technique",
+      "question": "贝壳和珍珠母怎样被切割、镶嵌到盒子、家具和首饰上？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 2
+    },
+    {
+      "id": "elephant-handheld",
+      "category": "animal",
+      "question": "不同地区的人为什么把大象做成能握在手里的形象？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1,
+      "minCanonicalOrigins": 1
+    },
+    {
+      "id": "elephant-form-material",
+      "category": "animal-descriptive",
+      "question": "不同地区有哪些带大象形象的藏品，它们各是什么物件、使用了什么材料？",
+      "expectedAnswerability": "supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3
+    },
+    {
+      "id": "daily-grooming",
+      "category": "everyday-life",
+      "question": "梳子、镜子和发簪怎样参与一个人每天出门前的准备？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "hardNegativeTitlePatterns": ["mirror glass"]
+    },
+    {
+      "id": "posture-status",
+      "category": "visual-inference",
+      "question": "人物是坐着、站着还是跪着，怎样改变我们对其地位的判断？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "ruler-symbolism",
+      "category": "title-ambiguous",
+      "question": "皇帝在不同的文化象征是什么？",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3,
+      "retrievalRoute": "title_ambiguous",
+      "hardNegativeTitlePatterns": ["queen of the may", "king street", "emperor moth"]
+    },
+    {
+      "id": "pilgrim-souvenir",
+      "category": "mobility",
+      "question": "朝圣者带回的小徽章、瓶子和纪念品怎样把远方变成随身经验？",
+      "expectedAnswerability": "unsupported",
+      "maxAccepted": 4,
+      "hardNegativeTitlePatterns": ["pilgrim flask"]
+    },
+    {
+      "id": "human-remains-ethics",
+      "category": "normative",
+      "question": "把人类遗骸放进公开展厅是否合适？",
+      "expectedAnswerability": "unsupported"
+    },
+    {
+      "id": "sacred-image-consent",
+      "category": "normative",
+      "question": "未经原属社群同意就发布仍在使用的圣物高清图，会越过什么伦理界线？",
+      "expectedAnswerability": "unsupported"
+    },
+    {
+      "id": "ivory-display-harm",
+      "category": "normative",
+      "question": "今天继续陈列象牙制品，会不会把猎杀造成的伤害美化掉？",
+      "expectedAnswerability": "unsupported"
+    },
+    {
+      "id": "quantum-ood",
+      "category": "out-of-domain",
+      "question": "拓扑量子比特纠错为什么需要表面码？",
+      "expectedAnswerability": "unsupported",
+      "maxAccepted": 0
+    }
+  ]
+}

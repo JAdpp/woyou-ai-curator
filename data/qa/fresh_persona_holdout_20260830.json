@@ -1,0 +1,136 @@
+{
+  "version": "2026-08-30-fresh-persona-holdout-v1",
+  "frozenAt": "2026-08-30T23:02:03+08:00",
+  "description": "Fresh live holdout drafted before retrieval from independent visitor personas. It deliberately excludes subjects used in the earlier regression suite (cats, dogs, rulers, elephants, parent-child imagery, lacquer, shell inlay, grooming, posture/status, pilgrimage souvenirs, human remains, sacred-image consent, ivory and quantum topics). Expected answerability labels are pre-run hypotheses and must not be edited to make the run pass.",
+  "cases": [
+    {
+      "id": "fresh-celestial-motifs",
+      "persona": "对星空好奇的中学生",
+      "category": "descriptive-cross-cultural",
+      "question": "世界各地有哪些把星星、月亮或太阳放到日常器物上的藏品？它们分别是什么东西？",
+      "hypothesis": "只要馆方题名或描述明确记录天体图案、物件类型与地域，就能做跨文化的描述型小展。",
+      "expectedAnswerability": "supported",
+      "minAccepted": 5,
+      "minCanonicalOrigins": 3
+    },
+    {
+      "id": "fresh-drinking-forms",
+      "persona": "对酒具设计好奇的餐饮从业者",
+      "category": "everyday-life-causal",
+      "question": "不同地方的人为什么把喝酒的杯子和壶做得那么不一样？",
+      "hypothesis": "器形、材料和地域可直接支持比较，但‘为什么’需要饮用方式、礼仪和生产史证据。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1,
+      "minCanonicalOrigins": 2
+    },
+    {
+      "id": "fresh-games-companions",
+      "persona": "喜欢桌游的大学生",
+      "category": "leisure-social-history",
+      "question": "棋盘、骰子和纸牌能告诉我们以前的人怎么玩、通常和谁一起玩吗？",
+      "hypothesis": "游戏器具类型可能有记录，具体玩法与同伴关系未必出现在馆藏元数据中。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-wind-visible",
+      "persona": "说话很简短的摄影爱好者",
+      "category": "short-ambiguous-visual",
+      "question": "风怎么被看见？",
+      "hypothesis": "这是有意义但语义开放的视觉问题；只有作品描述明确记录风、飘动或气象效果时才可局部回答。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-lake-map-change",
+      "persona": "关注城市环境变化的骑行爱好者",
+      "category": "maps-causal-history",
+      "question": "老地图上的湖为什么一张比一张小？是画得不准，还是后来真的被填了？",
+      "hypothesis": "地图可支持图面差异，但原因还需测绘史、水文与市政档案。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-repair-authorship",
+      "persona": "关心循环使用的修理志愿者",
+      "category": "conservation-evidence",
+      "question": "旧衣服上的接布、翻面和重新缝线，哪些是主人当年修的，哪些是后来修复师补的？",
+      "hypothesis": "材料、针脚和修复记录可能支持部分判断，但缺档时不能确定操作者。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-tool-wear-labour",
+      "persona": "对劳动过程感兴趣的夜班工人",
+      "category": "labour-inference",
+      "question": "同一种工具上有的磨得特别偏，有的几乎没用过，这能说明工人的分工和一天怎么干活吗？",
+      "hypothesis": "磨损可限定操作方式或频率，但分工和作息需要工序表、日志或口述史。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-machine-sound",
+      "persona": "依赖声音理解物件的低视力播客剪辑师",
+      "category": "sensory-reconstruction",
+      "question": "这些旧机器当年工作时是什么声音？如果没录音，哪些能从结构和材料推回去，哪些只是猜的？",
+      "hypothesis": "机械结构、材料与同型号录音可约束重建，原件的实际历史声响难以完全证实。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-three-mask-traditions",
+      "persona": "准备跨文化展板的博物馆教育员",
+      "category": "named-culture-comparison",
+      "question": "跨文化比较日本能乐、约鲁巴 Gẹ̀lẹ́dé 和尤皮克 Yup'ik 的面具：都能概括成‘佩戴者变成神’吗？请逐个给证据。",
+      "hypothesis": "三方可能有表演、仪式或灵性语境，但统一命题容易抹平功能差异。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1,
+      "minCanonicalOrigins": 3
+    },
+    {
+      "id": "fresh-attribution-method",
+      "persona": "对博物馆结论持怀疑态度的高中生",
+      "category": "museum-method",
+      "question": "博物馆怎么判断一件没有签名的东西是谁做的？",
+      "hypothesis": "归属措辞、材料技法和来源链可展示部分方法，但馆藏条目通常不是一套完整鉴定教程。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-tired-preference",
+      "persona": "没有明确学习目标、最近很累的上班族",
+      "category": "affective-vague",
+      "question": "我说不出想看什么，就是最近有点累。能不能挑几件‘看着不会被催着走’的东西，别按年代讲？",
+      "hypothesis": "这是有效偏好但不是可由馆藏证明的心理效果，系统应先澄清或明示试探性。",
+      "expectedAnswerability": "unsupported",
+      "maxAccepted": 4
+    },
+    {
+      "id": "fresh-provenance-consent",
+      "persona": "审核殖民时期来源说明的馆员",
+      "category": "provenance-evidence-boundary",
+      "question": "登记卡只写‘1897 年由一名远征军成员购得’，展签能否改写成‘经原主人自愿出售，现属本馆合法所有’？",
+      "hypothesis": "登记信息不足以证明原主人身份、自愿性或当代法律结论，只能部分回答。",
+      "expectedAnswerability": "partially_supported",
+      "minAccepted": 1
+    },
+    {
+      "id": "fresh-pseudoscience-dna",
+      "persona": "做‘远古黑科技’短视频的内容创作者",
+      "category": "anachronistic-overclaim",
+      "question": "史前陶片上的双线锯齿纹是不是 DNA 双螺旋，能证明制作者懂遗传学吗？",
+      "hypothesis": "形状类比不能支持时代错置的知识史结论。",
+      "expectedAnswerability": "unsupported",
+      "maxAccepted": 4
+    },
+    {
+      "id": "fresh-robot-firmware",
+      "persona": "想把博物馆当产品售后用的硬件爱好者",
+      "category": "out-of-domain",
+      "question": "我家的 2026 款扫地机器人一直转圈报错，能从馆藏里找到对应的 LiDAR 固件和刷机包吗？",
+      "hypothesis": "当代产品售后与固件下载明显超出馆藏证据域。",
+      "expectedAnswerability": "unsupported",
+      "maxAccepted": 0
+    }
+  ]
+}

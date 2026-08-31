@@ -87,5 +87,20 @@ def test_hybrid_v1_rejects_unversioned_embedding_model_change(
 ) -> None:
     monkeypatch.setenv("RAG_EMBEDDING_MODEL", "some/other-model")
 
-    with pytest.raises(ValueError, match="pinned for hybrid-rag-v1"):
+    with pytest.raises(ValueError, match="pinned for hybrid-rag-v2"):
+        Settings.from_env()
+
+
+def test_generation_budget_counts_retrieval_when_llm_audit_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_LLM_AUDIT_ENABLED", "false")
+    monkeypatch.setenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("DEEPSEEK_TIMEOUT_SECONDS", "90")
+    monkeypatch.setenv("DEEPSEEK_FRAME_TIMEOUT_SECONDS", "90")
+    monkeypatch.setenv("DEEPSEEK_LABELS_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("GENERATION_POSTER_WAIT_SECONDS", "2")
+    monkeypatch.setenv("GENERATION_JOB_TIMEOUT_SECONDS", "150")
+
+    with pytest.raises(ValueError, match="Generation stage timeouts"):
         Settings.from_env()

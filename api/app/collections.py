@@ -6,11 +6,12 @@ import hashlib
 import math
 import re
 from collections import Counter, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from pathlib import Path
 from threading import RLock
-from typing import Any, Iterable
+from time import perf_counter
+from typing import Any, Iterable, Sequence
 
 from .models import AgendaInput, EvidenceChunk, EvidenceDepth, MuseumObject
 from .dense_retrieval import (
@@ -26,9 +27,18 @@ CC_BY_4_0_LICENSE = "CC BY 4.0"
 CC_BY_4_0_RIGHTS_URI = "https://creativecommons.org/licenses/by/4.0/"
 FIELD_LEVEL_OPEN_ACCESS_INSTITUTIONS = frozenset({"aic", "cma", "met"})
 HYBRID_RETRIEVAL_METHOD = "hybrid_bm25_dense_rrf_evidence_mmr"
-HYBRID_RETRIEVAL_VERSION = "hybrid-rag-v1"
+HYBRID_RETRIEVAL_VERSION = "hybrid-rag-v2"
 BM25_RETRIEVAL_METHOD = "fielded_bm25_hard_anchor"
 BM25_RETRIEVAL_VERSION = "bm25-v1"
+
+# Open-vocabulary queries do not have a reviewed alias group to provide the
+# lexical safety gate used by concrete subjects such as cat or emperor.  These
+# calibrated floors are therefore intentionally higher than the general dense
+# floors.  They are model-specific retrieval thresholds, not topic rules: any
+# visitor-authored subject may pass them when the collection is semantically
+# close enough, while out-of-domain nearest neighbours remain a refusal.
+OPEN_QUERY_DENSE_MIN_SCORE = 0.44
+OPEN_QUERY_EVIDENCE_MIN_SCORE = 0.46
 logger = logging.getLogger("app.retrieval")
 
 
@@ -116,13 +126,24 @@ class QueryPlan:
     exact_tokens: set[str]
     browse_all: bool
     cross_cultural: bool
-    # Dense recall may add candidates only for a known multilingual concept.
-    # Unknown Chinese and English subjects retain the same lexical all-term
-    # gate to avoid "nearest available object" answers.
+    # Acquisition/source-history rows are normally precision hazards: a donor
+    # name or credit line does not make an object topical. They become eligible
+    # evidence only when the visitor explicitly asks about provenance,
+    # acquisition, removal, ownership or restitution.
+    allow_provenance_evidence: bool
+    # Dense recall is the open-vocabulary route.  Reviewed aliases improve a
+    # query but are not a whitelist: a new subject may still use embeddings.
     dense_fallback_allowed: bool
+    # Open queries have no reviewed lexical concept.  They use stricter,
+    # model-calibrated cosine floors and are later eligible for LLM audit.
+    open_semantic_query: bool
     # Familiar concrete entities (cat/dog/bird...) retain an exact lexical
     # subject gate even when dense retrieval is active.
     strict_anchor_groups: tuple[frozenset[str], ...]
+    # Depicted-person concepts such as emperor/king must identify the object's
+    # subject in its title. A reign date or a donor named King is context, not
+    # evidence that the object represents a ruler.
+    title_anchor_groups: tuple[frozenset[str], ...]
 
 
 @dataclass(frozen=True)
@@ -238,7 +259,53 @@ VISITOR_CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "龙": ("dragon", "dragons"),
     "狮": ("lion", "lions"),
     "虎": ("tiger", "tigers"),
+    # Visitor questions about rulership rarely use the art-historical routing
+    # term “王权”. Keep these ordinary Chinese forms as reviewed, strict
+    # subject groups so they can reach English-language catalogues without
+    # weakening the relevance gate for unknown questions.
+    "皇帝": (
+        "emperor",
+        "empress",
+        "monarch",
+        "sovereign",
+    ),
+    "帝王": (
+        "emperor",
+        "empress",
+        "monarch",
+        "sovereign",
+    ),
+    "国王": (
+        "king",
+        "queen",
+        "monarch",
+        "sovereign",
+    ),
+    "君主": (
+        "monarch",
+        "sovereign",
+        "emperor",
+        "empress",
+        "king",
+        "queen",
+        "ruler",
+    ),
+    "皇权": (
+        "imperial",
+        "emperor",
+        "empress",
+        "monarch",
+        "sovereign",
+        "royal",
+        "ruler",
+        "throne",
+        "crown",
+        "regalia",
+    ),
 }
+
+
+TITLE_SUBJECT_CONCEPTS = frozenset({"皇帝", "帝王", "国王", "君主"})
 
 
 TOKEN_STOPWORDS = {
@@ -301,6 +368,23 @@ QUERY_FRAME_PHRASES = (
     "帮我找",
     "给我看",
     "我想看",
+    "告诉我们",
+    "告诉我",
+    "为什么",
+    "能不能",
+    "怎么",
+    "如何",
+    "是否",
+    "能否",
+    "分别",
+    "逐个",
+    "随便",
+    "看看",
+    "逛逛",
+    "带我",
+    "推荐",
+    "有意思的",
+    "有趣的",
     "相关的",
     "有关的",
     "关于",
@@ -310,8 +394,14 @@ QUERY_FRAME_PHRASES = (
     "艺术品",
     "各文化地区",
     "不同文化地区",
+    "不同的文化地区",
+    "不同地方",
+    "不同的地方",
     "各个文化",
     "不同文化",
+    "不同的文化",
+    "不同文明",
+    "不同的文明",
     "多种文化",
     "各国文化",
     "各国地区",
@@ -325,20 +415,170 @@ QUERY_FRAME_PHRASES = (
 
 CROSS_CULTURAL_PATTERNS = (
     r"各(?:个)?文化",
-    r"不同文化",
+    r"不同(?:的)?文化",
+    r"不同(?:的)?文明",
     r"多种文化",
     r"跨文化",
     r"全球",
     r"各(?:个)?地区",
+    r"不同(?:的)?地区",
+    r"不同(?:的)?地方",
+    r"各地",
+    r"多个地方",
+    r"几个地区",
+    r"各处",
     r"各国(?:文化|地区)?",
     r"不同国家",
     r"多个国家",
     r"世界各地",
+    r"相隔(?:很)?远",
+    r"远隔重洋",
+    r"不同(?:的)?社会",
+    r"多个社会",
+    r"遥远(?:的)?社会",
     r"across\s+(?:different\s+)?cultures?",
     r"different\s+cultures?",
     r"multiple\s+cultures?",
     r"around\s+the\s+world",
     r"global(?:ly)?",
+)
+
+
+# When a visitor asks for a cross-cultural comparison, named origins are
+# coverage legs across the eventual object set. They must never become AND
+# anchors that require one object to be simultaneously East Asian, European
+# and American. The controlled labels mirror the collection's culture-pack
+# routing vocabulary; they affect retrieval structure, not cultural claims.
+CULTURAL_COMPARISON_LEG_CONCEPTS = frozenset(
+    {
+        "东亚",
+        "中国",
+        "日本",
+        "朝鲜",
+        "韩国",
+        "南亚",
+        "印度",
+        "东南亚",
+        "西亚",
+        "中东",
+        "北非",
+        "伊斯兰",
+        "埃及",
+        "波斯",
+        "欧洲",
+        "非洲",
+        "美洲",
+        "大洋洲",
+    }
+)
+
+
+# Explicitly naming two or more origins already expresses a cross-cultural
+# comparison, even when the visitor does not also write “不同文化”.  Keep the
+# groups coarse and disjoint enough that one phrase cannot satisfy two legs.
+NAMED_CULTURAL_LEG_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"东亚|中国|日本|韩国|朝鲜|\b(?:east asia(?:n)?|china|chinese|japan(?:ese)?|korea(?:n)?)\b",
+        r"南亚|印度|\b(?:south asia(?:n)?|india(?:n)?)\b",
+        r"东南亚|越南|泰国|柬埔寨|缅甸|印尼|\b(?:southeast asia(?:n)?|vietnam(?:ese)?|thai(?:land)?|cambodia(?:n)?|myanmar|burma|indonesia(?:n)?)\b",
+        r"西亚|中东|北非|伊朗|波斯|埃及|\b(?:west asia(?:n)?|middle east(?:ern)?|north africa(?:n)?|iran(?:ian)?|persia(?:n)?|egypt(?:ian)?)\b",
+        r"非洲|\bafrica(?:n)?\b",
+        r"美洲|墨西哥|秘鲁|\b(?:americas?|mexic(?:o|an)|peru(?:vian)?)\b",
+        r"欧洲|希腊|罗马|荷兰|\b(?:europe(?:an)?|greece|greek|roman|rome|netherlands|dutch)\b",
+        r"大洋洲|太平洋文化|\b(?:oceania(?:n)?|pacific island)\b",
+    )
+)
+
+
+PROVENANCE_QUERY_PATTERN = re.compile(
+    r"(?:来源史?|流传|传承|入藏|征集|购得|购买|收购|出售|"
+    r"交易|捐赠|赠予|原主人|所有权|权属|合法所有|掠夺|劫掠|"
+    r"战利品|远征军|殖民采集|归还|返还|遣返|"
+    r"\bprovenance\b|\bacquisition\b|\bacquired\b|\bpurchas(?:e|ed)\b|"
+    r"\bsold\b|\bsale\b|\bdonat(?:e|ed|ion)\b|\bbequest\b|"
+    r"\bownership\b|\blegal\s+title\b|\bloot(?:ed|ing)?\b|"
+    r"\bplunder(?:ed|ing)?\b|\brepatriat(?:e|ed|ion)\b|"
+    r"\brestitut(?:e|ed|ion)\b)",
+    re.IGNORECASE,
+)
+
+
+# Catalogue records describe an absent maker mark and an uncertain maker as
+# different facts.  Both can nevertheless occur in visitor questions about
+# the *operation* of attribution.  These state patterns therefore only decide
+# whether to add museum-method retrieval vocabulary; they never turn
+# ``unsigned`` into evidence for ``unknown artist`` (or the reverse).
+MISSING_SIGNATURE_STATE_PATTERN = re.compile(
+    r"(?:没(?:有)?|无|未|缺少|缺乏|不带|找不到)(?:任何)?(?:作者|创作者|制作者|工匠)?(?:的)?(?:署名|签名|落款|款识)|"
+    r"(?:署名|签名|落款|款识)(?:缺失|不存在|不可见|未见)|"
+    r"\bunsigned\b|\bwithout\s+(?:an?\s+)?(?:artist(?:'s)?\s+)?signature\b|"
+    r"\bno\s+(?:known\s+)?signature\b|\bnot\s+signed\b|"
+    r"\black(?:s|ing)?\s+(?:an?\s+)?signature\b",
+    re.IGNORECASE,
+)
+
+UNKNOWN_CREATOR_STATE_PATTERN = re.compile(
+    r"(?:作者|创作者|制作者|工匠|画家|艺术家)(?:身份)?(?:不明|未知|不可考|无法确定)|佚名|"
+    r"(?:不知道|不清楚)(?:它?的?)?(?:作者|创作者|制作者|工匠|谁(?:做|画|制作|创作))|"
+    r"\banonymous\b|\bunattributed\b|"
+    r"\bunknown\s+(?:artist|maker|author|creator)\b|"
+    r"\b(?:artist|maker|author|creator)\s+(?:unknown|unidentified)\b",
+    re.IGNORECASE,
+)
+
+ATTRIBUTION_METHOD_INTENT_PATTERN = re.compile(
+    r"怎么|如何|怎样|凭什么|依据什么|通过什么|"
+    r"判断|鉴定|辨认|确定|识别|推断|考证|归属|"
+    r"谁(?:创作|制作|做|画|写)|"
+    r"\bhow\b|\bdetermin\w*\b|\bidentif\w*\b|"
+    r"\battribut(?:e|ed|es|ing|ion|ions)\b|\bauthorship\b|"
+    r"\bwho\s+(?:made|created|painted|wrote)\b|\bconnoisseurship\b",
+    re.IGNORECASE,
+)
+
+ATTRIBUTION_CREATOR_TARGET_PATTERN = re.compile(
+    r"作者|创作者|制作者|工匠|画家|艺术家|归属|"
+    r"谁(?:创作|制作|做|画|写)|"
+    r"\battribut(?:e|ed|es|ing|ion|ions)\b|\bauthorship\b|"
+    r"\b(?:artist|maker|author|creator)\b|"
+    r"\bwho\s+(?:made|created|painted|wrote)\b|\bconnoisseurship\b",
+    re.IGNORECASE,
+)
+
+# High-precision catalogue vocabulary for records that discuss attribution as
+# a curatorial judgement rather than merely printing a creator field.  Broad
+# words such as ``artist``, ``maker`` and ``unknown`` are deliberately absent
+# from the anchor group because they occur in thousands of unrelated records.
+ATTRIBUTION_METHOD_ANCHOR_TERMS = frozenset(
+    {
+        "attribution",
+        "reattributed",
+        "reattribution",
+        "stylistic",
+        "connoisseurship",
+        "authorship",
+    }
+)
+ATTRIBUTION_METHOD_SCORING_TERMS = frozenset(
+    {
+        *ATTRIBUTION_METHOD_ANCHOR_TERMS,
+        "follower",
+        "workshop",
+        "attribute",
+        "attributed",
+        "comparison",
+        "study",
+        "research",
+        "technical",
+        "analysis",
+        "technology",
+        "revealed",
+        "evidence",
+        "characteristic",
+        "style",
+        "school",
+    }
 )
 
 
@@ -376,12 +616,14 @@ def _concept_present(question: str, concept: str) -> bool:
     return False
 
 
-BROWSE_QUERY_PATTERNS = (
-    r"这些藏品.*(?:关系|联系|共同)",
-    r"随便(?:看看|逛逛)",
-    r"推荐(?:一些|几个|藏品|展品)",
-    r"recommend\s+(?:something|anything|objects?)",
-    r"surprise\s+me",
+PURE_BROWSE_QUERY_PATTERNS = (
+    r"(?:我)?(?:还)?(?:没想好|没有想好)(?:(?:先|随便|带我))*(?:看看|逛逛)吧?",
+    r"(?:请)?(?:随便)?(?:带我)?(?:看看|逛逛)吧?",
+    r"(?:请)?(?:随便)?给我看(?:点|些)?(?:有意思|有趣|好看)?(?:的)?(?:藏品|展品|艺术品)吧?",
+    r"(?:请)?(?:随便)?推荐(?:一些|几个)?(?:有意思|有趣|好看)?(?:的)?(?:藏品|展品|艺术品)?吧?",
+    r"这些藏品(?:之间)?(?:有)?什么(?:关系|联系|共同点)吧?",
+    r"recommend(?:something|anything|objects?)",
+    r"surpriseme",
 )
 
 
@@ -722,9 +964,52 @@ def normalize_object(raw: dict[str, Any]) -> MuseumObject | None:
     )
 
 
+CATALOGUE_SPELLING_EQUIVALENTS: dict[str, tuple[str, ...]] = {
+    "catalog": ("catalogue",),
+    "catalogue": ("catalog",),
+    "center": ("centre",),
+    "centre": ("center",),
+    "color": ("colour",),
+    "colour": ("color",),
+    "fiber": ("fibre",),
+    "fibre": ("fiber",),
+    "jewelry": ("jewellery",),
+    "jewellery": ("jewelry",),
+    "mold": ("mould",),
+    "mould": ("mold",),
+    "modeled": ("modelled",),
+    "modelled": ("modeled",),
+}
+
+
+def _english_token_variants(token: str) -> set[str]:
+    """Normalize orthographic form without erasing the source spelling.
+
+    Museum records mix hyphenated compounds, open compounds, possessives and
+    British/American spelling. Retaining the full token preserves precision;
+    adding its constituents lets an atomic planner query such as
+    ``hand-built`` match institution prose such as ``built by hand``.
+    """
+
+    variants = {token}
+    parts = [part for part in token.split("-") if len(part) > 1]
+    variants.update(parts)
+    if token.endswith("'s") and len(token) > 3:
+        variants.add(token[:-2])
+    for value in tuple(variants):
+        variants.update(CATALOGUE_SPELLING_EQUIVALENTS.get(value, ()))
+    return variants
+
+
 def _token_sequence(text: str) -> list[str]:
     lowered = text.casefold()
-    english = re.findall(r"[a-z0-9][a-z0-9'-]+", lowered)
+    raw_english = re.findall(r"[a-z0-9][a-z0-9'-]+", lowered)
+    english = [
+        variant
+        for token in raw_english
+        for variant in sorted(_english_token_variants(token))
+        if variant not in TOKEN_STOPWORDS
+    ]
     chinese_runs = re.findall(r"[\u3400-\u9fff]+", lowered)
     chinese: list[str] = []
     for run in chinese_runs:
@@ -735,11 +1020,77 @@ def _token_sequence(text: str) -> list[str]:
             chinese.extend(
                 run[index : index + 3] for index in range(max(0, len(run) - 2))
             )
-    return [token for token in english if token not in TOKEN_STOPWORDS] + chinese
+    return english + chinese
 
 
 def _tokens(text: str) -> set[str]:
     return set(_token_sequence(text))
+
+
+ATOMIC_QUERY_FRAME_WORDS = frozenset(
+    {
+        "catalog",
+        "catalogue",
+        "evidence",
+        "made",
+        "method",
+        "methods",
+        "museum",
+        "object",
+        "objects",
+        "process",
+        "processes",
+        "record",
+        "records",
+        "technique",
+        "techniques",
+    }
+)
+
+
+def _atomic_catalogue_query_plan(question: str, base: QueryPlan) -> QueryPlan:
+    """Require every content leg in an LLM-planned atomic query.
+
+    Visitor questions remain broad hybrid searches. A planner-generated query
+    has a narrower contract: its few content words describe one evidence axis.
+    Treating them as one large OR group lets ``pottery`` swamp
+    ``hand-built pottery``. Separate variant groups preserve the axis while
+    still accepting plurals, compounds and catalogue spelling variants.
+    """
+
+    raw_words = re.findall(r"[a-z0-9][a-z0-9'-]+", question.casefold())
+    if not raw_words:
+        return base
+    groups: list[frozenset[str]] = []
+    seen: set[frozenset[str]] = set()
+    for raw_word in raw_words:
+        parts = [part for part in raw_word.split("-") if len(part) > 1]
+        for part in parts or [raw_word]:
+            if part in TOKEN_STOPWORDS or part in ATOMIC_QUERY_FRAME_WORDS:
+                continue
+            variants = _english_token_variants(part)
+            variants = _english_inflections(variants)
+            catalogue_aliases = set(variants)
+            for base_group in base.anchor_groups:
+                if base_group.intersection(variants):
+                    catalogue_aliases.update(base_group)
+            group = frozenset(
+                variant
+                for variant in catalogue_aliases
+                if variant not in TOKEN_STOPWORDS
+                and variant not in ATOMIC_QUERY_FRAME_WORDS
+            )
+            if group and group not in seen:
+                seen.add(group)
+                groups.append(group)
+    if len(groups) < 2:
+        return base
+    return replace(
+        base,
+        anchor_tokens=frozenset().union(*groups),
+        anchor_groups=tuple(groups),
+        strict_anchor_groups=tuple(groups),
+    )
 
 
 _EXPLICIT_DOG_TERMS = re.compile(
@@ -748,6 +1099,25 @@ _EXPLICIT_DOG_TERMS = re.compile(
 )
 _CANINE_WORD = re.compile(r"\bcanines?\b", re.IGNORECASE)
 _DENTAL_WORDS = frozenset({"tooth", "teeth", "dental", "fang", "fangs"})
+_KING_QUEEN_WORD = re.compile(r"\b(?:kings?|queens?)\b", re.IGNORECASE)
+_ACQUISITION_WORDS = frozenset(
+    {"gift", "bequest", "donated", "donor", "fund", "credit", "collection"}
+)
+_RULERSHIP_WORDS = frozenset(
+    {
+        "emperor",
+        "empress",
+        "monarch",
+        "sovereign",
+        "royal",
+        "ruler",
+        "reign",
+        "kingdom",
+        "throne",
+        "crown",
+        "regalia",
+    }
+)
 
 
 def _contextual_anchor_suppressions(text: str) -> frozenset[str]:
@@ -761,26 +1131,40 @@ def _contextual_anchor_suppressions(text: str) -> frozenset[str]:
     such as ``canine companion`` therefore keep their normal dog meaning.
     """
 
-    if not _CANINE_WORD.search(text):
-        return frozenset()
-    if _EXPLICIT_DOG_TERMS.search(text) or re.search(r"狗|犬(?![齿牙])", text):
-        return frozenset()
-
+    suppressed: set[str] = set()
     words = re.findall(r"[a-z][a-z'-]*", text.casefold())
-    canine_positions = [
-        index for index, word in enumerate(words) if word in {"canine", "canines"}
-    ]
-    if not canine_positions:
-        return frozenset()
-    dental_positions = {
-        index for index, word in enumerate(words) if word in _DENTAL_WORDS
-    }
-    if dental_positions and all(
-        any(abs(canine - dental) <= 2 for dental in dental_positions)
-        for canine in canine_positions
+    if _CANINE_WORD.search(text) and not (
+        _EXPLICIT_DOG_TERMS.search(text) or re.search(r"狗|犬(?![齿牙])", text)
     ):
-        return frozenset({"canine", "canines"})
-    return frozenset()
+        canine_positions = [
+            index for index, word in enumerate(words) if word in {"canine", "canines"}
+        ]
+        dental_positions = {
+            index for index, word in enumerate(words) if word in _DENTAL_WORDS
+        }
+        if dental_positions and canine_positions and all(
+            any(abs(canine - dental) <= 2 for dental in dental_positions)
+            for canine in canine_positions
+        ):
+            suppressed.update({"canine", "canines"})
+
+    # ``King`` and ``Queen`` are also surnames in museum credit lines. A gift
+    # from Ralph King is not evidence of rulership. Suppress the anchor only
+    # when every occurrence is locally attached to acquisition wording and no
+    # independent rulership vocabulary exists elsewhere in the record.
+    if _KING_QUEEN_WORD.search(text) and not (_RULERSHIP_WORDS & set(words)):
+        acquisition_positions = {
+            index for index, word in enumerate(words) if word in _ACQUISITION_WORDS
+        }
+        for term in ("king", "kings", "queen", "queens"):
+            positions = [index for index, word in enumerate(words) if word == term]
+            if positions and acquisition_positions and all(
+                any(abs(position - acquisition) <= 4 for acquisition in acquisition_positions)
+                for position in positions
+            ):
+                suppressed.add(term)
+
+    return frozenset(suppressed)
 
 
 def _effective_searchable(document: SearchDocument) -> set[str]:
@@ -862,16 +1246,68 @@ def _english_inflections(tokens: set[str]) -> set[str]:
 
 
 def _requests_cross_cultural(question: str) -> bool:
-    return any(
+    if any(
         re.search(pattern, question, re.IGNORECASE)
         for pattern in CROSS_CULTURAL_PATTERNS
-    )
+    ):
+        return True
+    return sum(bool(pattern.search(question)) for pattern in NAMED_CULTURAL_LEG_PATTERNS) >= 2
+
+
+def question_requests_provenance(question: str) -> bool:
+    """Whether source-history evidence is part of the visitor's subject.
+
+    This is an evidence-scope switch, not an answerability shortcut. Allowing
+    the catalogue's acquisition row into retrieval never proves consent,
+    lawful title or the right remedy; the LLM audit still evaluates that
+    predicate against the exact source text.
+    """
+
+    return PROVENANCE_QUERY_PATTERN.search(question) is not None
+
+
+def _attribution_method_query_terms(
+    question: str,
+) -> tuple[frozenset[str], frozenset[str]] | None:
+    """Bridge visitor phrasing to evidence-bearing attribution vocabulary.
+
+    A rewrite is activated only when a creator-field uncertainty or missing
+    mark is paired with an attribution operation (for example, ``how`` or
+    ``鉴定``).  A request simply asking to see unsigned works therefore does
+    not get broadened into records about connoisseurship.  State-specific
+    terms are score boosts, not facts accepted by retrieval: the later LLM
+    audit still has to cite an institution excerpt for every accepted object.
+    """
+
+    missing_signature = MISSING_SIGNATURE_STATE_PATTERN.search(question) is not None
+    unknown_creator = UNKNOWN_CREATOR_STATE_PATTERN.search(question) is not None
+    if not (missing_signature or unknown_creator):
+        return None
+    if ATTRIBUTION_METHOD_INTENT_PATTERN.search(question) is None:
+        return None
+    # A generic "how" near an unsigned object might ask about conservation,
+    # display or digitisation.  Require the operation to target creator
+    # identity/attribution before adding attribution-method vocabulary.
+    if ATTRIBUTION_CREATOR_TARGET_PATTERN.search(question) is None:
+        return None
+
+    anchors = _english_inflections(set(ATTRIBUTION_METHOD_ANCHOR_TERMS))
+    scoring = _english_inflections(set(ATTRIBUTION_METHOD_SCORING_TERMS))
+    if missing_signature:
+        scoring.update({"unsigned"})
+    if unknown_creator:
+        scoring.update({"anonymous", "unattributed", "unidentified"})
+    return frozenset(anchors), frozenset(scoring)
 
 
 def _is_browse_query(question: str) -> bool:
+    # Browse is an explicit no-topic intent, not a phrase that can be mixed
+    # into an otherwise topical question. Substring matching let requests such
+    # as “随便给我看看海豚…” bypass embeddings and the evidence audit entirely.
+    compact = re.sub(r"[\s，,。.!！？?、;；:：'\"]+", "", question.casefold())
     return any(
-        re.search(pattern, question, re.IGNORECASE)
-        for pattern in BROWSE_QUERY_PATTERNS
+        re.fullmatch(pattern, compact, re.IGNORECASE)
+        for pattern in PURE_BROWSE_QUERY_PATTERNS
     )
 
 
@@ -890,6 +1326,7 @@ def _query_plan(
 
     aliases_by_concept = _alias_catalog(extra_aliases)
     cross_cultural = _requests_cross_cultural(question)
+    allow_provenance_evidence = question_requests_provenance(question)
     matched: list[tuple[str, tuple[str, ...]]] = []
     for concept, aliases in aliases_by_concept.items():
         if _concept_present(question, concept) or any(
@@ -899,7 +1336,11 @@ def _query_plan(
 
     # Cross-cultural wording controls diversification; it is not itself the
     # subject of every selected object.
-    structural_concepts = {"跨文化", "交流"} if cross_cultural else set()
+    structural_concepts = (
+        {"跨文化", "交流", *CULTURAL_COMPARISON_LEG_CONCEPTS}
+        if cross_cultural
+        else set()
+    )
     thematic = [item for item in matched if item[0] not in structural_concepts]
 
     cleaned = question
@@ -920,6 +1361,7 @@ def _query_plan(
     anchor_tokens: set[str] = set()
     anchor_groups: list[frozenset[str]] = []
     strict_anchor_groups: list[frozenset[str]] = []
+    title_anchor_groups: list[frozenset[str]] = []
     scoring_tokens: set[str] = set(exact_tokens)
     for concept, aliases in thematic:
         concept_group = _tokens(concept)
@@ -930,7 +1372,16 @@ def _query_plan(
         anchor_groups.append(frozenset(concept_group))
         if concept in VISITOR_CONCEPT_ALIASES:
             strict_anchor_groups.append(frozenset(concept_group))
+        if concept in TITLE_SUBJECT_CONCEPTS:
+            title_anchor_groups.append(frozenset(concept_group))
         scoring_tokens.update(concept_group)
+
+    attribution_method_terms = _attribution_method_query_terms(question)
+    if attribution_method_terms is not None:
+        method_anchors, method_scoring = attribution_method_terms
+        anchor_tokens.update(method_anchors)
+        anchor_groups.append(method_anchors)
+        scoring_tokens.update(method_scoring)
 
     if not anchor_tokens:
         english_subjects = {
@@ -956,6 +1407,7 @@ def _query_plan(
         anchor_groups.clear()
         scoring_tokens.clear()
         strict_anchor_groups.clear()
+        title_anchor_groups.clear()
     return QueryPlan(
         scoring_tokens=scoring_tokens,
         anchor_tokens=anchor_tokens,
@@ -963,11 +1415,19 @@ def _query_plan(
         exact_tokens=exact_tokens,
         browse_all=browse_all,
         cross_cultural=cross_cultural,
-        # Dense-only recall is allowed for concepts with an explicit,
-        # reviewable alias policy. Unknown Chinese and English subjects keep
-        # the same lexical gate instead of accepting a nearest-neighbour guess.
-        dense_fallback_allowed=bool(thematic),
+        allow_provenance_evidence=allow_provenance_evidence,
+        # Embeddings, not a hand-written alias whitelist, are the fallback for
+        # any non-empty visitor subject.  Unknown subjects use higher semantic
+        # floors below and are audited before generation when a model is
+        # configured.
+        dense_fallback_allowed=bool(anchor_tokens or scoring_tokens),
+        # Every topical visitor question remains semantically open at runtime.
+        # Reviewed aliases add lexical precision, but never certify that the
+        # rest of an arbitrary question has been understood. Browse requests
+        # are the sole exception because they deliberately have no predicate.
+        open_semantic_query=not browse_all,
         strict_anchor_groups=tuple(strict_anchor_groups),
+        title_anchor_groups=tuple(title_anchor_groups),
     )
 
 
@@ -1413,10 +1873,15 @@ class CollectionRepository:
             )
         return eligible
 
-    def search(self, agenda: AgendaInput, collection: LoadedCollection) -> list[SearchResult]:
-        eligible = self.require_generation_ready(collection)
-        dense_signature = self._dense_manager.cache_signature(collection)
-        cache_key = (
+    def _search_cache_key(
+        self,
+        agenda: AgendaInput,
+        collection: LoadedCollection,
+        dense_signature: tuple[Any, ...],
+        *,
+        atomic: bool = False,
+    ) -> tuple[Any, ...]:
+        return (
             collection.id,
             collection.version,
             # A rebuild can intentionally retain the public version string.
@@ -1424,14 +1889,24 @@ class CollectionRepository:
             # snapshot from repopulating the cache used by the new snapshot.
             id(collection),
             agenda.question.strip().casefold(),
-            tuple(sorted({
-                topic.strip().casefold()
-                for topic in agenda.excluded_topics
-                if topic.strip()
-            })),
+            tuple(
+                sorted(
+                    {
+                        topic.strip().casefold()
+                        for topic in agenda.excluded_topics
+                        if topic.strip()
+                    }
+                )
+            ),
             self.rag_mode,
+            atomic,
             dense_signature,
         )
+
+    def search(self, agenda: AgendaInput, collection: LoadedCollection) -> list[SearchResult]:
+        eligible = self.require_generation_ready(collection)
+        dense_signature = self._dense_manager.cache_signature(collection)
+        cache_key = self._search_cache_key(agenda, collection, dense_signature)
         with self._cache_lock:
             cached = self._search_result_cache.get(cache_key)
             if cached is not None:
@@ -1508,6 +1983,523 @@ class CollectionRepository:
             self._remember_search(cache_key, results)
         return results
 
+    def search_many(
+        self,
+        agendas: Sequence[AgendaInput],
+        collection: LoadedCollection,
+        *,
+        deadline: float | None = None,
+        atomic: bool = False,
+    ) -> list[list[SearchResult]]:
+        """Search several agendas while batching lexical and dense recall.
+
+        Each query still runs through the same lexical candidate construction,
+        precision gates, evidence reranker and result cache as :meth:`search`.
+        Uncached queries share one catalogue traversal for fielded BM25 and one
+        embedding-provider call. Duplicate requests in the same batch share
+        both their query vector and final result.
+        """
+
+        agenda_list = list(agendas)
+        if not agenda_list:
+            return []
+
+        def check_deadline() -> None:
+            if deadline is not None and perf_counter() >= deadline:
+                raise CollectionDataError(
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                    "Batched collection retrieval exceeded its wall-clock budget.",
+                )
+
+        eligible = self.require_generation_ready(collection)
+        dense_signature = self._dense_manager.cache_signature(collection)
+        outputs: list[list[SearchResult] | None] = [None] * len(agenda_list)
+        pending: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+
+        for position, agenda in enumerate(agenda_list):
+            check_deadline()
+            cache_key = self._search_cache_key(
+                agenda,
+                collection,
+                dense_signature,
+                atomic=atomic,
+            )
+            with self._cache_lock:
+                cached = self._search_result_cache.get(cache_key)
+                if cached is not None:
+                    self._search_result_cache.move_to_end(cache_key)
+                    outputs[position] = list(cached)
+                    continue
+
+            existing = pending.get(cache_key)
+            if existing is not None:
+                existing["positions"].append(position)
+                continue
+
+            query = _query_plan(agenda.question, collection.concept_aliases)
+            if atomic:
+                query = _atomic_catalogue_query_plan(agenda.question, query)
+            excluded = [
+                _query_plan(topic, collection.concept_aliases).anchor_tokens
+                for topic in agenda.excluded_topics
+            ]
+
+            if query.browse_all and not excluded:
+                results = [
+                    SearchResult(
+                        obj=obj,
+                        score=(
+                            1.1
+                            if obj.evidence_depth == EvidenceDepth.FULL.value
+                            else 1.0
+                        ),
+                        retrieval_sources=("browse_all",),
+                    )
+                    for obj in eligible
+                ]
+                with self._cache_lock:
+                    self._remember_search(cache_key, results)
+                outputs[position] = list(results)
+                continue
+            if not query.scoring_tokens and not query.browse_all:
+                outputs[position] = []
+                continue
+
+            pending[cache_key] = {
+                "agenda": agenda,
+                "query": query,
+                "excluded": excluded,
+                "positions": [position],
+            }
+
+        if not pending:
+            return [list(result or []) for result in outputs]
+
+        pending_items = list(pending.items())
+        lexical_eligible = eligible
+        atomic_dense_prefilter = False
+        atomic_exact_prefilter = False
+        atomic_dense_index: Any | None = None
+        atomic_query_vectors: list[Any] = []
+        if atomic and self.rag_mode == "hybrid":
+            dense_index = self._dense_manager.get(collection)
+            if dense_index is not None:
+                try:
+                    check_deadline()
+                    embed_many = getattr(dense_index, "embed_queries", None)
+                    if callable(embed_many):
+                        query_vectors = embed_many(
+                            [item[1]["agenda"].question for item in pending_items]
+                        )
+                    else:
+                        query_vectors = [
+                            dense_index.embed_query(item[1]["agenda"].question)
+                            for item in pending_items
+                        ]
+                    atomic_dense_index = dense_index
+                    atomic_query_vectors = list(query_vectors)
+                    check_deadline()
+                    candidate_top_k = max(
+                        self.dense_top_k,
+                        min(self.hybrid_max_results, 400),
+                    )
+                    eligible_ids = {obj.id for obj in eligible}
+                    candidate_ids: set[str] = set()
+                    for query_vector in query_vectors:
+                        candidate_ids.update(
+                            hit.object_id
+                            for hit in dense_index.search_vector(
+                                query_vector,
+                                top_k=candidate_top_k,
+                                allowed_object_ids=eligible_ids,
+                            )
+                        )
+                        candidate_ids.update(
+                            hit.object_id
+                            for hit in dense_index.search_evidence_vector(
+                                query_vector,
+                                top_k=candidate_top_k * 2,
+                            )
+                            if hit.object_id in eligible_ids
+                        )
+                    check_deadline()
+                    if candidate_ids:
+                        lexical_eligible = [
+                            obj for obj in eligible if obj.id in candidate_ids
+                        ]
+                        atomic_dense_prefilter = True
+                        self._dense_manager.mark_query_success(
+                            collection,
+                            dense_index,
+                        )
+                except CollectionDataError:
+                    raise
+                except Exception as error:
+                    logger.warning(
+                        "atomic semantic prefilter unavailable; scanning full "
+                        "catalogue (%s: %s)",
+                        type(error).__name__,
+                        error,
+                    )
+                    self._dense_manager.mark_query_failure(collection, error)
+
+        if atomic:
+            # Embeddings can rank an exact but rare catalogue phrase very low
+            # (for example a literal "tool marks" sentence). Scan raw source
+            # text with compiled anchor-group expressions and union those IDs
+            # with the semantic prefilter. This avoids constructing full BM25
+            # documents for all 17k objects while preserving exact recall.
+            # Rare exact phrases need complete rescue, while a broad exact
+            # axis should not expand the semantic Top-K back into thousands of
+            # objects. Once an axis exceeds this cap it is represented by the
+            # dense prefilter only.
+            max_exact_per_query = max(250, self.dense_top_k)
+            exact_sets: list[set[str]] = [set() for _ in pending_items]
+            exact_overflow = [False for _ in pending_items]
+            group_patterns: list[list[re.Pattern[str]]] = []
+            for _, item in pending_items:
+                query: QueryPlan = item["query"]
+                patterns: list[re.Pattern[str]] = []
+                groups = query.strict_anchor_groups or query.anchor_groups
+                # Four or more exact legs are already highly selective after
+                # semantic Top-K and make a full-catalogue regex pass costly.
+                # The rescue scan is for short rare phrases such as "tool
+                # marks" that embeddings can rank unexpectedly low. Three-leg
+                # queries remain eligible; the child deadline below prevents
+                # their rescue scan from starving lexical AND scoring.
+                if len(groups) > 3:
+                    group_patterns.append(patterns)
+                    continue
+                for group in groups:
+                    alternatives: list[str] = []
+                    for token in sorted(group, key=lambda value: (-len(value), value)):
+                        escaped = re.escape(token)
+                        if re.search(r"[a-z0-9]", token, re.IGNORECASE):
+                            alternatives.append(
+                                rf"(?<![a-z0-9]){escaped}(?![a-z0-9])"
+                            )
+                        else:
+                            alternatives.append(escaped)
+                    if alternatives:
+                        patterns.append(
+                            re.compile(
+                                "(?:" + "|".join(alternatives) + ")",
+                                re.IGNORECASE,
+                            )
+                        )
+                group_patterns.append(patterns)
+
+            exact_scan_complete = True
+            exact_rescue_deadline: float | None = None
+            if deadline is not None:
+                exact_remaining = max(0.0, deadline - perf_counter())
+                lexical_reserve = min(
+                    2.5,
+                    max(0.75, exact_remaining * 0.40),
+                )
+                exact_rescue_deadline = deadline - lexical_reserve
+
+            for obj in eligible:
+                if not any(
+                    patterns and not exact_overflow[index]
+                    for index, patterns in enumerate(group_patterns)
+                ):
+                    break
+                if (
+                    exact_rescue_deadline is not None
+                    and perf_counter() >= exact_rescue_deadline
+                ):
+                    # Exact rescue is an optional recall aid over the dense
+                    # atomic pool. Preserve time for the mandatory lexical AND
+                    # scoring instead of exhausting the shared deadline here.
+                    exact_scan_complete = False
+                    break
+                raw_text = " ".join(
+                    filter(
+                        None,
+                        (
+                            obj.title,
+                            obj.title_original,
+                            obj.creator,
+                            obj.culture,
+                            obj.culture_display,
+                            obj.place,
+                            obj.date,
+                            obj.material,
+                            obj.type,
+                            obj.classification,
+                            obj.department,
+                            *obj.routing_domain_ids,
+                            *obj.culture_pack_ids,
+                            *obj.tags,
+                            *obj.relation_facets,
+                            obj.description,
+                            *(chunk.text for chunk in obj.evidence),
+                        ),
+                    )
+                )
+                for index, patterns in enumerate(group_patterns):
+                    if exact_overflow[index] or not patterns:
+                        continue
+                    if all(pattern.search(raw_text) for pattern in patterns):
+                        exact_sets[index].add(obj.id)
+                        if len(exact_sets[index]) > max_exact_per_query:
+                            exact_sets[index].clear()
+                            exact_overflow[index] = True
+
+            exact_ids = (
+                set().union(
+                    *(
+                        ids
+                        for ids, overflow in zip(
+                            exact_sets,
+                            exact_overflow,
+                            strict=True,
+                        )
+                        if not overflow
+                    )
+                )
+                if exact_scan_complete
+                else set()
+            )
+            if exact_ids:
+                if lexical_eligible is eligible:
+                    candidate_ids = set(exact_ids)
+                else:
+                    candidate_ids = {obj.id for obj in lexical_eligible}
+                    candidate_ids.update(exact_ids)
+                lexical_eligible = [
+                    obj for obj in eligible if obj.id in candidate_ids
+                ]
+                atomic_exact_prefilter = True
+
+        lexical_batches = self._lexical_search_many(
+            [
+                (item["query"], item["excluded"])
+                for _, item in pending_items
+            ],
+            lexical_eligible,
+            deadline=deadline,
+        )
+        if (
+            atomic
+            and atomic_dense_index is not None
+            and len(atomic_query_vectors) == len(pending_items)
+        ):
+            # An LLM planner can occasionally return an over-specified phrase
+            # (for example four catalogue facets joined as one query). Atomic
+            # lexical AND is the preferred precision path, but an empty or
+            # singleton batch must not erase semantically direct records. Reuse
+            # the already-computed query vector for a bounded evidence-backed
+            # dense relaxation; every survivor still passes both source-bound
+            # LLM audit stages before it can enter an exhibition.
+            relaxed_batches: list[list[SearchResult]] = []
+            for ((_, item), strict_results, query_vector) in zip(
+                pending_items,
+                lexical_batches,
+                atomic_query_vectors,
+                strict=True,
+            ):
+                if (
+                    deadline is not None
+                    and perf_counter() >= deadline - 0.25
+                ):
+                    relaxed_batches.append(strict_results)
+                    continue
+                try:
+                    relaxed_query = _query_plan(
+                        item["agenda"].question,
+                        collection.concept_aliases,
+                    )
+                    semantic_results = self._hybrid_search(
+                        item["agenda"].question,
+                        relaxed_query,
+                        item["excluded"],
+                        eligible,
+                        [],
+                        atomic_dense_index,
+                        query_vector=query_vector,
+                    )
+                except CollectionDataError:
+                    raise
+                except Exception as error:
+                    logger.warning(
+                        "atomic dense relaxation unavailable for %s (%s: %s)",
+                        collection.id,
+                        type(error).__name__,
+                        error,
+                    )
+                    semantic_results = []
+                annotated_semantic = [
+                    replace(
+                        result,
+                        retrieval_sources=tuple(
+                            dict.fromkeys(
+                                (
+                                    *result.retrieval_sources,
+                                    "dense_atomic_relaxation",
+                                )
+                            )
+                        ),
+                    )
+                    for result in semantic_results
+                ]
+                # Interleave both recall channels so a query-axis reserve sees
+                # one semantic and one exact candidate before either channel's
+                # long tail. The later evidence audit, not this ordering,
+                # grants admission.
+                merged: list[SearchResult] = []
+                seen: set[str] = set()
+                for offset in range(
+                    max(len(annotated_semantic), len(strict_results))
+                ):
+                    for channel in (annotated_semantic, strict_results):
+                        if offset >= len(channel):
+                            continue
+                        candidate = channel[offset]
+                        if candidate.obj.id in seen:
+                            continue
+                        merged.append(candidate)
+                        seen.add(candidate.obj.id)
+                        if len(merged) >= self.hybrid_max_results:
+                            break
+                    if len(merged) >= self.hybrid_max_results:
+                        break
+                relaxed_batches.append(merged)
+            lexical_batches = relaxed_batches
+        if atomic_dense_prefilter or atomic_exact_prefilter:
+            prefilter_sources = tuple(
+                source
+                for enabled, source in (
+                    (atomic_dense_prefilter, "dense_atomic_prefilter"),
+                    (atomic_exact_prefilter, "exact_atomic_prefilter"),
+                )
+                if enabled
+            )
+            lexical_batches = [
+                [
+                    replace(
+                        result,
+                        retrieval_sources=tuple(
+                            dict.fromkeys(
+                                (
+                                    *result.retrieval_sources,
+                                    *prefilter_sources,
+                                )
+                            )
+                        ),
+                    )
+                    for result in batch
+                ]
+                for batch in lexical_batches
+            ]
+        hybrid_pending: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+        for (cache_key, item), lexical_results in zip(
+            pending_items,
+            lexical_batches,
+            strict=True,
+        ):
+            item["lexical_results"] = lexical_results
+            # The visitor's original question already receives hybrid recall.
+            # Planner-generated atomic queries are a precision complement:
+            # every content leg is an explicit catalogue constraint and every
+            # returned object is still checked by the source-ID LLM audit.
+            # Running dense nearest-neighbour search for these expressions is
+            # both redundant and harmful: it can reintroduce objects that do
+            # not satisfy the atomic legs, while spending most of the bounded
+            # pre-audit budget on a second embedding pass.
+            if self.rag_mode != "hybrid" or atomic:
+                with self._cache_lock:
+                    self._remember_search(cache_key, lexical_results)
+                for position in item["positions"]:
+                    outputs[position] = list(lexical_results)
+                continue
+            if not lexical_results and not item["query"].dense_fallback_allowed:
+                with self._cache_lock:
+                    self._remember_search(cache_key, [])
+                for position in item["positions"]:
+                    outputs[position] = []
+                continue
+            hybrid_pending[cache_key] = item
+
+        pending = hybrid_pending
+        if not pending:
+            return [list(result or []) for result in outputs]
+
+        dense_index = self._dense_manager.get(collection)
+        if dense_index is None:
+            for cache_key, item in pending.items():
+                results = item["lexical_results"]
+                with self._cache_lock:
+                    self._remember_search(cache_key, results)
+                for position in item["positions"]:
+                    outputs[position] = list(results)
+            return [list(result or []) for result in outputs]
+
+        items = list(pending.items())
+        check_deadline()
+        try:
+            query_vectors = dense_index.embed_queries(
+                [item[1]["agenda"].question for item in items]
+            )
+            check_deadline()
+            if len(query_vectors) != len(items):
+                raise RuntimeError(
+                    "dense index returned an unexpected number of query vectors"
+                )
+        except CollectionDataError:
+            # A cooperative deadline is part of the public search contract,
+            # not a dense-runtime failure. Never turn it into a successful
+            # BM25 response after the caller's budget has already expired.
+            raise
+        except Exception as error:
+            logger.warning(
+                "batched hybrid RAG query degraded to BM25 for %s: %s",
+                collection.id,
+                error,
+            )
+            self._dense_manager.mark_query_failure(collection, error)
+            for _, item in items:
+                results = item["lexical_results"]
+                for position in item["positions"]:
+                    outputs[position] = list(results)
+            # Match the single-query failure path: transient dense failures are
+            # deliberately not cached, so a later request retries the encoder.
+            return [list(result or []) for result in outputs]
+
+        failures: list[Exception] = []
+        for (cache_key, item), query_vector in zip(items, query_vectors, strict=True):
+            check_deadline()
+            try:
+                results = self._hybrid_search(
+                    item["agenda"].question,
+                    item["query"],
+                    item["excluded"],
+                    eligible,
+                    item["lexical_results"],
+                    dense_index,
+                    query_vector=query_vector,
+                )
+            except Exception as error:
+                logger.warning(
+                    "batched hybrid RAG query degraded to BM25 for %s: %s",
+                    collection.id,
+                    error,
+                )
+                failures.append(error)
+                results = item["lexical_results"]
+            else:
+                with self._cache_lock:
+                    self._remember_search(cache_key, results)
+            for position in item["positions"]:
+                outputs[position] = list(results)
+
+        if failures:
+            self._dense_manager.mark_query_failure(collection, failures[0])
+        else:
+            self._dense_manager.mark_query_success(collection, dense_index)
+        return [list(result or []) for result in outputs]
+
     @staticmethod
     def _lexical_search(
         query: QueryPlan,
@@ -1548,6 +2540,11 @@ class CollectionRepository:
                 continue
             if query.anchor_groups and any(
                 not group & effective_searchable for group in query.anchor_groups
+            ):
+                continue
+            if query.title_anchor_groups and any(
+                not group & (document.title - document.contextual_anchor_suppressions)
+                for group in query.title_anchor_groups
             ):
                 continue
             matched_anchor_terms = tuple(
@@ -1600,7 +2597,11 @@ class CollectionRepository:
             matched_evidence_ids = tuple(
                 chunk.id
                 for chunk in obj.evidence
-                if query.anchor_tokens & _tokens(chunk.text)
+                if (
+                    chunk.source_kind != "institution_provenance"
+                    or query.allow_provenance_evidence
+                )
+                and query.anchor_tokens & _tokens(chunk.text)
             )
             results.append(
                 SearchResult(
@@ -1614,6 +2615,188 @@ class CollectionRepository:
         results.sort(key=lambda result: (-result.score, result.obj.id))
         return results
 
+    @staticmethod
+    def _lexical_search_many(
+        requests: Sequence[tuple[QueryPlan, list[set[str]]]],
+        eligible: list[MuseumObject],
+        *,
+        deadline: float | None = None,
+    ) -> list[list[SearchResult]]:
+        """Run independent fielded-BM25 queries over one document traversal.
+
+        Query-specific document frequencies, excluded topics, anchor gates and
+        compact candidate documents deliberately remain separate. The only
+        shared work is building each full :class:`SearchDocument`, which is the
+        dominant cost for agentic expansion queries and previously happened up
+        to three times in :meth:`search_many`.
+        """
+
+        if not requests:
+            return []
+
+        states: list[dict[str, Any]] = [
+            {
+                "query": query,
+                "excluded": excluded,
+                "document_frequency": Counter(),
+                "field_totals": Counter(),
+                "candidate_documents": [],
+                "searched_document_count": 0,
+            }
+            for query, excluded in requests
+        ]
+
+        for obj in eligible:
+            if deadline is not None and perf_counter() >= deadline:
+                raise CollectionDataError(
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                    "Batched collection retrieval exceeded its wall-clock budget.",
+                )
+            # Keep the same memory boundary as the single-query path: the full
+            # tokenised document exists for one object only. Each query retains
+            # only frequencies for its own scoring terms.
+            document = _build_search_document(obj)
+            effective_searchable = _effective_searchable(document)
+            for state in states:
+                query: QueryPlan = state["query"]
+                excluded: list[set[str]] = state["excluded"]
+                if any(
+                    topic_tokens and topic_tokens & effective_searchable
+                    for topic_tokens in excluded
+                ):
+                    continue
+                state["searched_document_count"] += 1
+                state["field_totals"].update(document.field_lengths)
+                state["document_frequency"].update(
+                    query.scoring_tokens & effective_searchable
+                )
+                if query.browse_all:
+                    state["candidate_documents"].append(
+                        (
+                            obj,
+                            QueryDocument(
+                                term_frequencies={
+                                    field: Counter()
+                                    for field in document.term_frequencies
+                                },
+                                field_lengths=document.field_lengths,
+                                matched_anchor_terms=(),
+                            ),
+                        )
+                    )
+                    continue
+                if query.anchor_groups and any(
+                    not group & effective_searchable
+                    for group in query.anchor_groups
+                ):
+                    continue
+                if query.title_anchor_groups and any(
+                    not group
+                    & (
+                        document.title
+                        - document.contextual_anchor_suppressions
+                    )
+                    for group in query.title_anchor_groups
+                ):
+                    continue
+                matched_anchor_terms = tuple(
+                    sorted(query.anchor_tokens & effective_searchable)
+                )
+                state["candidate_documents"].append(
+                    (
+                        obj,
+                        QueryDocument(
+                            term_frequencies={
+                                field: Counter(
+                                    {
+                                        token: frequency
+                                        for token, frequency in frequencies.items()
+                                        if token in query.scoring_tokens
+                                    }
+                                )
+                                for field, frequencies in document.term_frequencies.items()
+                            },
+                            field_lengths=document.field_lengths,
+                            matched_anchor_terms=matched_anchor_terms,
+                        ),
+                    )
+                )
+
+        batches: list[list[SearchResult]] = []
+        for state in states:
+            if deadline is not None and perf_counter() >= deadline:
+                raise CollectionDataError(
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                    "Batched collection retrieval exceeded its wall-clock budget.",
+                )
+            query = state["query"]
+            searched_document_count = state["searched_document_count"]
+            index = SearchIndex(
+                document_frequency=state["document_frequency"],
+                average_field_lengths={
+                    field: total / searched_document_count
+                    if searched_document_count
+                    else 0.0
+                    for field, total in state["field_totals"].items()
+                },
+                document_count=searched_document_count,
+            )
+            results: list[SearchResult] = []
+            for candidate_index, (obj, document) in enumerate(
+                state["candidate_documents"]
+            ):
+                if (
+                    deadline is not None
+                    and candidate_index % 128 == 0
+                    and perf_counter() >= deadline
+                ):
+                    raise CollectionDataError(
+                        "RETRIEVAL_SEARCH_TIMEOUT",
+                        "Batched collection retrieval exceeded its wall-clock budget.",
+                    )
+                if query.browse_all:
+                    results.append(
+                        SearchResult(
+                            obj=obj,
+                            score=(
+                                1.1
+                                if obj.evidence_depth == EvidenceDepth.FULL.value
+                                else 1.0
+                            ),
+                            retrieval_sources=("browse_all",),
+                        )
+                    )
+                    continue
+                score, field_scores = _object_score(obj, query, index, document)
+                if score <= 0:
+                    continue
+                matched_evidence_ids = tuple(
+                    chunk.id
+                    for chunk in obj.evidence
+                    if (
+                        chunk.source_kind != "institution_provenance"
+                        or query.allow_provenance_evidence
+                    )
+                    and query.anchor_tokens & _tokens(chunk.text)
+                )
+                results.append(
+                    SearchResult(
+                        obj=obj,
+                        score=score,
+                        matched_anchor_terms=document.matched_anchor_terms,
+                        matched_evidence_ids=matched_evidence_ids,
+                        field_scores=field_scores,
+                    )
+                )
+            if deadline is not None and perf_counter() >= deadline:
+                raise CollectionDataError(
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                    "Batched collection retrieval exceeded its wall-clock budget.",
+                )
+            results.sort(key=lambda result: (-result.score, result.obj.id))
+            batches.append(results)
+        return batches
+
     def _hybrid_search(
         self,
         question: str,
@@ -1622,18 +2805,32 @@ class CollectionRepository:
         eligible: list[MuseumObject],
         lexical_results: list[SearchResult],
         dense_index: Any,
+        *,
+        query_vector: Any | None = None,
     ) -> list[SearchResult]:
         """Fuse BM25 and dense recall, then rerank against evidence chunks.
 
-        BM25 candidates have already passed every lexical anchor group.  Dense
-        may add candidates only for a known multilingual concept and
-        only when an institution evidence chunk clears the semantic floor.
-        This preserves a truthful empty result for unknown subjects in either
-        Chinese or English.
+        BM25 candidates have already passed every lexical anchor group. Dense
+        recall is open-vocabulary: reviewed aliases and exact-title rules remain
+        precision guards for known ambiguous concepts, but they are no longer a
+        whitelist of subjects the visitor is allowed to ask about. A new subject
+        may enter through object and evidence embeddings when it clears the
+        stricter open-query floors below.
         """
 
         eligible_by_id = {obj.id: obj for obj in eligible}
-        query_vector = dense_index.embed_query(question)
+        dense_floor = (
+            max(self.dense_min_score, OPEN_QUERY_DENSE_MIN_SCORE)
+            if query.open_semantic_query
+            else self.dense_min_score
+        )
+        evidence_floor = (
+            max(self.evidence_min_score, OPEN_QUERY_EVIDENCE_MIN_SCORE)
+            if query.open_semantic_query
+            else self.evidence_min_score
+        )
+        if query_vector is None:
+            query_vector = dense_index.embed_query(question)
         object_dense_hits = dense_index.search_vector(
             query_vector,
             top_k=self.dense_top_k,
@@ -1649,38 +2846,44 @@ class CollectionRepository:
         # Evidence vectors deliberately carry a little object context to make
         # catalogue fragments retrievable.  That context must never turn an
         # unrelated fragment (for example an acquisition credit) into the
-        # query evidence cited by the curator.  Recheck the institution's raw
-        # excerpt and its explicit ``supports`` annotation against the expanded
-        # query vocabulary before an evidence id may enter the audit trace.
-        # This is a query-time guard, so it does not change the frozen embedding
-        # recipe or require rebuilding the index.
+        # query evidence cited by the curator. Provenance rows are eligible only
+        # when the visitor explicitly asks about source history; even then the
+        # later audit must keep documented acquisition separate from consent or
+        # legal-title claims. Reviewed concrete concepts additionally retain a
+        # lexical check; open-vocabulary questions may use an eligible excerpt
+        # on semantic similarity alone. This query-time guard does not change
+        # the frozen embedding recipe or require rebuilding the index.
         query_evidence_tokens = query.anchor_tokens | query.scoring_tokens
 
         def raw_evidence_matches(obj: MuseumObject, evidence_id: str) -> bool:
-            if not query_evidence_tokens:
-                return False
             chunk = next(
                 (item for item in obj.evidence if item.id == evidence_id),
                 None,
             )
-            if chunk is None:
+            if chunk is None or (
+                chunk.source_kind == "institution_provenance"
+                and not query.allow_provenance_evidence
+            ):
                 return False
-            return bool(
+            lexical_match = bool(
                 query_evidence_tokens
                 & _tokens(" ".join(filter(None, (chunk.text, chunk.supports))))
             )
+            if query.strict_anchor_groups or query.title_anchor_groups:
+                return lexical_match
+            return lexical_match or query.dense_fallback_allowed
 
         object_dense_scores: dict[str, float] = {}
         object_dense_rank: dict[str, int] = {}
         for rank, hit in enumerate(object_dense_hits, start=1):
-            if hit.score >= self.dense_min_score and hit.object_id in eligible_by_id:
+            if hit.score >= dense_floor and hit.object_id in eligible_by_id:
                 object_dense_scores[hit.object_id] = hit.score
                 object_dense_rank[hit.object_id] = rank
         evidence_recall_scores: dict[str, float] = {}
         evidence_recall_rank: dict[str, int] = {}
         evidence_recall_ids: dict[str, list[str]] = {}
         for rank, hit in enumerate(evidence_dense_hits, start=1):
-            if hit.score < self.evidence_min_score or hit.object_id not in eligible_by_id:
+            if hit.score < evidence_floor or hit.object_id not in eligible_by_id:
                 continue
             if not raw_evidence_matches(eligible_by_id[hit.object_id], hit.evidence_id):
                 continue
@@ -1705,6 +2908,12 @@ class CollectionRepository:
             if query.strict_anchor_groups and any(
                 not group & effective_searchable
                 for group in query.strict_anchor_groups
+            ):
+                dense_object_ids.discard(object_id)
+                continue
+            if query.title_anchor_groups and any(
+                not group & (document.title - document.contextual_anchor_suppressions)
+                for group in query.title_anchor_groups
             ):
                 dense_object_ids.discard(object_id)
                 continue
@@ -1765,16 +2974,35 @@ class CollectionRepository:
             candidate_ids,
             max_evidence_ids=5,
         )
-        # Dense-only objects need evidence-level support.  BM25 objects retain
-        # their lexical hard gate even when catalogue prose is very short.
+        # Dense-only objects need a non-provenance evidence row that clears the
+        # semantic floor. BM25 objects retain their lexical hard gate even when
+        # catalogue prose is very short.
+        qualified_evidence_by_object: dict[str, tuple[tuple[str, float], ...]] = {}
+        for object_id, evidence in evidence_hits.items():
+            obj = eligible_by_id.get(object_id)
+            if obj is None:
+                continue
+            scores = (
+                evidence.evidence_scores
+                if evidence.evidence_scores
+                else tuple(
+                    (evidence_id, evidence.score)
+                    for evidence_id in evidence.evidence_ids
+                )
+            )
+            qualified_evidence_by_object[object_id] = tuple(
+                (evidence_id, score)
+                for evidence_id, score in scores
+                if score >= evidence_floor
+                and raw_evidence_matches(obj, evidence_id)
+            )
         candidate_ids = {
             object_id
             for object_id in candidate_ids
             if object_id in lexical_by_id
             or (
                 object_id in dense_scores
-                and (evidence := evidence_hits.get(object_id)) is not None
-                and evidence.score >= self.evidence_min_score
+                and qualified_evidence_by_object.get(object_id)
             )
         }
         if not candidate_ids:
@@ -1806,19 +3034,8 @@ class CollectionRepository:
             lexical = lexical_by_id.get(object_id)
             obj = lexical.obj if lexical else eligible_by_id[object_id]
             evidence = evidence_hits.get(object_id)
-            evidence_scores = (
-                evidence.evidence_scores
-                if evidence and evidence.evidence_scores
-                else tuple(
-                    (evidence_id, evidence.score)
-                    for evidence_id in (evidence.evidence_ids if evidence else ())
-                )
-            )
-            qualified_dense_evidence = tuple(
-                (evidence_id, score)
-                for evidence_id, score in evidence_scores
-                if score >= self.evidence_min_score
-                and raw_evidence_matches(obj, evidence_id)
+            qualified_dense_evidence = qualified_evidence_by_object.get(
+                object_id, ()
             )
             qualified_evidence_score = max(
                 (score for _, score in qualified_dense_evidence),
@@ -1827,10 +3044,10 @@ class CollectionRepository:
             evidence_supported = qualified_evidence_score is not None
             dense_score = dense_scores.get(object_id)
             bm25_signal = lexical.score / top_bm25 if lexical else 0.0
-            dense_signal = floor_normalise(dense_score, self.dense_min_score)
+            dense_signal = floor_normalise(dense_score, dense_floor)
             evidence_signal = floor_normalise(
                 qualified_evidence_score,
-                self.evidence_min_score,
+                evidence_floor,
             )
             rrf_signal = rrf_scores[object_id] / top_rrf if top_rrf else 0.0
             # RRF supplies the main rank consensus; direct evidence similarity
@@ -1868,6 +3085,10 @@ class CollectionRepository:
                 sources.append("dense_object")
             if object_id in evidence_recall_rank and object_id in dense_object_ids:
                 sources.append("dense_evidence_recall")
+            if query.open_semantic_query and (
+                object_id in object_dense_rank or object_id in evidence_recall_rank
+            ):
+                sources.append("dense_open_query")
             if evidence_supported:
                 sources.append("evidence_rerank")
             fields = list(lexical.field_scores if lexical else ())

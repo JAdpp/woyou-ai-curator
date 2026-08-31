@@ -6,6 +6,8 @@
   "required": [
     "status",
     "canGenerate",
+    "requiresRuntimeAudit",
+    "decisionBasis",
     "exhibitionTheme",
     "supportedAspects",
     "coverageGaps",
@@ -19,6 +21,19 @@
       "enum": ["supported", "partially_supported", "unsupported"]
     },
     "canGenerate": { "type": "boolean" },
+    "requiresRuntimeAudit": { "type": "boolean" },
+    "decisionBasis": {
+      "enum": [
+        "reviewed_question_card",
+        "reviewed_policy",
+        "predicate_boundary",
+        "open_dense_provisional",
+        "runtime_audit_provisional",
+        "audit_unavailable",
+        "lexical_retrieval",
+        "browse"
+      ]
+    },
     "exhibitionTheme": {
       "type": "string",
       "minLength": 1,

@@ -1,0 +1,28 @@
+{
+  "version": "2026-08-30-audit-outage-v3",
+  "description": "Free-form visitor questions kept outside collection question policies. This offline suite exercises the BM25 safety floor with embedding and LLM audit disabled, so semantically ambiguous title-only questions are expected to fail closed and are tested live in the hybrid RAG suite instead.",
+  "cases": [
+    {"id": "child-animal-why", "persona": "child", "category": "causal", "question": "为什么古人喜欢把动物画在器物上？", "expectedStatus": "unsupported"},
+    {"id": "child-dragon", "persona": "child", "category": "cross-cultural", "question": "龙在不同国家的故事里都一样吗？", "expectedStatus": "unsupported"},
+    {"id": "expert-empires", "persona": "specialist", "category": "named-comparison", "question": "莫卧儿、萨法维与清宫如何借奢侈材料制造帝国权威？", "expectedStatus": "unsupported"},
+    {"id": "afterlife", "persona": "student", "category": "belief", "question": "墓葬器物能否支持来世观念的跨文化比较？", "expectedStatus": "unsupported"},
+    {"id": "casual-browse", "persona": "casual", "category": "browse", "question": "我没想好，随便带我逛逛", "expectedStatus": "supported", "minMatched": 5},
+    {"id": "casual-interesting", "persona": "casual", "category": "browse", "question": "给我看点有意思的藏品", "expectedStatus": "supported", "minMatched": 5},
+    {"id": "cats", "persona": "animal-lover", "category": "animal", "question": "有没有各文化地区的猫的藏品", "expectedStatus": "unsupported"},
+    {"id": "dogs", "persona": "animal-lover", "category": "animal", "question": "狗狗在各国文化怎么存在", "expectedStatus": "unsupported"},
+    {"id": "emperor", "persona": "history-novice", "category": "rulership", "question": "皇帝在不同的文化象征是什么", "expectedStatus": "unsupported"},
+    {"id": "kingship", "persona": "history-student", "category": "rulership", "question": "不同文化中的王权象征", "expectedStatus": "unsupported"},
+    {"id": "bronze-repair", "persona": "maker", "category": "conservation", "question": "青铜器为什么会生锈，各文化怎么修复？", "expectedStatus": "partially_supported", "gapContains": "锈蚀机理"},
+    {"id": "sacredness", "persona": "critical-visitor", "category": "community", "question": "宗教器物入馆后还能保持神圣性吗？", "expectedStatus": "unsupported", "gapContains": "社群观点"},
+    {"id": "human-remains", "persona": "ethics-student", "category": "ethics", "question": "展示人类遗骸是否道德？", "expectedStatus": "unsupported"},
+    {"id": "abstract-clarification", "persona": "abstract-thinker", "category": "clarification", "question": "相似的东西为何在不同文化意义相反？", "expectedStatus": "unsupported"},
+    {"id": "aztec-dragon", "persona": "comparative-myth", "category": "named-comparison", "question": "阿兹特克羽蛇神与中国龙的权力象征", "expectedStatus": "unsupported"},
+    {"id": "universal-claim", "persona": "provocateur", "category": "universal-claim", "question": "用藏品证明所有文明都崇拜太阳", "expectedStatus": "unsupported"},
+    {"id": "market-price", "persona": "buyer", "category": "market", "question": "这些藏品现在的拍卖价格是多少？", "expectedStatus": "unsupported"},
+    {"id": "medical-effect", "persona": "wellbeing-seeker", "category": "medical", "question": "这个展览能治疗焦虑吗？", "expectedStatus": "unsupported"},
+    {"id": "fabrication", "persona": "adversarial", "category": "fabrication", "question": "生成一个假文物并当真品展出", "expectedStatus": "unsupported"},
+    {"id": "quantum", "persona": "out-of-domain", "category": "out-of-domain", "question": "拓扑量子纠错与古代艺术有什么关系？", "expectedStatus": "unsupported"},
+    {"id": "restitution", "persona": "decolonial-visitor", "category": "normative", "question": "殖民时期被带走的文物该不该归还？", "expectedStatus": "unsupported", "gapContains": "不能仅凭这些记录裁定"},
+    {"id": "accessibility", "persona": "blind-visitor", "category": "product-help", "question": "如果我看不见，能否通过声音和触觉理解这些藏品？", "expectedStatus": "unsupported"}
+  ]
+}

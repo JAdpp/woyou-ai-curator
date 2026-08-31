@@ -1,11 +1,13 @@
 """Offline regression for the curation pipeline.
 
 Runs entirely against frozen collection data with no cloud model keys, so it is
-reproducible and cheap enough to run on every change. It checks two things:
+reproducible and cheap enough to run on every change. A synthetic evidence-ID
+auditor exercises the post-audit structure without making any semantic-quality
+claim; live semantic acceptance belongs to ``qa_open_rag.py``. It checks:
 
 1. the answerability gate still reproduces every curated label, and
 2. every visitor profile shape still produces a structurally valid, walkable
-   exhibition with its hard constraints intact.
+   exhibition from a candidate-bound audited fixture.
 
 Constraint checks are the point: an exhibition that loses its contrast voice or
 lets a metadata-only object carry the core-evidence role is a silent quality
@@ -47,17 +49,79 @@ class Failure(Exception):
     pass
 
 
+class SyntheticEvidenceAuditProvider:
+    """Candidate-bound structural double, never a semantic oracle.
+
+    It can accept only object/evidence IDs present in the audit payload. Other
+    model stages deliberately return an empty object so the generator exercises
+    its deterministic copy fallback. This keeps CI keyless without weakening
+    the production fail-closed retrieval contract.
+    """
+
+    supports_retrieval_audit = True
+    configured = True
+
+    async def generate_json(
+        self,
+        _system_prompt: str,
+        user_payload: dict[str, object],
+    ) -> dict[str, object]:
+        candidates = user_payload.get("candidates")
+        required = user_payload.get("requiredCount")
+        if not isinstance(candidates, list) or not isinstance(required, int):
+            return {}
+
+        accepted: list[dict[str, object]] = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            evidence = candidate.get("evidence")
+            if not isinstance(evidence, list) or not evidence:
+                continue
+            first = evidence[0]
+            if not isinstance(first, dict) or not first.get("id"):
+                continue
+            accepted.append(
+                {
+                    "objectId": candidate.get("objectId"),
+                    "relevanceScore": 0.99,
+                    "evidenceIds": [first["id"]],
+                    "reason": "synthetic candidate-bound structural fixture",
+                }
+            )
+            # Production asks the audit for an evidence-bound alternative
+            # pool, not merely the final display count.  Accept every shown
+            # fixture candidate so the selector can prove it avoids repeated
+            # titles and series in 10/15-minute routes.
+        supported = len(accepted) >= required
+        return {
+            "queryInterpretation": "synthetic structural audit fixture",
+            "answerability": "supported" if supported else "partially_supported",
+            "accepted": accepted,
+            "searchQueries": [],
+            "coverageGap": "" if supported else "synthetic fixture has too few candidates",
+        }
+
+
 def load(collection_id: str) -> tuple[CollectionRepository, ExhibitionGenerator, Path]:
     repository = CollectionRepository(
-        COLLECTIONS_DIR, default_collection_id=collection_id
+        COLLECTIONS_DIR,
+        default_collection_id=collection_id,
+        rag_mode="bm25",
     )
     settings = Settings(
         collections_dir=COLLECTIONS_DIR,
         store_mode="memory",
         # No key: the regression must never depend on a cloud model.
         deepseek_api_key=None,
+        rag_mode="bm25",
+        rag_llm_audit_enabled=True,
     )
-    generator = ExhibitionGenerator(settings, repository)
+    generator = ExhibitionGenerator(
+        settings,
+        repository,
+        provider=SyntheticEvidenceAuditProvider(),  # type: ignore[arg-type]
+    )
     collection_id = repository.get().id
     for candidate in sorted(COLLECTIONS_DIR.glob("*/manifest.json")):
         manifest = json.loads(candidate.read_text(encoding="utf-8"))
@@ -77,13 +141,22 @@ def check_answerability(generator: ExhibitionGenerator, collection_dir: Path) ->
     mismatches: list[str] = []
     themes: set[str] = set()
     for row in rows:
-        result = generator.check_agenda(
+        result = ExhibitionGenerator.probe_answerability(
+            generator.collections,
             AgendaInput(
                 question=row["question"],
                 priorKnowledge="some",
-                durationMinutes=10,
+                # Reviewed cards freeze five verified role objects. The label
+                # regression therefore checks the matching five-minute route;
+                # 10/15-minute structural coverage is exercised separately by
+                # the synthetic audited profile matrix below.
+                durationMinutes=5,
                 excludedTopics=[],
-            )
+            ),
+            # This check freezes the curated label distribution, not runtime
+            # outage behavior. ``True`` means “the later audit stage exists”;
+            # no cloud call occurs in probe_answerability.
+            audit_available=True,
         )
         observed[str(result.status)] += 1
         themes.add(result.exhibition_theme)
@@ -121,9 +194,13 @@ def check_exhibitions(generator: ExhibitionGenerator) -> tuple[int, Counter]:
     # Every duration against every motivation, over the first few domains.
     combinations = list(product(domains[:4], (5, 10, 15), list(VisitorMotivation)))
     for domain_id, minutes, motivation in combinations:
+        structural_query = domain_id.rsplit(":", 1)[-1].replace("-", " ")
         profile = VisitorProfile(
             curiosityDomainId=domain_id,
-            curiosityLabel=domain_id,
+            # ``global:...`` is an internal taxonomy key, not visitor copy.
+            # Passing it as a question also falsely requests a global cultural
+            # comparison. Use the readable concept for this structural test.
+            curiosityLabel=structural_query,
             motivation=motivation,
             priorKnowledge="some",
             durationMinutes=minutes,
@@ -197,9 +274,10 @@ def check_personalisation(generator: ExhibitionGenerator) -> float:
     selections: list[set[str]] = []
     for domain_id in domains[:4]:
         for minutes in (5, 15):
+            structural_query = domain_id.rsplit(":", 1)[-1].replace("-", " ")
             profile = VisitorProfile(
                 curiosityDomainId=domain_id,
-                curiosityLabel=domain_id,
+                curiosityLabel=structural_query,
                 durationMinutes=minutes,
                 priorKnowledge="some",
             )
@@ -243,6 +321,7 @@ def main() -> int:
     print(f"collection      {collection.id} @ {collection.version}")
     print(f"objects         {len(collection.objects)} loaded, {len(eligible)} with evidence")
     print(f"evidence depth  {full_depth} full / {len(eligible) - full_depth} thin")
+    print("audit fixture   synthetic candidate-bound IDs (not semantic QA)")
 
     steps = (
         ("answerability", lambda: check_answerability(generator, collection_dir)),

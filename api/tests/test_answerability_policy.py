@@ -51,11 +51,11 @@ def real_client() -> TestClient:
     )
 
 
-def agenda(question: str) -> dict[str, object]:
+def agenda(question: str, duration_minutes: int = 5) -> dict[str, object]:
     return {
         "question": question,
         "priorKnowledge": "some",
-        "durationMinutes": 10,
+        "durationMinutes": duration_minutes,
         "excludedTopics": [],
     }
 
@@ -65,22 +65,45 @@ def question_cards() -> list[dict[str, object]]:
     return payload["cards"]
 
 
-def test_sparse_cross_cultural_blue_and_white_question_is_partial_and_cannot_generate() -> None:
+def test_free_question_fails_as_audit_outage_not_as_collection_gap() -> None:
     client = real_client()
     question = "青花瓷为什么能成为跨文化交流的证据？"
     checked = client.post("/api/agenda/check", json=agenda(question))
     assert checked.status_code == 200
     payload = checked.json()
-    assert payload["status"] == "partially_supported"
+    assert payload["status"] == "unsupported"
     assert payload["canGenerate"] is False
-    assert 1 <= payload["coverage"]["matchedObjectCount"] < 5
+    assert payload["decisionBasis"] == "audit_unavailable"
+    assert payload["coverage"]["matchedObjectCount"] == 0
+    assert "不代表馆藏没有这个主题" in payload["coverageGaps"][0]
 
     generated = client.post("/api/exhibitions/generate-sync", json={"agenda": agenda(question)})
     assert generated.status_code == 422
-    assert generated.json()["error"]["code"] == "QUESTION_UNSUPPORTED"
+    assert generated.json()["error"]["code"] == "RETRIEVAL_AUDIT_UNAVAILABLE"
 
 
-def test_exact_and_near_question_card_matches_keep_starter_order() -> None:
+@pytest.mark.parametrize(
+    "question",
+    [
+        "我没想好，随便带我逛逛",
+        "给我看点有意思的藏品",
+    ],
+)
+def test_browse_agenda_check_stays_available_without_llm_audit(
+    question: str,
+) -> None:
+    checked = real_client().post("/api/agenda/check", json=agenda(question))
+
+    assert checked.status_code == 200
+    payload = checked.json()
+    assert payload["status"] == "supported"
+    assert payload["canGenerate"] is True
+    assert payload["requiresRuntimeAudit"] is False
+    assert payload["decisionBasis"] == "browse"
+    assert payload["coverage"]["matchedObjectCount"] >= 5
+
+
+def test_exact_question_card_keeps_starter_order_but_near_match_is_not_forced() -> None:
     repository = CollectionRepository(COLLECTIONS_DIR)
     collection = repository.list()[0]
     card = question_cards()[0]
@@ -92,17 +115,46 @@ def test_exact_and_near_question_card_matches_keep_starter_order() -> None:
     assert near_policy is not None
     assert near_policy[0].source == "question_card"
     assert near_policy[0].policy_id == card["id"]
-    assert near_policy[1] >= 0.72
+    assert 0.72 <= near_policy[1] < 1.0
 
     client = real_client()
-    for question in (exact_question, near_question):
-        generated = client.post(
-            "/api/exhibitions/generate-sync", json={"agenda": agenda(question)}
-        )
-        assert generated.status_code == 200, generated.text
-        actual_ids = [item["object"]["id"] for item in generated.json()["items"]]
-        assert actual_ids == expected_ids
-        assert generated.json()["exhibitionTheme"] == question.rstrip("？?。.!！")
+    exact = client.post(
+        "/api/exhibitions/generate-sync", json={"agenda": agenda(exact_question)}
+    )
+    assert exact.status_code == 200, exact.text
+    exact_payload = exact.json()
+    assert [item["object"]["id"] for item in exact_payload["items"]] == expected_ids
+    assert exact_payload["exhibitionTheme"] == exact_question.rstrip("？?。.!！")
+
+    # A fuzzy card match can help recognize a paraphrase, but it is not a
+    # reviewed answerability decision and cannot silently force the exact
+    # card's five-object spine. This is essential when a visitor appends a
+    # new legal, conservation or living-practice predicate to familiar words.
+    near_check = client.post("/api/agenda/check", json=agenda(near_question))
+    assert near_check.status_code == 200
+    assert near_check.json()["decisionBasis"] == "audit_unavailable"
+    assert near_check.json()["canGenerate"] is False
+    near = client.post(
+        "/api/exhibitions/generate-sync", json={"agenda": agenda(near_question)}
+    )
+    assert near.status_code == 422, near.text
+    assert near.json()["error"]["code"] == "RETRIEVAL_AUDIT_UNAVAILABLE"
+    near_agenda = AgendaInput(
+        question=near_question,
+        priorKnowledge="some",
+        durationMinutes=10,
+        collectionId=collection.id,
+    )
+    near_results = repository.search(near_agenda, collection)
+    generator = ExhibitionGenerator(
+        Settings(
+            collections_dir=COLLECTIONS_DIR,
+            rag_mode="bm25",
+            deepseek_api_key=None,
+        ),
+        repository,
+    )
+    assert generator._context(near_agenda, all_results=near_results).policy is None
 
 
 def test_replacement_is_limited_to_current_item_alternative_whitelist() -> None:
@@ -157,25 +209,28 @@ def test_replacement_is_limited_to_current_item_alternative_whitelist() -> None:
 
 def test_all_curated_regression_answerability_labels_are_preserved() -> None:
     repository = CollectionRepository(COLLECTIONS_DIR)
-    generator = ExhibitionGenerator(
-        Settings(collections_dir=COLLECTIONS_DIR, store_mode="memory", deepseek_api_key=None),
-        repository,
-    )
     payload = json.loads(
         (COLLECTION_DIR / "regression_questions.json").read_text(encoding="utf-8")
     )
     observed: dict[str, int] = {}
     detected_themes: set[str] = set()
     for row in payload["questions"]:
-        result = generator.check_agenda(
+        result = ExhibitionGenerator.probe_answerability(
+            repository,
             AgendaInput(
                 question=row["question"],
                 priorKnowledge="some",
-                durationMinutes=10,
+                # The curated label set describes the evidence hypothesis at a
+                # five-object route; it is not permission to bypass the live
+                # semantic audit when the visitor actually generates a visit.
+                durationMinutes=5,
                 excludedTopics=[],
-            )
+            ),
+            audit_available=True,
         )
         assert result.status == row["expectedStatus"], row["id"]
+        if row["expectedStatus"] == "supported" and result.decision_basis != "reviewed_question_card":
+            assert result.requires_runtime_audit is True, row["id"]
         assert result.exhibition_theme == row["question"].rstrip("？?。.!！")
         assert row.get("evidenceDomainId", "") not in result.supported_aspects
         detected_themes.add(result.exhibition_theme)

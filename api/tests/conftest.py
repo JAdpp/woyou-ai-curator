@@ -73,6 +73,47 @@ def write_collection(base: Path, count: int = 8) -> Path:
     (collection_dir / "objects.json").write_text(
         json.dumps({"objects": objects}, ensure_ascii=False), encoding="utf-8"
     )
+    # The shared API fixture has no external audit provider. Its canonical
+    # agenda therefore needs an explicit reviewed five-object spine; arbitrary
+    # free-form questions are intentionally fail-closed in audit-outage mode.
+    starter_ids = [obj["id"] for obj in objects[:5]]
+    (collection_dir / "question_cards.json").write_text(
+        json.dumps(
+            {
+                "cards": [
+                    {
+                        "id": "fixture-landscape-route",
+                        "question": "山水画如何组织观看者的行旅视线？",
+                        "coverageStatus": "supported",
+                        "reviewStatus": "fixture_reviewed",
+                        "evidenceDomainId": "山水",
+                        "starterObjectIds": starter_ids,
+                        "coverageLimits": [],
+                    },
+                    {
+                        "id": "fixture-calligraphy-route",
+                        "question": "书法与诗如何共同构成观看经验？",
+                        "coverageStatus": "supported",
+                        "reviewStatus": "fixture_reviewed",
+                        "evidenceDomainId": "观看",
+                        "starterObjectIds": starter_ids,
+                        "coverageLimits": [],
+                    },
+                    {
+                        "id": "fixture-mobile-viewpoint-route",
+                        "question": "山水图像中的移动视点如何被馆藏材料呈现？",
+                        "coverageStatus": "supported",
+                        "reviewStatus": "fixture_reviewed",
+                        "evidenceDomainId": "山水",
+                        "starterObjectIds": starter_ids,
+                        "coverageLimits": [],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     return collection_dir
 
 
@@ -115,7 +156,10 @@ def agenda_payload() -> dict[str, object]:
     return {
         "question": "山水画如何组织观看者的行旅视线？",
         "priorKnowledge": "略有了解",
-        "durationMinutes": 10,
+        # The reviewed fixture card freezes five starter objects, matching the
+        # five-minute profile. Longer visits must acquire additional audited
+        # objects instead of silently returning too few exhibits.
+        "durationMinutes": 5,
         "personalConnection": "我曾在博物馆看过山水长卷",
         "excludedTopics": []
     }

@@ -14,6 +14,11 @@ import { logEvent, resolveApiAssetUrl, resolveObjectImageUrl } from "@/lib/api";
 import { fill } from "@/lib/i18n";
 import { useLanguage } from "@/lib/useLanguage";
 import { getImageLicenseLabel, getLegacyRightsLabel } from "@/lib/rights";
+import {
+  publicInstitutionName,
+  publicObjectMetadata,
+  publicObjectTitle,
+} from "@/lib/localizedMetadata";
 import { EpilogueConversation } from "../EpilogueConversation";
 import type { HallLayout, TourStop } from "./layout";
 import { exhibitionViewHref } from "./progress";
@@ -145,6 +150,9 @@ function ArtworkLabel({
   } | null>(null);
   const imageLicenseLabel = getImageLicenseLabel(item.object);
   const legacyRightsLabel = getLegacyRightsLabel(item.object);
+  const publicTitle = publicObjectTitle(item, contentLang);
+  const publicMetadata = publicObjectMetadata(item, contentLang);
+  const institutionName = publicInstitutionName(item, contentLang);
 
   const clampPosition = (x: number, y: number, width: number, height: number) =>
     clampPanelPosition(x, y, width, height, window.innerWidth, window.innerHeight);
@@ -248,7 +256,7 @@ function ArtworkLabel({
       style={panelStyle}
       data-positioned={position ? "true" : "false"}
       data-collapsed={collapsed ? "true" : "false"}
-      aria-label={fill(t.labelOf, { title: item.displayTitle || item.object.title })}
+      aria-label={fill(t.labelOf, { title: publicTitle })}
     >
       <div className={styles.labelWindowBar}>
         <button
@@ -263,7 +271,7 @@ function ArtworkLabel({
           title={t.moveLabelTitle}
         >
           <span aria-hidden="true">⠿</span>
-          <span>{collapsed ? item.displayTitle || item.object.title : t.moveLabel}</span>
+          <span>{collapsed ? publicTitle : t.moveLabel}</span>
         </button>
         <div className={styles.labelWindowActions}>
           {!collapsed && (
@@ -296,10 +304,14 @@ function ArtworkLabel({
       {/* Chinese first: institutions catalogue in English, but the exhibition
           is read in Chinese. The original stays visible underneath and in the
           source panel, so nothing is hidden. */}
-      <h2 lang={contentLang}>{item.displayTitle || item.object.titleOriginal || item.object.title}</h2>
+      <h2 lang={contentLang}>{publicTitle}</h2>
       <p className={styles.originalTitle}>{item.object.title}</p>
       <p className={styles.tombstone}>
-        {[item.object.date, item.object.medium, item.object.culture].filter(Boolean).join(" · ")}
+        {publicMetadata.length > 0
+          ? publicMetadata.join(" · ")
+          : contentLang.startsWith("zh")
+            ? "中文著录暂缺，馆方原文见来源"
+            : ""}
       </p>
 
       <div className={styles.labelBody} lang={contentLang}>
@@ -328,7 +340,7 @@ function ArtworkLabel({
           rel="noreferrer"
           onClick={() => logEvent("institution_page_opened", exhibitionId, { itemId: item.id })}
         >
-          {item.object.institution || "机构页"} ↗
+          {institutionName || (contentLang.startsWith("zh") ? "机构页" : item.object.institution) || "机构页"} ↗
         </a>
       </div>
 
@@ -440,11 +452,14 @@ export function HallOverlay({
         text = `${candidateChapter.title}。${candidateChapter.leadIn}`;
       } else if (candidate.kind === "artwork" && candidateItem) {
         const spoken = candidateItem.labelSentences
-          .filter((sentence) => sentence.type !== "institution_fact")
+          .filter((sentence) => (
+            writtenIn === "en"
+            || (/[\u3400-\u9fff]/.test(sentence.text) && !/[A-Za-z]/.test(sentence.text))
+          ))
           .map((sentence) => sentence.text);
         // The device fallback reads the Chinese label, never the English
         // institution record. Qwen's text is reconstructed by the backend.
-        text = `${candidateItem.displayTitle || candidateItem.object.title}。${spoken.join(" ")}`;
+        text = `${publicObjectTitle(candidateItem, contentLang)}。${spoken.join(" ")}`;
       } else if (candidate.kind === "epilogue") {
         text = exhibition.epilogue.text;
       }
@@ -465,7 +480,7 @@ export function HallOverlay({
       current: describe(stop),
       next: nextStop ? describe(nextStop) : null,
     };
-  }, [chaptersById, exhibition, itemsById, layout.stops, stop, stopIndex]);
+  }, [chaptersById, contentLang, exhibition, itemsById, layout.stops, stop, stopIndex, writtenIn]);
 
   const audio = useAudioGuide({
     exhibitionId: exhibition.id,

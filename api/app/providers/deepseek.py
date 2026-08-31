@@ -49,6 +49,11 @@ class ProviderError(RuntimeError):
 
 
 class DeepSeekProvider:
+    # Generator feature detection keeps legacy/fake providers compatible while
+    # making the production provider opt in to the bounded relevance-audit pass.
+    supports_retrieval_audit = True
+    supports_retrieval_query_planning = True
+
     def __init__(self, settings: Settings) -> None:
         self.api_key = settings.deepseek_api_key
         self.model = settings.deepseek_model
@@ -73,6 +78,53 @@ class DeepSeekProvider:
             # visitor-facing generation deadline.
             thinking={"type": "disabled"},
             max_tokens=4096,
+        )
+
+    async def generate_retrieval_audit_json(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run the evidence gate deterministically rather than creatively."""
+
+        return await self._generate_json(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(user_payload, ensure_ascii=False),
+                },
+            ],
+            thinking={"type": "disabled"},
+            max_tokens=4096,
+            temperature=0.0,
+        )
+
+    async def generate_retrieval_query_plan_json(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Translate visitor wording into bounded catalogue search terms.
+
+        This stage has no collection records and no authority to accept an
+        object.  Its output is deliberately small because all resulting
+        candidates still pass the source-bound retrieval audit.
+        """
+
+        return await self._generate_json(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(user_payload, ensure_ascii=False),
+                },
+            ],
+            thinking={"type": "disabled"},
+            max_tokens=1200,
+            temperature=0.0,
         )
 
     async def generate_json_with_images(
@@ -131,6 +183,7 @@ class DeepSeekProvider:
         messages: list[dict[str, Any]],
         thinking: dict[str, str] | None = None,
         max_tokens: int | None = None,
+        temperature: float = 0.2,
     ) -> dict[str, Any]:
         if not self.api_key:
             raise ProviderError(
@@ -145,7 +198,7 @@ class DeepSeekProvider:
             "model": model,
             "messages": messages,
             "response_format": {"type": "json_object"},
-            "temperature": 0.2,
+            "temperature": temperature,
         }
         if thinking is not None:
             request_body["thinking"] = thinking

@@ -227,6 +227,8 @@
         "object",
         "role",
         "roleLabel",
+        "displayTitle",
+        "localizedMetadata",
         "subQuestion",
         "whySelected",
         "relation",
@@ -240,6 +242,8 @@
           "enum": ["opening", "context", "core_evidence", "contrast", "synthesis"]
         },
         "roleLabel": { "type": "string" },
+        "displayTitle": { "type": "string" },
+        "localizedMetadata": { "$ref": "#/$defs/localizedMetadata" },
         "subQuestion": { "type": "string" },
         "whySelected": { "type": "string" },
         "relation": { "type": "string" },
@@ -249,6 +253,18 @@
           "items": { "$ref": "#/$defs/sentence" }
         },
         "alternatives": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "localizedMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creator", "date", "medium", "culture", "institution"],
+      "properties": {
+        "creator": { "type": "string" },
+        "date": { "type": "string" },
+        "medium": { "type": "string" },
+        "culture": { "type": "string" },
+        "institution": { "type": "string" }
       }
     },
     "validation": {

@@ -66,6 +66,31 @@ def test_text_json_request_disables_thinking_and_bounds_output(monkeypatch) -> N
     assert body["max_tokens"] == 4096
 
 
+def test_retrieval_audit_request_is_deterministic(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    _install_fake_client(monkeypatch, captured)
+    provider = DeepSeekProvider(
+        Settings(
+            deepseek_api_key="test-key",
+            deepseek_model="deepseek-v4-flash",
+        )
+    )
+
+    result = asyncio.run(
+        provider.generate_retrieval_audit_json(
+            "retrieval audit",
+            {"requiredCount": 5, "candidates": []},
+        )
+    )
+
+    assert result == {"items": []}
+    body = captured["body"]
+    assert body["model"] == "deepseek-v4-flash"
+    assert body["temperature"] == 0.0
+    assert body["thinking"] == {"type": "disabled"}
+    assert body["max_tokens"] == 4096
+
+
 def test_visual_label_request_uses_the_dedicated_model_and_bound_image(
     monkeypatch,
 ) -> None:

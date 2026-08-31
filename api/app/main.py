@@ -307,7 +307,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         StaticFiles(directory=str(settings.aliyun_image_output_dir), check_dir=False),
         name="generated-posters",
     )
-    interviews = InterviewService(collections)
+    interviews = InterviewService(
+        collections,
+        audit_available=bool(
+            settings.rag_llm_audit_enabled
+            and generator.provider.configured
+            and getattr(generator.provider, "supports_retrieval_audit", False)
+        ),
+    )
     interview_sessions: dict[str, InterviewState] = {}
     jobs = JobStore(max_job_seconds=settings.generation_job_timeout_seconds)
     poster_background_tasks: set[asyncio.Task[bool]] = set()
@@ -645,7 +652,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if state is None:
             raise HTTPException(status_code=404, detail="Interview session not found.")
         before = len(state.transcript)
-        updated = interviews.answer(state, answer)
+        # The final interview turn may run hybrid retrieval to decide whether
+        # negotiation is needed. Keep that CPU/mmap work off the event loop so
+        # other jobs and SSE streams remain responsive.
+        updated = await asyncio.to_thread(interviews.answer, state, answer)
         # A stale answer is ignored by the state machine and leaves the
         # transcript untouched; there is nothing to speak to in that case.
         if len(updated.transcript) > before:

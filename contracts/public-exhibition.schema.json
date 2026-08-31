@@ -46,12 +46,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "object", "role", "roleLabel", "subQuestion", "whySelected", "relation", "labelSentences"],
+        "required": ["id", "object", "role", "roleLabel", "displayTitle", "localizedMetadata", "subQuestion", "whySelected", "relation", "labelSentences"],
         "properties": {
           "id": { "type": "string" },
           "object": { "$ref": "#/$defs/publicMuseumObject" },
           "role": { "enum": ["opening", "context", "core_evidence", "contrast", "synthesis"] },
           "roleLabel": { "type": "string" },
+          "displayTitle": { "type": "string" },
+          "localizedMetadata": { "$ref": "#/$defs/localizedMetadata" },
           "subQuestion": { "type": "string" },
           "whySelected": { "type": "string" },
           "relation": { "type": "string" },
@@ -80,6 +82,18 @@
   },
   "$defs": {
     "nullableString": { "type": ["string", "null"] },
+    "localizedMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creator", "date", "medium", "culture", "institution"],
+      "properties": {
+        "creator": { "type": "string" },
+        "date": { "type": "string" },
+        "medium": { "type": "string" },
+        "culture": { "type": "string" },
+        "institution": { "type": "string" }
+      }
+    },
     "curatorialClaim": {
       "type": "object",
       "required": ["id", "text", "evidenceIds", "confidence"],

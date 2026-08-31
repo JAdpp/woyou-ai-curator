@@ -178,7 +178,7 @@ class FastEmbedProvider:
     ) -> None:
         if model_name != DEFAULT_EMBEDDING_MODEL:
             raise DenseRetrievalError(
-                f"hybrid-rag-v1 supports only the pinned model {DEFAULT_EMBEDDING_MODEL!r}"
+                f"hybrid-rag-v2 supports only the pinned model {DEFAULT_EMBEDDING_MODEL!r}"
             )
         try:
             import fastembed
@@ -551,6 +551,35 @@ class DenseIndex:
         if vector.shape != (int(self.manifest["dimension"]),):
             raise DenseRetrievalError("query embedding dimension does not match index")
         return vector
+
+    def embed_queries(self, queries: Sequence[str]) -> list[Any]:
+        """Encode several queries in one provider batch.
+
+        Agentic query expansion commonly contributes two or three closely
+        related searches.  Calling the ONNX encoder separately for each query
+        repeats most of its setup cost, so the batch path deliberately uses
+        ``provider.embed`` once while keeping ``embed_query`` unchanged for the
+        ordinary single-search path.
+        """
+
+        query_list = list(queries)
+        if not query_list:
+            return []
+        vectors = list(
+            self.provider.embed(
+                query_list,
+                batch_size=min(64, len(query_list)),
+            )
+        )
+        if len(vectors) != len(query_list):
+            raise DenseRetrievalError(
+                "embedding provider returned an unexpected number of query vectors"
+            )
+        dimension = int(self.manifest["dimension"])
+        normalised = [_normalise(vector) for vector in vectors]
+        if any(vector.shape != (dimension,) for vector in normalised):
+            raise DenseRetrievalError("query embedding dimension does not match index")
+        return normalised
 
     def search_vector(
         self,

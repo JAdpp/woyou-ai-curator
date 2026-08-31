@@ -11,6 +11,7 @@ from time import perf_counter
 import pytest
 from fastapi.testclient import TestClient
 
+from app.collections import CollectionDataError, SearchResult
 from app.config import Settings
 from app.generator import ExhibitionGenerator
 from app.jobs import JobStore
@@ -19,7 +20,13 @@ from app.main import (
     _mark_interrupted_generation,
     create_app,
 )
-from app.models import ExhibitionPoster, VisitorProfile
+from app.models import (
+    AgendaInput,
+    EvidenceChunk,
+    ExhibitionPoster,
+    MuseumObject,
+    VisitorProfile,
+)
 from app.providers.aliyun_image import GeneratedPoster, PosterContext
 from app.providers.deepseek import DeepSeekProvider, ProviderError
 from app.store import ExhibitionStore
@@ -31,6 +38,132 @@ class _SlowModelProvider:
     async def generate_json(self, _system_prompt: str, _payload: dict) -> dict:
         await asyncio.sleep(0.25)
         return {}
+
+
+def _timeout_candidate(object_id: str) -> SearchResult:
+    evidence_id = f"{object_id}:metadata"
+    obj = MuseumObject(
+        id=object_id,
+        sourceId=object_id,
+        title=f"Object {object_id}",
+        description="Institution description.",
+        imageUrl=f"https://example.test/{object_id}.jpg",
+        objectUrl=f"https://example.test/{object_id}",
+        rights="CC0",
+        institution="Fixture Museum",
+        institutionId="fixture",
+        evidence=[
+            EvidenceChunk(
+                id=evidence_id,
+                text=f"Institution record identifies object {object_id}.",
+                sourceUrl=f"https://example.test/{object_id}",
+                sourceTitle=f"Object {object_id}",
+                sourceKind="institution_metadata",
+            )
+        ],
+    )
+    return SearchResult(
+        obj=obj,
+        score=80.0,
+        matched_evidence_ids=(evidence_id,),
+        retrieval_sources=("dense_object", "evidence_rerank"),
+        dense_score=0.72,
+        evidence_score=0.70,
+    )
+
+
+class _FirstAuditNeedsExpansionProvider:
+    configured = True
+    supports_retrieval_audit = True
+
+    async def generate_json(self, _prompt: str, payload: dict) -> dict:
+        return {
+            "queryInterpretation": "保留的首轮解释",
+            "answerability": "supported",
+            "accepted": [
+                {
+                    "objectId": candidate["objectId"],
+                    "relevanceScore": 0.9,
+                    "evidenceIds": [candidate["evidence"][0]["id"]],
+                }
+                for candidate in payload["candidates"]
+            ],
+            "expansionReason": "insufficient_direct_objects",
+            "searchQueries": ["bounded optional expansion"],
+            "coverageGap": "首轮只有两件直接证据。",
+        }
+
+
+class _PartialCaseStudyProvider:
+    configured = True
+    supports_retrieval_audit = True
+
+    def __init__(self, answerability: str = "partially_supported") -> None:
+        self.answerability = answerability
+
+    async def generate_json(self, _prompt: str, payload: dict) -> dict:
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list):
+            # The later curation call may fail over to the deterministic
+            # template; this fixture isolates the answerability gate.
+            return {}
+        return {
+            "queryInterpretation": "馆藏可支持具体案例，但不能推出普遍结论",
+            "answerability": self.answerability,
+            "accepted": [
+                {
+                    "objectId": candidate["objectId"],
+                    "relevanceScore": 0.9,
+                    "evidenceIds": [candidate["evidence"][0]["id"]],
+                }
+                for candidate in candidates
+            ],
+            "expansionReason": "none",
+            "searchQueries": [],
+            "coverageGap": "馆藏只支持这些对象案例，不支持普遍因果结论。",
+        }
+
+
+class _UsablePartialAuditProvider:
+    configured = True
+    supports_retrieval_audit = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate_json(self, _prompt: str, payload: dict) -> dict:
+        self.calls += 1
+        return {
+            "queryInterpretation": "足量对象案例",
+            "answerability": "partially_supported",
+            "accepted": [
+                {
+                    "objectId": candidate["objectId"],
+                    "relevanceScore": 0.9,
+                    "evidenceIds": [candidate["evidence"][0]["id"]],
+                }
+                for candidate in payload["candidates"]
+            ],
+            "expansionReason": (
+                "predicate_evidence_gap" if self.calls == 1 else "none"
+            ),
+            "searchQueries": (
+                ["direct predicate evidence"] if self.calls == 1 else []
+            ),
+            "coverageGap": "对象案例不能推出普遍方法。",
+        }
+
+
+class _ExpansionMustNotStartCollections:
+    def __init__(self) -> None:
+        self.search_many_calls = 0
+
+    def match_question_policy(self, _collection, _question):
+        return None
+
+    def search_many(self, _agendas, _collection):
+        self.search_many_calls += 1
+        raise AssertionError("optional expansion had no remaining budget")
 
 
 class _DelayedPosterProvider:
@@ -107,6 +240,144 @@ def test_frame_deadline_falls_back_before_the_job_safety_timeout(client) -> None
     assert any("确定性模板" in limit for limit in exhibition.coverage_limits)
 
 
+def test_optional_expansion_deadline_preserves_the_first_audit_verdict() -> None:
+    candidates = [_timeout_candidate("a"), _timeout_candidate("b")]
+    collections = _ExpansionMustNotStartCollections()
+    generator = ExhibitionGenerator(
+        Settings(
+            rag_retrieval_timeout_seconds=1.25,
+            rag_llm_audit_timeout_seconds=1.25,
+        ),
+        collections,  # type: ignore[arg-type]
+        provider=_FirstAuditNeedsExpansionProvider(),  # type: ignore[arg-type]
+    )
+    agenda = AgendaInput(
+        question="需要补证但首审已经有直接证据的问题",
+        priorKnowledge="none",
+        durationMinutes=5,
+        collectionId="fixture",
+    )
+
+    outcome = asyncio.run(
+        generator._agentic_retrieve(
+            agenda,
+            object(),  # type: ignore[arg-type]
+            candidates,
+            required_count=5,
+        )
+    )
+
+    assert collections.search_many_calls == 0
+    assert [result.obj.id for result in outcome.results] == ["a", "b"]
+    assert outcome.answerability == "partially_supported"
+    assert outcome.interpretation == "保留的首轮解释"
+    assert "首轮只有两件直接证据" in outcome.coverage_gap
+    assert outcome.failure_code is None
+    assert outcome.warning_code == "RETRIEVAL_SEARCH_TIMEOUT"
+    assert outcome.warning_detail
+
+
+def test_usable_partial_does_not_spend_time_on_optional_refinement() -> None:
+    candidates = [_timeout_candidate(str(index)) for index in range(5)]
+    collections = _ExpansionMustNotStartCollections()
+    provider = _UsablePartialAuditProvider()
+    generator = ExhibitionGenerator(
+        Settings(),
+        collections,  # type: ignore[arg-type]
+        provider=provider,  # type: ignore[arg-type]
+    )
+    agenda = AgendaInput(
+        question="馆藏案例可以支持但不能推出普遍结论的问题",
+        priorKnowledge="none",
+        durationMinutes=5,
+        collectionId="fixture",
+    )
+
+    outcome = asyncio.run(
+        generator._agentic_retrieve(
+            agenda,
+            object(),  # type: ignore[arg-type]
+            candidates,
+            required_count=5,
+        )
+    )
+
+    assert collections.search_many_calls == 0
+    assert provider.calls == 1
+    assert len(outcome.results) == 5
+    assert outcome.answerability == "partially_supported"
+    assert outcome.warning_code is None
+
+
+def test_partial_answer_with_five_audited_objects_generates_narrowed_exhibition(
+    client,
+) -> None:
+    generator = ExhibitionGenerator(
+        client.app.state.settings,
+        client.app.state.collections,
+        provider=_PartialCaseStudyProvider(),  # type: ignore[arg-type]
+    )
+    collection = client.app.state.collections.get()
+    agenda = AgendaInput(
+        question="landscape object institution description",
+        priorKnowledge="none",
+        durationMinutes=5,
+        collectionId=collection.id,
+    )
+
+    exhibition = asyncio.run(generator.generate(agenda))
+
+    assert len(exhibition.items) == 5
+    assert exhibition.validation.passed is True
+    assert "馆藏只支持这些对象案例，不支持普遍因果结论。" in (
+        exhibition.coverage_limits
+    )
+
+
+def test_profile_flow_also_generates_a_narrowed_partial_exhibition(client) -> None:
+    generator = ExhibitionGenerator(
+        client.app.state.settings,
+        client.app.state.collections,
+        provider=_PartialCaseStudyProvider(),  # type: ignore[arg-type]
+    )
+    collection = client.app.state.collections.get()
+    profile = VisitorProfile(
+        curiosityLabel="对象案例",
+        freeFormQuestion="landscape object institution description",
+        durationMinutes=5,
+    )
+
+    exhibition = asyncio.run(
+        generator.generate_from_profile(profile, collection_id=collection.id)
+    )
+
+    assert len(exhibition.items) == 5
+    assert exhibition.validation.passed is True
+    assert "馆藏只支持这些对象案例，不支持普遍因果结论。" in (
+        exhibition.coverage_limits
+    )
+
+
+def test_unsupported_answer_still_fails_even_with_five_topical_objects(client) -> None:
+    generator = ExhibitionGenerator(
+        client.app.state.settings,
+        client.app.state.collections,
+        provider=_PartialCaseStudyProvider("unsupported"),  # type: ignore[arg-type]
+    )
+    collection = client.app.state.collections.get()
+    agenda = AgendaInput(
+        question="landscape object institution description",
+        priorKnowledge="none",
+        durationMinutes=5,
+        collectionId=collection.id,
+    )
+
+    with pytest.raises(CollectionDataError) as raised:
+        asyncio.run(generator.generate(agenda))
+
+    assert raised.value.code == "QUESTION_UNSUPPORTED_AFTER_AUDIT"
+
+
 def test_job_deadline_message_does_not_blame_the_visitors_topic() -> None:
     async def scenario():
         jobs = JobStore(max_job_seconds=0.02)
@@ -148,8 +419,69 @@ def test_unexpected_job_error_is_sanitised_and_has_a_stable_code() -> None:
     job = asyncio.run(scenario())
     assert job.status == "failed"
     assert job.error_code == "curation_failed"
+
+
+def test_post_audit_unsupported_job_is_actionable_not_reported_as_outage() -> None:
+    async def scenario():
+        jobs = JobStore(max_job_seconds=1)
+        job = jobs.create()
+
+        async def unsupported_work(_jobs: JobStore, _job_id: str) -> None:
+            _jobs.start_step(_job_id, "retrieve")
+            raise CollectionDataError(
+                "QUESTION_UNSUPPORTED_AFTER_AUDIT",
+                "internal retrieval detail",
+                coverageGap="missing comparison leg",
+            )
+
+        jobs.run(job.id, unsupported_work)
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if jobs.get(job.id).status == "failed":
+                break
+        return jobs.get(job.id)
+
+    job = asyncio.run(scenario())
+    assert job.status == "failed"
+    assert job.error_code == "question_unsupported_after_audit"
+    assert "选择系统建议的相近方向" in (job.error or "")
+    assert "稍后重试" not in (job.error or "")
     assert "问题仍然保留" in (job.error or "")
     assert "certificate" not in (job.error or "")
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "RETRIEVAL_AUDIT_UNAVAILABLE",
+        "RETRIEVAL_AUDIT_INVALID",
+        "RETRIEVAL_SEARCH_TIMEOUT",
+    ],
+)
+def test_retrieval_infrastructure_failure_does_not_blame_topic(
+    error_code: str,
+) -> None:
+    async def scenario():
+        jobs = JobStore(max_job_seconds=1)
+        job = jobs.create()
+
+        async def failed_retrieval(_jobs: JobStore, _job_id: str) -> None:
+            _jobs.start_step(_job_id, "retrieve")
+            raise CollectionDataError(error_code, "internal retrieval detail")
+
+        jobs.run(job.id, failed_retrieval)
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if jobs.get(job.id).status == "failed":
+                break
+        return jobs.get(job.id)
+
+    job = asyncio.run(scenario())
+    assert job.status == "failed"
+    assert job.error_code == error_code.casefold()
+    assert "不代表馆藏不支持" in (job.error or "")
+    assert "直接重试" in (job.error or "")
+    assert "相近方向" not in (job.error or "")
 
 
 def test_interrupted_persisted_skeleton_becomes_an_honest_draft(client) -> None:

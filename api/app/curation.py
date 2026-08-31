@@ -54,6 +54,7 @@ from .models import (
     ExhibitionItem,
     ExhibitionStatus,
     LabelSentence,
+    LocalizedObjectMetadata,
     MuseumObject,
     ObjectSummary,
     ROLE_LABELS,
@@ -328,6 +329,72 @@ def ensure_core_evidence_candidate(
     return selected[:-1] + [replacement]
 
 
+def ensure_cultural_region_candidates(
+    selected: list[MuseumObject],
+    pool: list[SearchResult],
+    *,
+    minimum_regions: int = 3,
+) -> list[MuseumObject]:
+    """Preserve the audited cross-region promise in the final shortlist."""
+
+    from .generator import ExhibitionGenerator  # local import avoids a cycle
+
+    def origin(obj: MuseumObject) -> str:
+        return ExhibitionGenerator._canonical_object_origin(obj)
+
+    available_origins = {
+        value for result in pool if (value := origin(result.obj))
+    }
+    target = min(minimum_regions, len(available_origins), len(selected))
+    if target <= 1:
+        return selected
+
+    repaired = list(selected)
+    chosen_ids = {obj.id for obj in repaired}
+    for result in pool:
+        current_origins = {value for obj in repaired if (value := origin(obj))}
+        if len(current_origins) >= target:
+            break
+        candidate = result.obj
+        candidate_origin = origin(candidate)
+        if (
+            candidate.id in chosen_ids
+            or not candidate_origin
+            or candidate_origin in current_origins
+        ):
+            continue
+
+        origin_counts = {
+            value: sum(origin(obj) == value for obj in repaired)
+            for value in current_origins
+        }
+        full_count = sum(
+            obj.evidence_depth == EvidenceDepth.FULL.value for obj in repaired
+        )
+        victim_index = next(
+            (
+                index
+                for index in range(len(repaired) - 1, -1, -1)
+                if (
+                    not origin(repaired[index])
+                    or origin_counts.get(origin(repaired[index]), 0) > 1
+                )
+                and (
+                    repaired[index].evidence_depth != EvidenceDepth.FULL.value
+                    or candidate.evidence_depth == EvidenceDepth.FULL.value
+                    or full_count > 1
+                )
+            ),
+            None,
+        )
+        if victim_index is None:
+            continue
+        chosen_ids.remove(repaired[victim_index].id)
+        repaired[victim_index] = ExhibitionGenerator._prioritized_object(result)
+        chosen_ids.add(candidate.id)
+    return repaired
+
+
 def order_for_narrative(
     results: list[SearchResult],
     count: int,
@@ -348,6 +415,28 @@ def order_for_narrative(
         prefer_culture_diversity=prefer_culture_diversity,
     )
     selected = ensure_core_evidence_candidate(selected, results)
+    if prefer_culture_diversity:
+        selected = ensure_cultural_region_candidates(selected, results)
+        from .generator import ExhibitionGenerator  # local import avoids a cycle
+
+        selected_origins = {
+            value
+            for obj in selected
+            if (value := ExhibitionGenerator._canonical_object_origin(obj))
+        }
+        available_origins = {
+            value
+            for result in results
+            if (value := ExhibitionGenerator._canonical_object_origin(result.obj))
+        }
+        required_origins = min(3, len(available_origins), count)
+        if len(selected_origins) < required_origins:
+            raise CollectionDataError(
+                "CROSS_CULTURAL_SELECTION_INSUFFICIENT",
+                "Final object selection could not preserve the audited cultural-region coverage.",
+                requiredRegionCount=required_origins,
+                selectedRegionCount=len(selected_origins),
+            )
 
     def sort_key(obj: MuseumObject) -> tuple[int, str]:
         match = re.search(r"-?\d{3,4}", obj.date or "")
@@ -431,6 +520,7 @@ def label_sentences(
     item_id: str,
     _role_label: str,
     max_chars: int,
+    language: str = "zh",
 ) -> list[LabelSentence]:
     """Build a readable deterministic floor while the visual pass is pending.
 
@@ -440,21 +530,35 @@ def label_sentences(
     """
 
     evidence = catalogue_evidence(obj)[0]
-    title = display_title(obj).strip() or obj.title
+    if language == "en":
+        title = display_title(obj).strip() or obj.title
+    else:
+        candidate = display_title(obj).strip()
+        title = candidate if re.search(r"[\u3400-\u9fff]", candidate) else ""
     if len(title) > 30:
         title = title[:29].rstrip() + "…"
-    details = [
-        value.strip()
-        for value in (obj.date, obj.medium, obj.culture)
-        if value.strip()
-    ]
-    text = f"馆方记录题名为《{title}》"
-    for detail in details:
-        candidate = f"{text}，{detail}"
-        if len(candidate) + 1 > max_chars:
-            break
-        text = candidate
-    text += "。"
+    if language == "en":
+        details = [
+            value.strip()
+            for value in (obj.date, obj.medium, obj.culture)
+            if value.strip()
+        ]
+        text = f'The institution catalogues this object as “{title}”'
+        for detail in details:
+            candidate = f"{text}, {detail}"
+            if len(candidate) + 1 > max_chars:
+                break
+            text = candidate
+        text += "."
+    else:
+        # Raw institution metadata is often English. The public Chinese label
+        # must not expose that as if it were already visitor-language copy;
+        # the visual label pass supplies audited translations separately.
+        text = (
+            f"馆方记录题名为《{title}》。"
+            if title
+            else "馆方原始题名与著录信息可在来源面板中查看。"
+        )
     if len(text) > max_chars:
         text = text[: max(1, max_chars - 1)].rstrip("，；：、 ") + "。"
     return [
@@ -711,6 +815,7 @@ FRAME_PROMPT = """你是 AI 策展人“彦远”的策展编辑系统，为一�
 5. 证据只能支持局部观察时，把 confidence 写成 provisional 或 uncertain，不要把相似外观写成跨文化因果或共同象征。
 6. 章节引导语和结语只能改写 bigIdea/keyMessages，不得引入新的事实主张。
 7. 不得扩大馆方的对象识别：例如 evidence 写 feline 时不能改称为 dog；若对象与访客问题存在分类冲突，要明确把它写成材料边界，不能拿来支撑命题。
+8. evidenceBoundaries 若非空，展览必须明确收窄到馆藏可支持的对象案例；bigIdea、keyMessage、章节与结语都不得越过这些边界。
 
 写作分层：
 - curatorialBrief 是可审计的策展依据；title、subtitle、chapters、epilogue 直接给普通参观者阅读。
@@ -760,6 +865,13 @@ curatorialBrief 与 objectDecision 只用于保持问题方向，是内部工作
   · 若 titleOriginal 已是中文，直接沿用；
   · 否则把英文题名意译成简洁的中文展品名，不要音译，不要保留英文。
 
+著录译文：localizedMetadata 只把本件输入中的 creator、date、medium、culture、institution
+逐字段翻成简体中文，供中文展签与语音导览使用。
+  · 每个字段必须同时原样回传 sourceValue，并把译文放在 zh；sourceValue 必须逐字符等于本件输入的同名字段。
+  · 原字段为空时对应译文字段也必须为空；不得新增人名、数字、年代、地域、材质或机构。
+  · 保留原文中的全部阿拉伯数字；BCE/BC 译为“公元前”，CE/AD 译为“公元”。
+  · 不要夹带英文原文、拉丁字母括注或解释；不确定如何翻译时输出空字符串。
+
 展签写法：
 - 图像可读时写 2-3 句：第一句为具体视觉观察，至少指出两个可以在图上定位的特征；第二句用馆方记录补充语境；第三句仅在本件证据确实能回应访客问题时才写。
 - 图像不可读时写 1-2 句，只使用馆方文字。
@@ -770,6 +882,12 @@ curatorialBrief 与 objectDecision 只用于保持问题方向，是内部工作
 
 输出单个 JSON 对象：
 {"items": [{"objectId": ..., "displayTitle": 中文展品名,
+  "localizedMetadata": {
+    "creator": {"sourceValue": 输入creator原文, "zh": 中文作者或制作者},
+    "date": {"sourceValue": 输入date原文, "zh": 中文年代},
+    "medium": {"sourceValue": 输入medium原文, "zh": 中文材料与技法},
+    "culture": {"sourceValue": 输入culture原文, "zh": 中文文化或地域},
+    "institution": {"sourceValue": 输入institution原文, "zh": 中文机构名}},
   "labelSentences": [{"text": ..., "type": "visual_observation|system_inference|uncertain", "evidenceIds": [...]}]}]}"""
 
 
@@ -792,6 +910,7 @@ Hard constraints:
 5. Where the evidence supports only a local observation, set confidence to provisional or uncertain. Never write visual resemblance up into cross-cultural causation or shared symbolism.
 6. Chapter lead-ins and the epilogue may only restate the bigIdea and keyMessages. They must not introduce a new factual claim.
 7. Never broaden an institution's object identification. If the evidence says feline, do not call it a dog. Treat a classification conflict with the visitor's question as a material limit, not supporting evidence.
+8. When evidenceBoundaries is non-empty, narrow the exhibition to the object cases the collection can support. The big idea, key messages, chapters and epilogue must not cross those boundaries.
 
 Public voice:
 1. Write like a curator standing beside one visitor: point to a specific object, material or difference before offering a limited interpretation.
@@ -895,6 +1014,8 @@ def frame_payload(
     items: list[ExhibitionItem],
     chapters: list[Chapter],
     brief: CuratorialBrief | None = None,
+    *,
+    evidence_boundaries: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Bounded evidence payload for a claim-mapped curatorial frame."""
     by_id = {item.id: item for item in items}
@@ -943,6 +1064,7 @@ def frame_payload(
 
     return {
         "visitor": _visitor_brief(plan.profile),
+        "evidenceBoundaries": list(evidence_boundaries),
         "retrieval": {
             "method": plan.retrieval_method,
             "version": plan.retrieval_version,
@@ -1013,8 +1135,9 @@ def labels_payload(
             "roleLabel": item.role_label,
             "title": item.object.title,
             "titleOriginal": item.object.title_original,
+            "creator": item.object.maker or item.object.creator,
             "date": item.object.date,
-            "medium": item.object.medium,
+            "medium": item.object.medium or item.object.material,
             "culture": item.object.culture,
             "institution": item.object.institution,
             "objectDecision": raw_decision,
@@ -1381,6 +1504,182 @@ def _fit_label_budget(
     ]
 
 
+_LOCALIZED_METADATA_FIELDS = ("creator", "date", "medium", "culture", "institution")
+
+
+_CONTROLLED_INSTITUTION_TRANSLATIONS = {
+    "cleveland museum of art": "克利夫兰艺术博物馆",
+    "the metropolitan museum of art": "大都会艺术博物馆",
+    "metropolitan museum of art": "大都会艺术博物馆",
+    "art institute of chicago": "芝加哥艺术博物馆",
+}
+
+
+def _source_metadata(item: ExhibitionItem, field: str) -> str:
+    obj = item.object
+    if field == "creator":
+        return (obj.maker or obj.creator or "").strip()
+    if field == "medium":
+        return (obj.medium or obj.material or "").strip()
+    return str(getattr(obj, field, "") or "").strip()
+
+
+_CONTROLLED_TRANSLATION_GUARDS: dict[str, tuple[tuple[re.Pattern[str], tuple[str, ...]], ...]] = {
+    "creator": (
+        (
+            re.compile(r"\b(?:unknown|anonymous|unidentified)\b", re.I),
+            ("佚名", "不详", "未知", "无名", "未详"),
+        ),
+    ),
+    "date": (
+        (re.compile(r"\bqing dynasty\b", re.I), ("清",)),
+        (re.compile(r"\bming dynasty\b", re.I), ("明",)),
+        (re.compile(r"\bhan dynasty\b", re.I), ("汉", "漢")),
+    ),
+    "culture": (
+        (re.compile(r"\b(?:italy|italian)\b", re.I), ("意大利",)),
+        (re.compile(r"\b(?:china|chinese)\b", re.I), ("中国",)),
+        (re.compile(r"\b(?:japan|japanese)\b", re.I), ("日本",)),
+        (re.compile(r"\b(?:korea|korean)\b", re.I), ("韩国", "朝鲜")),
+        (re.compile(r"\b(?:iran|iranian|persia|persian)\b", re.I), ("伊朗", "波斯")),
+        (re.compile(r"\b(?:india|indian)\b", re.I), ("印度",)),
+        (re.compile(r"\b(?:egypt|egyptian)\b", re.I), ("埃及",)),
+        (re.compile(r"\b(?:netherlands|dutch|holland)\b", re.I), ("荷兰", "尼德兰")),
+        (re.compile(r"\b(?:mexico|mexican)\b", re.I), ("墨西哥",)),
+        (re.compile(r"\b(?:peru|peruvian)\b", re.I), ("秘鲁",)),
+    ),
+    "medium": (
+        (re.compile(r"\b(?:bronze|copper alloy)\b", re.I), ("铜",)),
+        (re.compile(r"\b(?:ceramic|porcelain|stoneware|earthenware)\b", re.I), ("陶", "瓷")),
+        (re.compile(r"\bivory\b", re.I), ("象牙",)),
+        (re.compile(r"\bwatercolou?r\b", re.I), ("水彩",)),
+        (re.compile(r"\boil\b", re.I), ("油",)),
+        (re.compile(r"\bcanvas\b", re.I), ("画布", "布")),
+        (re.compile(r"\bink\b", re.I), ("墨",)),
+        (re.compile(r"\bpaper\b", re.I), ("纸",)),
+        (re.compile(r"\bsilk\b", re.I), ("丝", "绢")),
+        (re.compile(r"\bwood\b", re.I), ("木",)),
+        (re.compile(r"\blacquer(?:ed)?\b", re.I), ("漆",)),
+        (re.compile(r"\bglass\b", re.I), ("玻璃",)),
+        (re.compile(r"\bgold\b", re.I), ("金",)),
+        (re.compile(r"\bsilver\b", re.I), ("银",)),
+    ),
+}
+
+
+def _passes_controlled_translation_guard(
+    field: str,
+    source: str,
+    translated: str,
+) -> bool:
+    if field == "institution":
+        expected = _CONTROLLED_INSTITUTION_TRANSLATIONS.get(source.casefold().strip())
+        if expected is not None:
+            return translated == expected
+        # Institution names are authority records. A fluent-looking
+        # transliteration cannot be verified from the catalogue field alone.
+        return not re.search(r"[A-Za-z]", source)
+
+    matched_controlled_source = False
+    for pattern, alternatives in _CONTROLLED_TRANSLATION_GUARDS.get(field, ()):
+        if not pattern.search(source):
+            continue
+        matched_controlled_source = True
+        if not any(value in translated for value in alternatives):
+            return False
+    # Creator names and institutions are proper-name authority records, not
+    # ordinary descriptive vocabulary. Without a deterministic mapping we
+    # omit a Latin-script model transliteration instead of letting a plausible
+    # but wrong person or museum reach the label and TTS.
+    if (
+        field in {"creator", "institution"}
+        and re.search(r"[A-Za-z]", source)
+        and not matched_controlled_source
+    ):
+        return False
+    if field == "date":
+        if re.search(r"\b(?:bc|bce)\b", source, re.I) and "公元前" not in translated:
+            return False
+        # Catalogue dates normally omit CE/AD. In that common case a model may
+        # not invent a BCE direction merely because the numerals still match.
+        if not re.search(r"\b(?:bc|bce)\b", source, re.I) and "公元前" in translated:
+            return False
+    return True
+
+
+def _validated_chinese_metadata(
+    source: str,
+    candidate: object,
+    field: str,
+) -> str:
+    """Accept a bounded, source-bound model translation.
+
+    Exact ``sourceValue`` binding prevents cross-object and cross-field swaps.
+    Format, number and controlled-vocabulary guards catch common fact changes;
+    they do not turn an open-ended model translation into an institution fact.
+    The source drawer therefore remains authoritative and omission is safer
+    than a plausible-looking value that cannot be checked.
+    """
+
+    if not isinstance(candidate, dict):
+        return ""
+    if candidate.get("sourceValue") != source:
+        return ""
+    translated = to_simplified(str(candidate.get("zh") or "").strip())
+    if not source or not translated or len(translated) > 180:
+        return ""
+    if not re.search(r"[\u3400-\u9fff]", translated):
+        return ""
+    if re.search(r"[A-Za-z]", translated):
+        return ""
+    source_numbers = re.findall(r"\d+", source)
+    translated_numbers = re.findall(r"\d+", translated)
+    if source_numbers != translated_numbers:
+        return ""
+    if not _passes_controlled_translation_guard(field, source, translated):
+        return ""
+    return translated
+
+
+def apply_localized_metadata(
+    items: list[ExhibitionItem],
+    output: dict[str, Any],
+) -> int:
+    """Apply safe visitor-language tombstones independently from labels.
+
+    A visual sentence may fail evidence validation while its field-by-field
+    translations remain valid. Keeping the two commits independent prevents a
+    temporary vision failure from reintroducing English into Chinese TTS.
+    """
+
+    raw_items = output.get("items")
+    if not isinstance(raw_items, list):
+        return 0
+    by_object = {item.object.id: item for item in items}
+    applied = 0
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        item = by_object.get(str(raw.get("objectId", "")))
+        localized = raw.get("localizedMetadata")
+        if item is None or not isinstance(localized, dict):
+            continue
+        updates: dict[str, str] = {}
+        for field in _LOCALIZED_METADATA_FIELDS:
+            accepted = _validated_chinese_metadata(
+                _source_metadata(item, field),
+                localized.get(field),
+                field,
+            )
+            if accepted:
+                updates[field] = accepted
+        if not updates:
+            continue
+        item.localized_metadata = item.localized_metadata.model_copy(update=updates)
+        applied += 1
+    return applied
+
+
 def apply_labels(
     items: list[ExhibitionItem],
     output: dict[str, Any],
@@ -1538,5 +1837,6 @@ def apply_model_output(
     """
     exhibition = apply_frame(exhibition, output)
     if isinstance(output.get("items"), list):
+        apply_localized_metadata(exhibition.items, output)
         apply_labels(exhibition.items, output, max_chars)
     return exhibition

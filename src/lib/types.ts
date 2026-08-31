@@ -216,6 +216,16 @@ export interface AgendaInput {
 export interface AnswerabilityResult {
   status: AnswerabilityStatus;
   canGenerate?: boolean;
+  requiresRuntimeAudit: boolean;
+  decisionBasis:
+    | "reviewed_question_card"
+    | "reviewed_policy"
+    | "predicate_boundary"
+    | "open_dense_provisional"
+    | "runtime_audit_provisional"
+    | "audit_unavailable"
+    | "lexical_retrieval"
+    | "browse";
   exhibitionTheme?: string | null;
   supportedAspects: string[];
   coverageGaps: string[];
@@ -252,6 +262,7 @@ export interface MuseumObject {
   titleOriginal?: string;
   date: string;
   maker?: string;
+  creator?: string | null;
   culture?: string;
   medium: string;
   type: string;
@@ -312,6 +323,14 @@ export interface ExhibitionItem {
   roleLabel: string;
   /** Chinese title shown in the hall; English original stays on `object`. */
   displayTitle?: string;
+  /** Visitor-language rendering; the MuseumObject fields remain source-exact. */
+  localizedMetadata?: {
+    creator: string;
+    date: string;
+    medium: string;
+    culture: string;
+    institution: string;
+  };
   subQuestion: string;
   whySelected: string;
   relation: string;

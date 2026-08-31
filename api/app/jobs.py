@@ -232,12 +232,27 @@ class JobStore:
             except CollectionDataError as error:
                 # Collection errors carry precise internal details, but those
                 # details are not a recovery instruction for a visitor.
-                message = (
-                    "当前馆藏不足以可靠回答这个问题。请保留原问题并选择系统建议的相近方向，"
-                    "或减少必须覆盖的地区后重试。"
-                    if error.code == "QUESTION_UNSUPPORTED"
-                    else "馆藏数据暂时无法完成本次策展。你的问题仍然保留，请稍后重试。"
-                )
+                if error.code in {
+                    "QUESTION_UNSUPPORTED",
+                    "QUESTION_UNSUPPORTED_AFTER_AUDIT",
+                }:
+                    message = (
+                        "当前馆藏不足以可靠回答这个问题。你的原问题仍然保留；"
+                        "请选择系统建议的相近方向，或减少必须覆盖的地区后重试。"
+                    )
+                elif error.code in {
+                    "RETRIEVAL_AUDIT_UNAVAILABLE",
+                    "RETRIEVAL_AUDIT_INVALID",
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                }:
+                    message = (
+                        "证据检索或相关性审查暂时没有完成。你的问题仍然保留，"
+                        "这不代表馆藏不支持该主题；请直接重试。"
+                    )
+                else:
+                    message = (
+                        "馆藏数据暂时无法完成本次策展。你的问题仍然保留，请稍后重试。"
+                    )
                 self.fail(
                     job_id,
                     message,

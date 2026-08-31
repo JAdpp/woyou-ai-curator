@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app import curation
 from app.curation import assign_roles, chapter_sizes, ensure_core_evidence_candidate, plan_roles
 from app.interview_voice import InterviewVoice
 from app.jobs import STEP_DEFINITIONS
@@ -68,6 +71,292 @@ def _answer_interview(
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_open_semantic_interview_names_the_provisional_audit_choice(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app.generator import AgenticRetrievalOutcome, ExhibitionGenerator
+    from app.interview import FREE_TEXT_VALUE, InterviewService
+    from app.models import (
+        InterviewAnswer,
+        InterviewQuestionId,
+        InterviewState,
+    )
+
+    repository = client.app.state.collections
+    collection = repository.get()
+    service = InterviewService(repository, audit_available=True)
+    monkeypatch.setattr(
+        service,
+        "_available_domains",
+        lambda _collection, _language="zh": [
+            ("global:daily-life", "日常生活", "饮食、居家与劳动 · 20 件")
+        ],
+    )
+    monkeypatch.setattr(
+        ExhibitionGenerator,
+        "probe_answerability",
+        staticmethod(
+            lambda _collections, _agenda, **_kwargs: SimpleNamespace(
+                status="supported",
+                requires_runtime_audit=True,
+                coverage=SimpleNamespace(
+                    evidence_domain_ids=["global:daily-life"]
+                ),
+                recommended_questions=[],
+            )
+        ),
+    )
+    original = "镜子如何改变不同文化中的自我观看？"
+    state = InterviewState(
+        id="provisional",
+        collectionId=collection.id,
+        profile=VisitorProfile(freeFormQuestion=original, durationMinutes=5),
+    )
+
+    question = service._negotiation_question(state, collection)
+
+    assert question is not None
+    assert question.id == InterviewQuestionId.NEGOTIATION
+    assert question.options[0].value == FREE_TEXT_VALUE
+    assert question.options[0].label == "按原问题做语义核查"
+    assert "不能把近邻直接当成答案" in question.prompt
+
+    state.next_question = question
+    updated = service.answer(
+        state,
+        InterviewAnswer(questionId=InterviewQuestionId.NEGOTIATION, value=FREE_TEXT_VALUE),
+    )
+    assert updated.profile.to_agenda(collection.id).question == original
+
+
+def test_negotiation_changes_the_active_retrieval_question(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app.generator import AgenticRetrievalOutcome, ExhibitionGenerator
+    from app.interview import InterviewService
+    from app.models import (
+        InterviewAnswer,
+        InterviewQuestionId,
+        InterviewState,
+    )
+
+    repository = client.app.state.collections
+    collection = repository.get()
+    service = InterviewService(repository)
+    domains = [("global:daily-life", "日常生活", "饮食、居家与劳动 · 20 件")]
+    monkeypatch.setattr(
+        service,
+        "_available_domains",
+        lambda _collection, _language="zh": domains,
+    )
+    monkeypatch.setattr(
+        ExhibitionGenerator,
+        "probe_answerability",
+        staticmethod(
+            lambda _collections, _agenda, **_kwargs: SimpleNamespace(
+                status="unsupported",
+                requires_runtime_audit=False,
+                coverage=SimpleNamespace(
+                    evidence_domain_ids=["global:daily-life"]
+                ),
+                recommended_questions=[],
+            )
+        ),
+    )
+
+    def new_state(identifier: str) -> InterviewState:
+        return InterviewState(
+            id=identifier,
+            collectionId=collection.id,
+            profile=VisitorProfile(
+                freeFormQuestion="原来无法支持的问题",
+                durationMinutes=5,
+            ),
+        )
+
+    narrowed = new_state("narrowed")
+    narrowed.next_question = service._negotiation_question(narrowed, collection)
+    assert narrowed.next_question is not None
+    narrowed = service.answer(
+        narrowed,
+        InterviewAnswer(
+            questionId=InterviewQuestionId.NEGOTIATION,
+            value="global:daily-life",
+        ),
+    )
+    assert narrowed.profile.to_agenda(collection.id).question == "日常生活"
+
+    rewritten = new_state("rewritten")
+    rewritten.next_question = service._negotiation_question(rewritten, collection)
+    assert rewritten.next_question is not None
+    assert rewritten.next_question.allow_free_text is True
+    revised_question = "梳妆器物在不同地区怎样进入日常生活？"
+    rewritten = service.answer(
+        rewritten,
+        InterviewAnswer(
+            questionId=InterviewQuestionId.NEGOTIATION,
+            freeText=revised_question,
+        ),
+    )
+    assert rewritten.profile.to_agenda(collection.id).question == revised_question
+
+
+def test_out_of_domain_negotiation_does_not_offer_unrelated_rich_domains(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app.generator import ExhibitionGenerator
+    from app.interview import InterviewService, RECOMMENDED_QUESTION_PREFIX
+    from app.models import InterviewAnswer, InterviewQuestionId, InterviewState
+
+    repository = client.app.state.collections
+    collection = repository.get()
+    service = InterviewService(repository, audit_available=False)
+    monkeypatch.setattr(
+        service,
+        "_available_domains",
+        lambda _collection, _language="zh": [
+            ("global:daily-life", "日常生活", "馆藏很多"),
+            ("global:making-material", "材料与制作", "馆藏也很多"),
+        ],
+    )
+    reviewed = "镜子如何进入不同文化的日常生活？"
+    monkeypatch.setattr(
+        ExhibitionGenerator,
+        "probe_answerability",
+        staticmethod(
+            lambda _collections, _agenda, **_kwargs: SimpleNamespace(
+                status="unsupported",
+                requires_runtime_audit=False,
+                coverage=SimpleNamespace(evidence_domain_ids=[]),
+                recommended_questions=[reviewed],
+            )
+        ),
+    )
+    state = InterviewState(
+        id="ood",
+        collectionId=collection.id,
+        profile=VisitorProfile(
+            freeFormQuestion="量子纠错如何改变帝国权力？",
+            durationMinutes=5,
+        ),
+    )
+
+    question = service._negotiation_question(state, collection)
+
+    assert question is not None
+    assert {option.value for option in question.options}.isdisjoint(
+        {"global:daily-life", "global:making-material"}
+    )
+    assert "不会拿馆藏量大的无关门类" in question.prompt
+    assert question.options[0].value == f"{RECOMMENDED_QUESTION_PREFIX}{reviewed}"
+
+    state.next_question = question
+    updated = service.answer(
+        state,
+        InterviewAnswer(
+            questionId=InterviewQuestionId.NEGOTIATION,
+            value=question.options[0].value,
+        ),
+    )
+    assert updated.profile.to_agenda(collection.id).question == reviewed
+
+
+def test_negotiation_only_offers_domains_overlapping_current_evidence(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app.generator import ExhibitionGenerator
+    from app.interview import InterviewService
+    from app.models import InterviewState
+
+    repository = client.app.state.collections
+    collection = repository.get()
+    service = InterviewService(repository)
+    monkeypatch.setattr(
+        service,
+        "_available_domains",
+        lambda _collection, _language="zh": [
+            ("global:daily-life", "日常生活", "馆藏很多"),
+            ("global:making-material", "材料与制作", "馆藏也很多"),
+        ],
+    )
+    monkeypatch.setattr(
+        ExhibitionGenerator,
+        "probe_answerability",
+        staticmethod(
+            lambda _collections, _agenda, **_kwargs: SimpleNamespace(
+                status="partially_supported",
+                requires_runtime_audit=False,
+                coverage=SimpleNamespace(
+                    evidence_domain_ids=["global:making-material"]
+                ),
+                recommended_questions=[],
+            )
+        ),
+    )
+    state = InterviewState(
+        id="partial",
+        collectionId=collection.id,
+        profile=VisitorProfile(
+            freeFormQuestion="漆器表面怎样体现跨文化交流？",
+            durationMinutes=5,
+        ),
+    )
+
+    question = service._negotiation_question(state, collection)
+
+    assert question is not None
+    assert [option.value for option in question.options] == [
+        "global:making-material"
+    ]
+
+
+def test_interview_never_promises_runtime_audit_when_capability_is_unavailable(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app.generator import ExhibitionGenerator
+    from app.interview import InterviewService
+    from app.models import InterviewState
+
+    repository = client.app.state.collections
+    collection = repository.get()
+    service = InterviewService(repository, audit_available=False)
+    seen: dict[str, bool] = {}
+
+    def probe(_collections, _agenda, *, audit_available=False):
+        seen["audit_available"] = audit_available
+        return SimpleNamespace(
+            status="unsupported",
+            requires_runtime_audit=False,
+            coverage=SimpleNamespace(evidence_domain_ids=[]),
+            recommended_questions=[],
+        )
+
+    monkeypatch.setattr(
+        ExhibitionGenerator,
+        "probe_answerability",
+        staticmethod(probe),
+    )
+    state = InterviewState(
+        id="no-audit",
+        collectionId=collection.id,
+        profile=VisitorProfile(
+            freeFormQuestion="镜子怎样改变自我观看？",
+            durationMinutes=5,
+        ),
+    )
+
+    question = service._negotiation_question(state, collection)
+
+    assert seen == {"audit_available": False}
+    assert question is not None
+    assert all(option.label != "按原问题做语义核查" for option in question.options)
 
 
 def test_initial_free_text_question_is_not_asked_again_even_for_explorer(
@@ -635,6 +924,126 @@ def test_pipeline_reports_a_concrete_finding_for_every_step(client: TestClient) 
     assert "个展厅" not in by_key["space"]["finding"]
 
 
+def test_profile_generation_can_recover_sparse_recall_with_agentic_expansion(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    import asyncio
+    from dataclasses import replace
+
+    from app.generator import AGENTIC_RETRIEVAL_METHOD, ExhibitionGenerator
+    from app.models import VisitorProfile
+
+    repository = client.app.state.collections
+    collection = repository.get()
+    question = "山水画中的空间怎样引导观看？"
+    profile = VisitorProfile(
+        freeFormQuestion=question,
+        curiosityLabel=question,
+        durationMinutes=5,
+    )
+    agenda = profile.to_agenda(collection.id)
+    original_search = repository.search
+    full_results = original_search(agenda, collection)
+    assert len(full_results) >= 5
+    expansion_query = "landscape painting spatial viewing"
+    seen_queries: list[str] = []
+
+    def sparse_then_expanded(search_agenda, search_collection):
+        seen_queries.append(search_agenda.question)
+        if search_agenda.question == expansion_query:
+            return full_results
+        return full_results[:2]
+
+    def sparse_many(search_agendas, search_collection, **_kwargs):
+        agendas = list(search_agendas)
+        seen_queries.extend(search_agenda.question for search_agenda in agendas)
+        return [
+            full_results
+            if search_agenda.question == expansion_query
+            else full_results[:2]
+            for search_agenda in agendas
+        ]
+
+    monkeypatch.setattr(repository, "search", sparse_then_expanded)
+    monkeypatch.setattr(repository, "search_many", sparse_many)
+
+    class Provider:
+        configured = True
+        supports_retrieval_audit = True
+        supports_vision = False
+
+        def __init__(self) -> None:
+            self.audit_calls = 0
+
+        async def generate_json(self, _prompt: str, payload: dict) -> dict:
+            if "candidates" not in payload:
+                # The later frame/label stages deliberately fall back to the
+                # deterministic exhibition; this test isolates retrieval.
+                return {}
+            self.audit_calls += 1
+            candidates = payload["candidates"]
+            accept_count = 2 if self.audit_calls == 1 else 5
+            return {
+                "queryInterpretation": "山水空间与观看",
+                "answerability": "supported",
+                "accepted": [
+                    {
+                        "objectId": candidate["objectId"],
+                        "relevanceScore": 0.9,
+                        "evidenceIds": [candidate["evidence"][0]["id"]],
+                    }
+                    for candidate in candidates[:accept_count]
+                ],
+                "searchQueries": [expansion_query]
+                if self.audit_calls == 1
+                else [],
+                "coverageGap": "",
+            }
+
+    provider = Provider()
+    generator = ExhibitionGenerator(
+        replace(
+            client.app.state.settings,
+            rag_llm_audit_enabled=True,
+            rag_llm_audit_timeout_seconds=8.0,
+        ),
+        repository,
+        provider=provider,  # type: ignore[arg-type]
+    )
+
+    exhibition = asyncio.run(
+        generator.generate_from_profile(profile, collection_id=collection.id)
+    )
+
+    assert provider.audit_calls == 2
+    assert expansion_query in seen_queries
+    assert len(exhibition.items) == 5
+    assert exhibition.curatorial_brief is not None
+    assert exhibition.curatorial_brief.retrieval.method == AGENTIC_RETRIEVAL_METHOD
+
+    # The public legacy sync endpoint must use the same recoverable retrieval
+    # gate. It used to reject the initial two hits before the agent could issue
+    # the expansion that supplies the five-object evidence chain.
+    legacy_provider = Provider()
+    legacy_generator = ExhibitionGenerator(
+        replace(
+            client.app.state.settings,
+            rag_llm_audit_enabled=True,
+            rag_llm_audit_timeout_seconds=8.0,
+        ),
+        repository,
+        provider=legacy_provider,  # type: ignore[arg-type]
+    )
+    legacy_exhibition = asyncio.run(legacy_generator.generate(agenda))
+
+    assert legacy_provider.audit_calls == 2
+    assert len(legacy_exhibition.items) == 5
+    assert {item.object.id for item in legacy_exhibition.items} <= {
+        result.obj.id for result in full_results
+    }
+
+
 def test_generated_exhibition_has_chapters_epilogue_and_space_design(
     client: TestClient,
 ) -> None:
@@ -846,9 +1255,21 @@ def test_public_brief_redacts_profile_and_remaps_internal_item_ids(
 
     from jsonschema import Draft202012Validator
 
-    from app.models import Exhibition, PublicExhibition, ReviewRecord
+    from app.models import (
+        Exhibition,
+        LocalizedObjectMetadata,
+        PublicExhibition,
+        ReviewRecord,
+    )
 
     _curation, exhibition, _plan, _profile = _plan_and_items(client)
+    exhibition.items[0].display_title = "公开中文题名"
+    exhibition.items[0].localized_metadata = LocalizedObjectMetadata(
+        date="十八世纪",
+        medium="纸本水墨",
+        culture="中国",
+        institution="克利夫兰艺术博物馆",
+    )
     private_item_ids = {item.id for item in exhibition.items}
     exhibition.status = "published"
     exhibition.slug = "brief-privacy-test"
@@ -865,6 +1286,8 @@ def test_public_brief_redacts_profile_and_remaps_internal_item_ids(
     assert "audience" not in brief
     assert "excludedCandidates" not in brief
     public_item_ids = {item["id"] for item in public["items"]}
+    assert public["items"][0]["displayTitle"] == "公开中文题名"
+    assert public["items"][0]["localizedMetadata"]["medium"] == "纸本水墨"
     decision_ids = {decision["itemId"] for decision in brief["objects"]}
     assert decision_ids == public_item_ids
     assert not (decision_ids & private_item_ids)
@@ -1144,6 +1567,139 @@ def test_visual_label_keeps_both_source_layers_when_model_exceeds_budget(
     ]
 
 
+def test_localized_metadata_is_field_validated_and_never_mutates_source_record(
+    client: TestClient,
+) -> None:
+    curation, exhibition, _plan, _profile = _plan_and_items(client)
+    item = exhibition.items[0]
+    item.object.maker = ""
+    item.object.creator = None
+    item.object.date = "1710-1720 CE"
+    item.object.medium = "watercolor on ivory"
+    item.object.material = "watercolor on ivory"
+    item.object.culture = "Italy"
+    item.object.institution = "Cleveland Museum of Art"
+    source_before = item.object.model_dump(mode="json")
+
+    output = {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "localizedMetadata": {
+                    "creator": {"sourceValue": "", "zh": "某位十八世纪画家"},
+                    "date": {
+                        "sourceValue": "1710-1720 CE",
+                        "zh": "1710年至1720年，公元",
+                    },
+                    "medium": {
+                        "sourceValue": "watercolor on ivory",
+                        "zh": "象牙水彩",
+                    },
+                    "culture": {"sourceValue": "Italy", "zh": "意大利"},
+                    "institution": {
+                        "sourceValue": "Cleveland Museum of Art",
+                        "zh": "克利夫兰艺术博物馆",
+                    },
+                },
+            }
+        ]
+    }
+
+    assert curation.apply_localized_metadata([item], output) == 1
+    assert item.localized_metadata.creator == ""
+    assert item.localized_metadata.date == "1710年至1720年，公元"
+    assert item.localized_metadata.medium == "象牙水彩"
+    assert item.localized_metadata.culture == "意大利"
+    assert item.localized_metadata.institution == "克利夫兰艺术博物馆"
+    assert item.object.model_dump(mode="json") == source_before
+
+    invalid = {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "localizedMetadata": {
+                    "date": {
+                        "sourceValue": "1710-1720 CE",
+                        "zh": "1710年至1750年",
+                    },
+                    "medium": {
+                        "sourceValue": "watercolor on ivory",
+                        "zh": "watercolor 水彩",
+                    },
+                    "culture": {"sourceValue": "Italy", "zh": "Italy"},
+                },
+            }
+        ]
+    }
+    before_localized = item.localized_metadata.model_dump(mode="json")
+    assert curation.apply_localized_metadata([item], invalid) == 0
+    assert item.localized_metadata.model_dump(mode="json") == before_localized
+
+    wrong_facts = {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "localizedMetadata": {
+                    "medium": {
+                        "sourceValue": "watercolor on ivory",
+                        "zh": "陶瓷",
+                    },
+                    "culture": {"sourceValue": "Italy", "zh": "法国"},
+                    "institution": {
+                        "sourceValue": "Cleveland Museum of Art",
+                        "zh": "大英博物馆",
+                    },
+                },
+            }
+        ]
+    }
+    assert curation.apply_localized_metadata([item], wrong_facts) == 0
+    assert item.localized_metadata.model_dump(mode="json") == before_localized
+
+    cross_object_source = {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "localizedMetadata": {
+                    "culture": {"sourceValue": "France", "zh": "法国"},
+                },
+            }
+        ]
+    }
+    assert curation.apply_localized_metadata([item], cross_object_source) == 0
+
+
+@pytest.mark.parametrize(
+    "field,source,translated",
+    [
+        ("creator", "Unknown artist", "毕加索"),
+        ("creator", "Vincent van Gogh", "伦勃朗"),
+        ("date", "late Qing dynasty", "公元前汉代"),
+        ("date", "18th century CE", "公元前18世纪"),
+        ("date", "18th century", "公元前18世纪"),
+        ("date", "1760", "公元前1760年"),
+        ("institution", "Unknown Museum", "大英博物馆"),
+        ("institution", "Cleveland Museum of Art", "芝加哥艺术博物馆"),
+        ("institution", "The Metropolitan Museum of Art", "芝加哥艺术博物馆"),
+        ("institution", "Art Institute of Chicago", "克利夫兰艺术博物馆"),
+        ("medium", "oil on canvas", "青铜"),
+    ],
+)
+def test_localized_metadata_rejects_unverifiable_or_inverted_translations(
+    field: str,
+    source: str,
+    translated: str,
+) -> None:
+    assert (
+        curation._validated_chinese_metadata(
+            source,
+            {"sourceValue": source, "zh": translated},
+            field,
+        )
+        == ""
+    )
+
+
 def test_labels_reject_hidden_evidence_without_partial_chapter_mutation(
     client: TestClient,
 ) -> None:
@@ -1242,27 +1798,79 @@ def test_refocus_rejects_when_selected_objects_do_not_support_new_focus(
     import pytest
 
     from app.collections import CollectionDataError
-    from app.generator import ExhibitionGenerator
+    from app.generator import AgenticRetrievalOutcome, ExhibitionGenerator
 
     _curation, exhibition, _plan, _profile = _plan_and_items(client)
     generator = ExhibitionGenerator(
         client.app.state.settings, client.app.state.collections
     )
     context = generator._context(exhibition.agenda)
-    monkeypatch.setattr(
-        generator,
-        "check_agenda",
-        lambda _agenda: SimpleNamespace(can_generate=True),
-    )
+    async def searched(*_args, **_kwargs):
+        return context.results
+
+    async def audited(*_args, **_kwargs):
+        return AgenticRetrievalOutcome(
+            results=context.results,
+            audit_applied=True,
+            answerability="supported",
+        )
+
+    monkeypatch.setattr(generator, "_search_async", searched)
+    monkeypatch.setattr(generator, "_agentic_retrieve", audited)
+    monkeypatch.setattr(generator, "_hard_generation_boundary", lambda *_args: None)
     monkeypatch.setattr(
         generator,
         "_context",
-        lambda _agenda: replace(context, results=[]),
+        lambda _agenda, **_kwargs: replace(context, results=[]),
     )
     before = exhibition.model_dump(mode="json")
 
     with pytest.raises(CollectionDataError) as raised:
         asyncio.run(generator.refocus(exhibition, "一个完全不同的新问题"))
+    assert raised.value.code == "FOCUS_REQUIRES_NEW_EXHIBITION"
+    assert exhibition.model_dump(mode="json") == before
+
+
+def test_refocus_cannot_replace_current_route_with_question_card_starters(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    import asyncio
+
+    import pytest
+
+    from app.collections import CollectionDataError
+    from app.generator import AgenticRetrievalOutcome, ExhibitionGenerator
+
+    _curation, exhibition, _plan, _profile = _plan_and_items(client)
+    generator = ExhibitionGenerator(
+        client.app.state.settings,
+        client.app.state.collections,
+    )
+    context = generator._context(exhibition.agenda)
+    forced = tuple(reversed([item.object.id for item in exhibition.items]))
+    assert forced != tuple(item.object.id for item in exhibition.items)
+
+    async def searched(*_args, **_kwargs):
+        return context.results
+
+    async def audited(*_args, **_kwargs):
+        return AgenticRetrievalOutcome(
+            results=context.results,
+            audit_applied=False,
+            forced_object_ids=forced,
+            answerability="supported",
+        )
+
+    monkeypatch.setattr(generator, "_search_async", searched)
+    monkeypatch.setattr(generator, "_agentic_retrieve", audited)
+    monkeypatch.setattr(generator, "_hard_generation_boundary", lambda *_args: None)
+    monkeypatch.setattr(generator, "_context", lambda *_args, **_kwargs: context)
+    before = exhibition.model_dump(mode="json")
+
+    with pytest.raises(CollectionDataError) as raised:
+        asyncio.run(generator.refocus(exhibition, "一个已审定问题卡的新焦点"))
+
     assert raised.value.code == "FOCUS_REQUIRES_NEW_EXHIBITION"
     assert exhibition.model_dump(mode="json") == before
 

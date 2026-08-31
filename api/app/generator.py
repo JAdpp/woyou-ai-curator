@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -19,6 +20,7 @@ from .collections import (
     LoadedCollection,
     QuestionPolicy,
     SearchResult,
+    _query_plan,
     _requests_cross_cultural,
 )
 from .config import Settings
@@ -34,20 +36,40 @@ from .models import (
     ExhibitionItem,
     ExhibitionStatus,
     LabelSentence,
+    LocalizedObjectMetadata,
     MuseumObject,
     ObjectSummary,
     ROLE_LABELS,
     Revision,
     SentenceType,
     VersionInfo,
+    VisitorMotivation,
     VisitorProfile,
     utc_now,
 )
 from .providers.deepseek import DeepSeekProvider, ProviderError, VisionImage
+from .retrieval_agent import (
+    AGENTIC_RETRIEVAL_METHOD,
+    AGENTIC_RETRIEVAL_VERSION,
+    EXPANDABLE_REASONS,
+    EXPANSION_REASON_NONE,
+    RetrievalAudit,
+    RetrievalQueryPlan,
+    audit_payload,
+    audit_prompt,
+    fuse_search_results,
+    parse_audit,
+    parse_query_plan,
+    query_plan_payload,
+    query_plan_prompt,
+)
 from .validator import REQUIRED_ROLES, validate_exhibition
 
 
 logger = logging.getLogger(__name__)
+
+QUESTION_CARD_RETRIEVAL_METHOD = "reviewed_question_card_starters"
+QUESTION_CARD_RETRIEVAL_VERSION = "question-card-v1"
 
 # (step_key, human-readable finding) -> awaited by the job runner
 StepEmitter = Callable[[str, str], Awaitable[None]]
@@ -63,6 +85,26 @@ class GenerationContext:
     evidence_domain_id: str | None
     policy: QuestionPolicy | None
     exhibition_theme: str
+
+
+@dataclass(frozen=True)
+class AgenticRetrievalOutcome:
+    results: list[SearchResult]
+    audit_applied: bool = False
+    expanded_queries: tuple[str, ...] = ()
+    # Frozen question cards force their reviewed five-object spine, while the
+    # wider query pool remains available for honest in-theme alternatives.
+    forced_object_ids: tuple[str, ...] = ()
+    answerability: str | None = None
+    interpretation: str = ""
+    coverage_gap: str = ""
+    expansion_reason: str = EXPANSION_REASON_NONE
+    failure_code: str | None = None
+    # Optional catalogue expansion is best-effort. Its failure must remain
+    # observable without overwriting the mandatory first audit or making a
+    # semantic unsupported verdict look like an infrastructure outage.
+    warning_code: str | None = None
+    warning_detail: str = ""
 
 
 ROLE_ORDER = [
@@ -85,11 +127,59 @@ UNSUPPORTED_BOUNDARY_PATTERNS = (
 
 PARTIAL_SCOPE_PATTERNS = (
     r"所有|全部|一定",
+    r"(?:为什么|为何).{0,24}(?:喜欢|偏爱)",
     r"直接导致|完全由|唯一原因",
     r"精确复原|完整复原",
     r"真实劳动条件",
     r"全部政治和经济原因",
 )
+
+
+AFFECTIVE_BROWSE_PATTERN = re.compile(
+    r"(?:我|最近|今天|现在).{0,18}(?:累|疲惫|压力|烦|焦虑|想放松|"
+    r"想休息|静一静|慢一点)|(?:不想|不要|别).{0,10}(?:被催|赶时间|"
+    r"按年代讲)|\b(?:tired|overwhelmed|stressed|need\s+(?:a\s+)?break|"
+    r"slow\s+down)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_affective_browse_profile(profile: VisitorProfile, question: str) -> bool:
+    """Route a recharge preference as browsing, not a historical claim.
+
+    The original words remain the public inquiry and frame input. Only object
+    retrieval becomes browse/diversity selection, with a visible boundary that
+    the objects are not proven to cause relaxation or therapeutic effects.
+    """
+
+    return bool(
+        profile.motivation == VisitorMotivation.RECHARGER
+        and AFFECTIVE_BROWSE_PATTERN.search(question)
+    )
+
+
+BRONZE_REPAIR_EVIDENCE = re.compile(
+    r"\b(?:conservation\s+(?:treatment|work|history|campaign|project)|"
+    r"treatment\s+(?:report|history)|(?:was|were|has\s+been|have\s+been)\s+"
+    r"(?:conserved|restored|repaired|cleaned|stabili[sz]ed)|restored\s+by|"
+    r"repaired\s+by|corrosion|corroded|rust(?:ed|ing)?|stabili[sz](?:ed|ation)|"
+    r"repair(?:ed|s)?|cleaning)\b",
+    re.IGNORECASE,
+)
+RITUAL_PRACTICE_EVIDENCE = re.compile(
+    r"\b(?:consecrat(?:ed|ion)|active\s+(?:worship|ritual)|"
+    r"(?:used|use)\s+(?:in|for)\s+(?:worship|ritual|ceremon(?:y|ies)|devotion)|"
+    r"worship(?:ped)?|devotion(?:al)?|prayer|pilgrimage|offering(?:s)?|"
+    r"funerary\s+(?:ritual|use)|ritual\s+(?:use|object|implement|practice))\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class PredicateAssessment:
+    status: AnswerabilityStatus
+    matched: list[SearchResult]
+    gap: str
 
 
 @dataclass(frozen=True)
@@ -129,6 +219,70 @@ CULTURAL_COVERAGE_OBLIGATIONS: tuple[CulturalCoverageObligation, ...] = (
     CulturalCoverageObligation("东南亚", (r"东南亚|\bsoutheast asia(?:n)?\b",), culture_pack_ids=("southeast_asia",)),
     CulturalCoverageObligation("西亚／北非", (r"西亚|中东|北非|\bwest asia(?:n)?\b|\bmiddle east(?:ern)?\b|\bnorth africa(?:n)?\b",), culture_pack_ids=("west_asia_north_africa",)),
     CulturalCoverageObligation("大洋洲／太平洋", (r"大洋洲|太平洋文化|\boceania(?:n)?\b|\bpacific island",), culture_pack_ids=("oceania",)),
+)
+
+
+CANONICAL_ORIGIN_REGIONS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "east_asia",
+        re.compile(
+            r"中国|日本|韩国|朝鲜|东亚|\b(?:china|chinese|japan|japanese|korea|korean|tibet|tibetan|mongol(?:ia|ian)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "south_asia",
+        re.compile(
+            r"南亚|印度|\b(?:india|indian|pakistan|pakistani|sri lanka|nepal|nepalese|mughal)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "southeast_asia",
+        re.compile(
+            r"东南亚|越南|泰国|柬埔寨|缅甸|印尼|\b(?:southeast asia|vietnam(?:ese)?|thailand|thai|siam|cambodia(?:n)?|myanmar|burma|burmese|indonesia(?:n)?|philippines?|filipino)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "west_asia_north_africa",
+        re.compile(
+            r"西亚|中东|北非|伊朗|波斯|埃及|\b(?:west asia|middle east|north africa|iran(?:ian)?|persia(?:n)?|iraq(?:i)?|syria(?:n)?|turk(?:ey|ish)|ottoman|egypt(?:ian)?|morocco|moroccan|algeria(?:n)?|tunisia(?:n)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "africa",
+        re.compile(
+            r"非洲|\b(?:africa(?:n)?|nigeria(?:n)?|congo(?:lese)?|ghana(?:ian)?|mali(?:an)?|ethiopia(?:n)?|senegal(?:ese)?|kenya(?:n)?|tanzania(?:n)?|uganda(?:n)?|côte d['’]ivoire|ivorian)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "americas",
+        re.compile(
+            r"美洲|墨西哥|秘鲁|\b(?:americas?|american|united states|mexic(?:o|an)|aztec|maya(?:n)?|peru(?:vian)?|andean|brazil(?:ian)?|canada|canadian|colombia(?:n)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "europe",
+        re.compile(
+            r"欧洲|希腊|罗马|\b(?:europe(?:an)?|greece|greek|roman|rome|italy|italian|france|french|germany|german|netherlands|dutch|holland|britain|british|england|english|spain|spanish|portugal|portuguese|russia(?:n)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "oceania",
+        re.compile(
+            r"大洋洲|太平洋|\b(?:oceania(?:n)?|pacific island|australia(?:n)?|new zealand|maori|papua new guinea)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+CANONICAL_ORIGIN_PACKS = frozenset(
+    region for region, _pattern in CANONICAL_ORIGIN_REGIONS
 )
 
 
@@ -174,7 +328,28 @@ class ExhibitionGenerator:
                     else self.provider.generate_json(system_prompt, user_payload)
                 )
             else:
-                operation = self.provider.generate_json(system_prompt, user_payload)
+                audit_generate = getattr(
+                    self.provider,
+                    "generate_retrieval_audit_json",
+                    None,
+                )
+                query_plan_generate = getattr(
+                    self.provider,
+                    "generate_retrieval_query_plan_json",
+                    None,
+                )
+                if stage.startswith("retrieval_plan:") and callable(
+                    query_plan_generate
+                ):
+                    operation = query_plan_generate(system_prompt, user_payload)
+                elif stage.startswith("retrieval_audit") and callable(
+                    audit_generate
+                ):
+                    operation = audit_generate(system_prompt, user_payload)
+                else:
+                    operation = self.provider.generate_json(
+                        system_prompt, user_payload
+                    )
             result = await asyncio.wait_for(
                 operation,
                 timeout=timeout_seconds,
@@ -195,6 +370,1143 @@ class ExhibitionGenerator:
                 timeout_seconds,
             )
 
+    async def _search_async(
+        self,
+        agenda: AgendaInput,
+        collection: LoadedCollection,
+        *,
+        deadline: float | None = None,
+    ) -> list[SearchResult]:
+        """Run CPU/mmap retrieval without blocking the API event loop."""
+
+        retrieval_budget = float(
+            getattr(
+                self.settings,
+                "rag_retrieval_timeout_seconds",
+                self.settings.rag_llm_audit_timeout_seconds,
+            )
+        )
+        timeout_seconds = (
+            retrieval_budget
+            if deadline is None
+            else max(0.0, deadline - perf_counter())
+        )
+        if timeout_seconds <= 0.0:
+            raise CollectionDataError(
+                "RETRIEVAL_SEARCH_TIMEOUT",
+                "Collection retrieval had no wall-clock budget remaining.",
+                timeoutSeconds=0.0,
+            )
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self.collections.search, agenda, collection),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as error:
+            raise CollectionDataError(
+                "RETRIEVAL_SEARCH_TIMEOUT",
+                "Collection retrieval exceeded its wall-clock budget.",
+                timeoutSeconds=timeout_seconds,
+            ) from error
+
+    async def _agentic_retrieve(
+        self,
+        agenda: AgendaInput,
+        collection: LoadedCollection,
+        initial_results: list[SearchResult],
+        *,
+        required_count: int,
+        deadline: float | None = None,
+    ) -> AgenticRetrievalOutcome:
+        """Audit hybrid recall and run at most one bounded expansion loop.
+
+        The deterministic/embedding repository remains the source of every
+        object and evidence ID. The model can only accept IDs it was shown and
+        can only suggest additional search strings; it cannot inject an object
+        or turn its own background knowledge into museum evidence.
+        """
+
+        # A browse-all visit intentionally has no topical predicate to audit.
+        # It enters the separate diversity/narrative selector below; asking the
+        # relevance model whether objects "answer" a request to surprise the
+        # visitor would manufacture an unsupported theme.
+        if initial_results and all(
+            "browse_all" in result.retrieval_sources
+            for result in initial_results
+        ):
+            return AgenticRetrievalOutcome(results=initial_results)
+
+        policy_match = self.collections.match_question_policy(
+            collection, agenda.question
+        )
+        # Only a supported public question card with enough explicit starter
+        # objects is a frozen positive route. Regression labels never exempt a
+        # query from runtime relevance audit. Exact reviewed negative/partial
+        # policies remain hard boundaries so the profile path cannot bypass
+        # answerability merely because raw retrieval found many topical rows.
+        if policy_match is not None and policy_match[1] == 1.0:
+            policy = policy_match[0]
+            if policy.status != AnswerabilityStatus.SUPPORTED.value:
+                return AgenticRetrievalOutcome(
+                    results=initial_results,
+                    answerability=policy.status,
+                    coverage_gap=(
+                        policy.rationale
+                        or "；".join(policy.coverage_limits)
+                        or (
+                            "The reviewed question boundary does not support generation as asked."
+                            if agenda.language == "en"
+                            else "经审定的问题边界不支持按当前问法生成展览。"
+                        )
+                    ),
+                )
+            if policy.source == "question_card" and policy.starter_object_ids:
+                eligible_by_id = {
+                    obj.id: obj
+                    for obj in self.collections.require_generation_ready(collection)
+                }
+                starters = [
+                    eligible_by_id[object_id]
+                    for object_id in policy.starter_object_ids
+                    if object_id in eligible_by_id
+                ]
+                if len(starters) >= required_count:
+                    starters = starters[:required_count]
+                    initial_by_id = {
+                        result.obj.id: result for result in initial_results
+                    }
+                    starter_results: list[SearchResult] = []
+                    for rank, obj in enumerate(starters):
+                        base = initial_by_id.get(obj.id)
+                        if base is None:
+                            starter_results.append(
+                                SearchResult(
+                                    obj=obj,
+                                    score=float(len(starters) - rank),
+                                    retrieval_sources=("question_card",),
+                                )
+                            )
+                        else:
+                            starter_results.append(
+                                replace(
+                                    base,
+                                    retrieval_sources=tuple(
+                                        dict.fromkeys(
+                                            (*base.retrieval_sources, "question_card")
+                                        )
+                                    ),
+                                )
+                            )
+                    starter_ids = tuple(obj.id for obj in starters)
+                    remaining = [
+                        result
+                        for result in initial_results
+                        if result.obj.id not in set(starter_ids)
+                    ]
+                    return AgenticRetrievalOutcome(
+                        results=[*starter_results, *remaining],
+                        forced_object_ids=starter_ids,
+                        answerability=AnswerabilityStatus.SUPPORTED.value,
+                    )
+
+        provider_can_audit = bool(
+            self.provider is not None
+            and self.provider.configured
+            and getattr(self.provider, "supports_retrieval_audit", False)
+        )
+        provider_can_plan_queries = bool(
+            provider_can_audit
+            and getattr(
+                self.provider,
+                "supports_retrieval_query_planning",
+                False,
+            )
+            and callable(
+                getattr(
+                    self.provider,
+                    "generate_retrieval_query_plan_json",
+                    None,
+                )
+            )
+        )
+        unaudited_dense_only = any(
+            "bm25" not in result.retrieval_sources
+            and any(
+                source.startswith("dense")
+                for source in result.retrieval_sources
+            )
+            for result in initial_results
+        )
+        lexical_fallback = [
+            result
+            for result in initial_results
+            if "bm25" in result.retrieval_sources
+        ]
+        safe_fallback = lexical_fallback if unaudited_dense_only else initial_results
+        # Every non-browse, non-frozen visitor question reaches the same
+        # evidence audit. A familiar alias only improves recall; it cannot
+        # certify that the rest of a free-form question is supported. This
+        # also prevents degraded BM25 mode from treating one generic matched
+        # word (for example "place") as approval of an unknown subject.
+        semantic_audit_required = True
+        if not self.settings.rag_llm_audit_enabled:
+            return AgenticRetrievalOutcome(
+                results=[] if semantic_audit_required else safe_fallback,
+                failure_code=(
+                    "RETRIEVAL_AUDIT_UNAVAILABLE"
+                    if semantic_audit_required
+                    else None
+                ),
+                coverage_gap=(
+                    "The semantic relevance audit is disabled; this open or ambiguous query cannot be approved from similarity or title words alone."
+                    if agenda.language == "en"
+                    else "语义相关性审查已停用；开放问法或有歧义的题名不能只靠相似度／词面命中获准。"
+                )
+                if semantic_audit_required or unaudited_dense_only
+                else "",
+            )
+        if not provider_can_audit:
+            return AgenticRetrievalOutcome(
+                results=[] if semantic_audit_required else safe_fallback,
+                failure_code=(
+                    "RETRIEVAL_AUDIT_UNAVAILABLE"
+                    if semantic_audit_required
+                    else None
+                ),
+                coverage_gap=(
+                    "This open or ambiguous query requires an evidence relevance audit, but the audit model is unavailable."
+                    if agenda.language == "en"
+                    else "开放问法或有歧义的题名需要证据相关性审查；本次审查模型不可用，未让词面近邻进入展览。"
+                )
+                if semantic_audit_required or unaudited_dense_only
+                else "",
+            )
+
+        # A source-quote audit is deliberately stricter than nearest-neighbour
+        # retrieval. Give a five-object exhibition enough reviewed alternatives
+        # for some honest rejections while retaining the configured/token cap.
+        top_k = min(max(required_count * 4, 20), self.settings.rag_llm_audit_top_k, 32)
+        max_queries = min(self.settings.rag_agentic_max_queries, 5)
+        started = perf_counter()
+        retrieval_budget = float(
+            getattr(
+                self.settings,
+                "rag_retrieval_timeout_seconds",
+                self.settings.rag_llm_audit_timeout_seconds,
+            )
+        )
+        retrieval_deadline = deadline or (started + retrieval_budget)
+        per_audit_cap = float(self.settings.rag_llm_audit_timeout_seconds)
+        query_plan: RetrievalQueryPlan | None = None
+
+        def remaining_time() -> float:
+            return max(0.0, retrieval_deadline - perf_counter())
+
+        async def run_audit(
+            candidates: list[SearchResult],
+            *,
+            pass_number: int,
+            timeout_seconds: float,
+        ) -> RetrievalAudit:
+            candidates = self._dedupe_audit_candidates(candidates)
+            audited_candidates = self._audit_candidate_sample(
+                candidates,
+                top_k=top_k,
+                cross_cultural=_requests_cross_cultural(agenda.question),
+                cultural_obligations=self._cultural_coverage_obligations(
+                    agenda.question
+                ),
+            )
+            output = await self._generate_model_json(
+                audit_prompt(agenda.language),
+                audit_payload(
+                    agenda.question,
+                    audited_candidates,
+                    required_count=required_count,
+                    top_k=top_k,
+                    pass_number=pass_number,
+                    mandatory_predicates=(
+                        query_plan.mandatory_predicates if query_plan else ()
+                    ),
+                    pool_coverage_legs=(
+                        query_plan.pool_coverage_legs if query_plan else ()
+                    ),
+                    selection_constraints=(
+                        query_plan.selection_constraints if query_plan else ()
+                    ),
+                ),
+                stage=f"retrieval_audit:{pass_number}",
+                timeout_seconds=timeout_seconds,
+            )
+            audit = parse_audit(
+                output,
+                audited_candidates,
+                question=agenda.question,
+                max_expansion_queries=max_queries,
+                mandatory_predicates=(
+                    query_plan.mandatory_predicates if query_plan else ()
+                ),
+            )
+            return audit
+
+        # When the visitor's words produce too few direct catalogue matches,
+        # translate them into a few atomic catalogue expressions before the
+        # first evidence audit. This is a recall aid, not an approval shortcut:
+        # planned-query candidates are fused with the original ranking and
+        # must still be accepted against source IDs by ``run_audit``.
+        preplanned_queries: list[str] = []
+        # BM25 hit count is not a precision signal: a broad word such as
+        # "writing" can produce hundreds of cabinets and manuscripts while
+        # missing all three inscription functions the visitor named. Every
+        # open, non-frozen question therefore receives one bounded semantic
+        # query plan before evidence audit. The plan only improves recall; it
+        # cannot approve objects or bypass source-ID validation.
+        if provider_can_plan_queries and max_queries > 0:
+            remaining = remaining_time()
+            mandatory_audit_floor = min(
+                per_audit_cap,
+                max(10.0, per_audit_cap * 0.75),
+            )
+            planner_budget = min(
+                8.0,
+                per_audit_cap,
+                max(0.0, remaining - mandatory_audit_floor),
+            )
+            if planner_budget >= 2.0:
+                try:
+                    raw_plan = await self._generate_model_json(
+                        query_plan_prompt(agenda.language),
+                        query_plan_payload(agenda.question, agenda.language),
+                        stage="retrieval_plan:1",
+                        timeout_seconds=planner_budget,
+                    )
+                    query_plan = parse_query_plan(
+                        raw_plan,
+                        question=agenda.question,
+                        # The configured bound applies to the whole retrieval
+                        # turn. Do not withhold one of three slots from a
+                        # question that explicitly contains three evidence
+                        # axes: losing the third axis before the first audit is
+                        # worse than having no post-audit slot left.
+                        max_queries=max_queries,
+                    )
+                except (ProviderError, ValueError, TypeError, KeyError) as error:
+                    logger.warning(
+                        "optional retrieval query plan unavailable (%s: %s)",
+                        type(error).__name__,
+                        error,
+                    )
+                    query_plan = None
+
+                if (
+                    query_plan is not None
+                    and query_plan.valid
+                    and query_plan.in_collection_scope
+                    and query_plan.search_queries
+                ):
+                    atomic_query_texts = list(query_plan.search_queries)
+                    # Atomic axes protect precision, but their conjunction can
+                    # hide records whose prose expresses the relationship
+                    # across several fields. For plans with three or more
+                    # axes, reserve one remaining slot for a combined semantic
+                    # query. Collection search treats an over-specified atomic
+                    # expression as evidence-backed dense recall, after which
+                    # the same source-bound audits still decide admission.
+                    semantic_synthesis = query_plan.semantic_query
+                    if not semantic_synthesis and len(atomic_query_texts) >= 3:
+                        semantic_synthesis = re.sub(
+                            r"\s+",
+                            " ",
+                            " ".join(atomic_query_texts),
+                        ).strip()[:180]
+                    semantic_synthesis = semantic_synthesis.strip()[:240]
+                    if semantic_synthesis.casefold() in {
+                        query.casefold() for query in atomic_query_texts
+                    }:
+                        semantic_synthesis = ""
+                    if semantic_synthesis and len(atomic_query_texts) >= max_queries:
+                        # The planner is instructed to order axes by
+                        # importance. At the configured cap, replace the final
+                        # narrow axis with the all-relation dense query.
+                        atomic_query_texts = atomic_query_texts[:-1]
+                    planned_query_texts = [
+                        *([semantic_synthesis] if semantic_synthesis else []),
+                        *atomic_query_texts,
+                    ][:max_queries]
+                    remaining = remaining_time()
+                    mandatory_audit_reserve = min(
+                        per_audit_cap,
+                        max(mandatory_audit_floor, remaining * 0.55),
+                    )
+                    search_budget = min(
+                        8.0,
+                        max(0.0, remaining - mandatory_audit_reserve),
+                    )
+                    if search_budget >= 0.5:
+                        planned_agendas = [
+                            agenda.model_copy(update={"question": query})
+                            for query in planned_query_texts
+                        ]
+                        planning_deadline = perf_counter() + search_budget
+
+                        def search_planned_queries() -> list[list[SearchResult]]:
+                            batch_search = getattr(
+                                self.collections,
+                                "search_many",
+                                None,
+                            )
+                            if callable(batch_search):
+                                if isinstance(
+                                    self.collections,
+                                    CollectionRepository,
+                                ):
+                                    batches = batch_search(
+                                        planned_agendas,
+                                        collection,
+                                        deadline=planning_deadline,
+                                        atomic=True,
+                                    )
+                                    if semantic_synthesis and batches:
+                                        batches[0] = [
+                                            replace(
+                                                result,
+                                                retrieval_sources=tuple(
+                                                    dict.fromkeys(
+                                                        (
+                                                            *result.retrieval_sources,
+                                                            "agentic_semantic_synthesis",
+                                                        )
+                                                    )
+                                                ),
+                                            )
+                                            for result in batches[0]
+                                        ]
+                                    return batches
+                                return batch_search(planned_agendas, collection)
+                            return [
+                                self.collections.search(planned, collection)
+                                for planned in planned_agendas
+                            ]
+
+                        try:
+                            planned_batches = await asyncio.wait_for(
+                                asyncio.to_thread(search_planned_queries),
+                                timeout=search_budget,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "optional pre-audit catalogue planning search timed out"
+                            )
+                            planned_batches = []
+                        except CollectionDataError as error:
+                            logger.warning(
+                                "optional pre-audit catalogue planning search skipped "
+                                "(%s: %s)",
+                                type(error).__name__,
+                                error,
+                            )
+                            planned_batches = []
+                        except ValueError as error:
+                            logger.warning(
+                                "optional pre-audit catalogue planning search skipped "
+                                "(%s: %s)",
+                                type(error).__name__,
+                                error,
+                            )
+                            planned_batches = []
+
+                        nonempty_batches = [
+                            batch for batch in planned_batches if batch
+                        ]
+                        if nonempty_batches:
+                            initial_results = fuse_search_results(
+                                [initial_results, *nonempty_batches],
+                                limit=self.settings.rag_max_results,
+                                rrf_k=self.settings.rag_rrf_k,
+                            )
+                            initial_results = self._query_coverage_order(
+                                initial_results,
+                                nonempty_batches,
+                                top_k=top_k,
+                            )
+                            preplanned_queries.extend(
+                                query
+                                for query, batch in zip(
+                                    planned_query_texts,
+                                    planned_batches,
+                                    strict=False,
+                                )
+                                if batch
+                            )
+                elif query_plan is not None and not query_plan.valid:
+                    logger.warning(
+                        "optional retrieval query plan returned an invalid contract"
+                    )
+
+        # Reserve time for a second audit only when the first pass asks for
+        # expansion. Most well-formed queries complete after this single call.
+        remaining = remaining_time()
+        if remaining < 1.0:
+            return AgenticRetrievalOutcome(
+                results=[],
+                failure_code="RETRIEVAL_AUDIT_UNAVAILABLE",
+                coverage_gap=(
+                    "The shared retrieval deadline expired before relevance audit."
+                    if agenda.language == "en"
+                    else "共享检索时限在相关性审查开始前已用尽。"
+                ),
+            )
+        # The first audit is mandatory; expansion is conditional. Give the
+        # mandatory pass all currently available time up to its own cap, then
+        # decide from the real remaining budget whether a requested expansion
+        # can run. Reserving most of the deadline for a hypothetical second
+        # pass caused valid no-expansion audits to time out prematurely.
+        first_budget = min(per_audit_cap, remaining)
+        try:
+            first = await run_audit(
+                initial_results,
+                pass_number=1,
+                timeout_seconds=first_budget,
+            )
+        except (ProviderError, ValueError, TypeError, KeyError) as error:
+            logger.warning(
+                "retrieval audit unavailable (%s: %s); failing closed",
+                type(error).__name__,
+                error,
+            )
+            return AgenticRetrievalOutcome(
+                results=[],
+                failure_code="RETRIEVAL_AUDIT_UNAVAILABLE",
+                coverage_gap=(
+                    "The semantic relevance audit was unavailable, so no unreviewed candidate was allowed into the exhibition."
+                    if agenda.language == "en"
+                    else "语义相关性审查暂不可用；本次没有让未经审查的候选进入展览。"
+                ),
+            )
+        if not first.valid:
+            logger.warning(
+                "retrieval audit returned an invalid contract; failing closed"
+            )
+            return AgenticRetrievalOutcome(
+                results=[],
+                failure_code="RETRIEVAL_AUDIT_INVALID",
+                coverage_gap=(
+                    "The semantic relevance audit returned an invalid contract, so no unreviewed candidate was allowed into the exhibition."
+                    if agenda.language == "en"
+                    else "语义相关性审查返回无效结构；本次没有让未经审查的候选进入展览。"
+                ),
+            )
+        first = self._enforce_audited_object_count(
+            first,
+            required_count=required_count,
+            language=agenda.language,
+        )
+        first = self._enforce_audited_cultural_coverage(agenda, first)
+        should_expand = bool(first.search_queries) and (
+            first.expansion_reason in EXPANDABLE_REASONS
+        )
+        named_cultural_obligations = self._cultural_coverage_obligations(
+            agenda.question
+        )
+        generic_cultural_roots = {
+            root
+            for result in first.accepted
+            if (root := self._canonical_object_origin(result.obj))
+        }
+        generic_cultural_minimum_met = bool(
+            not named_cultural_obligations
+            and _requests_cross_cultural(agenda.question)
+            and len(generic_cultural_roots) >= 3
+        )
+        usable_partial = bool(
+            len(first.accepted) >= required_count
+            and first.answerability
+            == AnswerabilityStatus.PARTIALLY_SUPPORTED.value
+            and (
+                first.expansion_reason != "missing_cultural_leg"
+                or generic_cultural_minimum_met
+            )
+        )
+        if (
+            len(first.accepted) >= required_count
+            and first.answerability == AnswerabilityStatus.SUPPORTED.value
+        ) or usable_partial or not should_expand:
+            return AgenticRetrievalOutcome(
+                results=first.accepted,
+                audit_applied=True,
+                expanded_queries=tuple(preplanned_queries),
+                answerability=first.answerability,
+                interpretation=first.interpretation,
+                coverage_gap=first.coverage_gap,
+                expansion_reason=first.expansion_reason,
+            )
+
+        result_sets = [initial_results]
+        used_queries: list[str] = list(preplanned_queries)
+        preplanned_keys = {query.casefold() for query in preplanned_queries}
+        remaining_query_slots = max(0, max_queries - len(used_queries))
+        planned_queries = tuple(
+            query
+            for query in first.search_queries
+            if query.casefold() not in preplanned_keys
+        )[:remaining_query_slots]
+        # Encode all expansion queries in one provider batch. They still pass
+        # independently through BM25, semantic floors, evidence reranking and
+        # the second audit; batching removes repeated query-model startup. The
+        # worker checks a cooperative deadline between scans (the active ONNX
+        # kernel itself cannot be interrupted by asyncio cancellation).
+        remaining = remaining_time()
+        minimum_atomic_search = 2.0
+        minimum_second_audit = min(
+            per_audit_cap,
+            max(8.0, per_audit_cap * 0.65),
+        )
+        second_audit_reserve = min(
+            per_audit_cap,
+            max(minimum_second_audit, remaining * 0.50),
+        )
+        search_budget = remaining - second_audit_reserve
+        if planned_queries and search_budget < minimum_atomic_search:
+            warning_detail = (
+                "The shared retrieval deadline left no time for the requested catalogue expansion."
+                if agenda.language == "en"
+                else "共享检索时限不足以执行证据审查提出的扩展检索。"
+            )
+            logger.warning("optional agentic expansion skipped: %s", warning_detail)
+            return AgenticRetrievalOutcome(
+                results=first.accepted,
+                audit_applied=True,
+                expanded_queries=tuple(used_queries),
+                answerability=first.answerability,
+                interpretation=first.interpretation,
+                coverage_gap=first.coverage_gap,
+                expansion_reason=first.expansion_reason,
+                warning_code="RETRIEVAL_SEARCH_TIMEOUT",
+                warning_detail=warning_detail,
+            )
+        if planned_queries:
+            expanded_agendas = [
+                agenda.model_copy(update={"question": query})
+                for query in planned_queries
+            ]
+            expansion_deadline = perf_counter() + search_budget
+
+            def search_expansions() -> list[list[SearchResult]]:
+                batch_search = getattr(self.collections, "search_many", None)
+                if callable(batch_search):
+                    if isinstance(self.collections, CollectionRepository):
+                        return batch_search(
+                            expanded_agendas,
+                            collection,
+                            deadline=expansion_deadline,
+                            atomic=True,
+                        )
+                    return batch_search(expanded_agendas, collection)
+                return [
+                    self.collections.search(expanded_agenda, collection)
+                    for expanded_agenda in expanded_agendas
+                ]
+
+            try:
+                expanded_batches = await asyncio.wait_for(
+                    asyncio.to_thread(search_expansions),
+                    timeout=search_budget,
+                )
+            except asyncio.TimeoutError as error:
+                logger.warning(
+                    "batched agentic retrieval timed out (%s: %s)",
+                    type(error).__name__,
+                    error,
+                )
+                return AgenticRetrievalOutcome(
+                    results=first.accepted,
+                    audit_applied=True,
+                    expanded_queries=tuple(used_queries),
+                    answerability=first.answerability,
+                    interpretation=first.interpretation,
+                    coverage_gap=first.coverage_gap,
+                    expansion_reason=first.expansion_reason,
+                    warning_code="RETRIEVAL_SEARCH_TIMEOUT",
+                    warning_detail=(
+                        "The bounded catalogue expansion timed out; the original question was retained."
+                        if agenda.language == "en"
+                        else "扩展馆藏检索超时；原问题已保留，本次没有把超时误报为主题不受支持。"
+                    ),
+                )
+            except CollectionDataError as error:
+                if error.code == "RETRIEVAL_SEARCH_TIMEOUT":
+                    logger.warning(
+                        "batched agentic retrieval reached its cooperative deadline"
+                    )
+                    return AgenticRetrievalOutcome(
+                        results=first.accepted,
+                        audit_applied=True,
+                        expanded_queries=tuple(used_queries),
+                        answerability=first.answerability,
+                        interpretation=first.interpretation,
+                        coverage_gap=first.coverage_gap,
+                        expansion_reason=first.expansion_reason,
+                        warning_code="RETRIEVAL_SEARCH_TIMEOUT",
+                        warning_detail=(
+                            "The bounded catalogue expansion timed out; the original question was retained."
+                            if agenda.language == "en"
+                            else "扩展馆藏检索超时；原问题已保留，本次没有把超时误报为主题不受支持。"
+                        ),
+                    )
+                logger.warning(
+                    "agentic retrieval batch skipped (%s: %s)",
+                    type(error).__name__,
+                    error,
+                )
+                expanded_batches = []
+            except ValueError as error:
+                logger.warning(
+                    "agentic retrieval batch skipped (%s: %s)",
+                    type(error).__name__,
+                    error,
+                )
+                expanded_batches = []
+            for query, expanded in zip(
+                planned_queries,
+                expanded_batches,
+                strict=False,
+            ):
+                if expanded:
+                    result_sets.append(expanded)
+                    used_queries.append(query)
+
+        if len(result_sets) == 1:
+            return AgenticRetrievalOutcome(
+                results=first.accepted,
+                audit_applied=True,
+                expanded_queries=tuple(used_queries),
+                answerability=first.answerability,
+                interpretation=first.interpretation,
+                coverage_gap=first.coverage_gap,
+                expansion_reason=first.expansion_reason,
+            )
+
+        fused = fuse_search_results(
+            result_sets,
+            limit=self.settings.rag_max_results,
+            rrf_k=self.settings.rag_rrf_k,
+        )
+        fused = self._query_coverage_order(
+            fused,
+            expanded_batches,
+            top_k=top_k,
+        )
+        # Optional expansion must not erase evidence the mandatory first pass
+        # already verified.  RRF can demote a first-pass object when it appears
+        # only in the original wording but not in a translated query.  Keep
+        # those objects at the front of the second audit window; they are still
+        # re-audited and therefore receive no automatic approval.
+        first_accepted_ids = {result.obj.id for result in first.accepted}
+        if first_accepted_ids:
+            fused = [
+                *first.accepted,
+                *[
+                    result
+                    for result in fused
+                    if result.obj.id not in first_accepted_ids
+                ],
+            ][: self.settings.rag_max_results]
+        remaining_budget = remaining_time()
+        if remaining_budget < 1.0:
+            warning_detail = (
+                "The shared retrieval deadline expired before expanded evidence could be audited."
+                if agenda.language == "en"
+                else "扩展候选尚未完成证据复审，共享检索时限已用尽。"
+            )
+            logger.warning("optional expanded evidence audit skipped: %s", warning_detail)
+            return AgenticRetrievalOutcome(
+                results=first.accepted,
+                audit_applied=True,
+                expanded_queries=tuple(used_queries),
+                answerability=first.answerability,
+                interpretation=first.interpretation,
+                coverage_gap=first.coverage_gap,
+                expansion_reason=first.expansion_reason,
+                warning_code="RETRIEVAL_AUDIT_UNAVAILABLE",
+                warning_detail=warning_detail,
+            )
+        try:
+            second = await run_audit(
+                fused,
+                pass_number=2,
+                timeout_seconds=min(per_audit_cap, remaining_budget),
+            )
+        except (ProviderError, ValueError, TypeError, KeyError) as error:
+            logger.warning(
+                "expanded retrieval audit unavailable (%s: %s); retaining first audit",
+                type(error).__name__,
+                error,
+            )
+            return AgenticRetrievalOutcome(
+                results=first.accepted,
+                audit_applied=True,
+                expanded_queries=tuple(used_queries),
+                answerability=first.answerability,
+                interpretation=first.interpretation,
+                coverage_gap=first.coverage_gap,
+                expansion_reason=first.expansion_reason,
+                warning_code="RETRIEVAL_AUDIT_UNAVAILABLE",
+                warning_detail=(
+                    "Expanded candidates could not be audited, so they were not used."
+                    if agenda.language == "en"
+                    else "扩展候选未能完成证据复审，因此没有进入展览。"
+                ),
+            )
+        if not second.valid:
+            logger.warning(
+                "expanded retrieval audit returned an invalid contract; retaining first audit"
+            )
+            return AgenticRetrievalOutcome(
+                results=first.accepted,
+                audit_applied=True,
+                expanded_queries=tuple(used_queries),
+                answerability=first.answerability,
+                interpretation=first.interpretation,
+                coverage_gap=first.coverage_gap,
+                expansion_reason=first.expansion_reason,
+                warning_code="RETRIEVAL_AUDIT_INVALID",
+                warning_detail=(
+                    "The expanded evidence audit returned an invalid contract."
+                    if agenda.language == "en"
+                    else "扩展证据复审返回了无效结构。"
+                ),
+            )
+        second = self._enforce_audited_object_count(
+            second,
+            required_count=required_count,
+            language=agenda.language,
+        )
+        chosen = self._enforce_audited_cultural_coverage(agenda, second)
+        return AgenticRetrievalOutcome(
+            results=chosen.accepted,
+            audit_applied=True,
+            expanded_queries=tuple(used_queries),
+            answerability=chosen.answerability,
+            interpretation=chosen.interpretation or first.interpretation,
+            coverage_gap=chosen.coverage_gap or first.coverage_gap,
+            expansion_reason=first.expansion_reason,
+        )
+
+    @staticmethod
+    def _dedupe_audit_candidates(
+        candidates: list[SearchResult],
+    ) -> list[SearchResult]:
+        """Collapse exact duplicated institution descriptions for auditing.
+
+        Museum APIs often expose a parent work plus separately addressable
+        parts with the same explanatory text. Showing all of them to the model
+        spends a bounded audit window without adding another evidence case.
+        Only long, exact normalized descriptions from the same institution are
+        folded; distinct records, short tombstones and later selection remain
+        untouched.
+        """
+
+        seen: set[tuple[str, str]] = set()
+        unique: list[SearchResult] = []
+        for result in candidates:
+            description = re.sub(
+                r"\s+",
+                " ",
+                result.obj.description or "",
+            ).strip().casefold()
+            key = (result.obj.institution_id, description)
+            if len(description) >= 120 and key in seen:
+                continue
+            if len(description) >= 120:
+                seen.add(key)
+            unique.append(result)
+        return unique
+
+    @staticmethod
+    def _query_coverage_order(
+        fused: list[SearchResult],
+        query_batches: list[list[SearchResult]],
+        *,
+        top_k: int,
+    ) -> list[SearchResult]:
+        """Reserve audit-window candidates from every atomic query axis.
+
+        RRF correctly rewards consensus, but several independent evidence legs
+        are not expected to share objects. Without a small per-query reserve,
+        generic candidates common to all rankings can fill the whole audit
+        window. This only reorders already-retrieved candidates; the evidence
+        auditor still decides relevance and validates every source ID.
+        """
+
+        batches = [batch for batch in query_batches if batch]
+        if not batches or len(fused) <= 1 or top_k <= 1:
+            return fused
+        fused_by_id = {result.obj.id: result for result in fused}
+        # A single precise query may be the only route to the requested
+        # predicate, so expose enough of its head to build a five-object room.
+        # With several independent axes, retain the smaller per-axis reserve
+        # so no one query can consume the whole audit window.
+        if len(batches) == 1:
+            quotas = [min(5, max(1, top_k // 3))]
+        else:
+            ordinary_quota = 2 if top_k >= len(batches) * 2 + 3 else 1
+            quotas = [
+                min(4, max(ordinary_quota, top_k // 5))
+                if any(
+                    "agentic_semantic_synthesis" in result.retrieval_sources
+                    for result in batch[:5]
+                )
+                else ordinary_quota
+                for batch in batches
+            ]
+        reserve = min(top_k - 1, sum(quotas))
+        head_count = max(1, top_k - reserve)
+        selected = list(fused[:head_count])
+        selected_ids = {result.obj.id for result in selected}
+
+        for offset in range(max(quotas, default=0)):
+            for batch, quota in zip(batches, quotas, strict=True):
+                if offset >= quota:
+                    continue
+                candidate = next(
+                    (
+                        fused_by_id[result.obj.id]
+                        for result in batch[offset:]
+                        if result.obj.id in fused_by_id
+                        and result.obj.id not in selected_ids
+                    ),
+                    None,
+                )
+                if candidate is not None:
+                    selected.append(candidate)
+                    selected_ids.add(candidate.obj.id)
+                if len(selected) >= top_k:
+                    break
+            if len(selected) >= top_k:
+                break
+
+        selected.extend(
+            result for result in fused if result.obj.id not in selected_ids
+        )
+        return selected
+
+    @classmethod
+    def _audit_candidate_sample(
+        cls,
+        candidates: list[SearchResult],
+        *,
+        top_k: int,
+        cross_cultural: bool,
+        cultural_obligations: list[CulturalCoverageObligation] | None = None,
+    ) -> list[SearchResult]:
+        """Keep retrieval rank while reserving room for origin diversity.
+
+        Dense/BM25 fusion often places many records from one well-described
+        institution first. For a cross-cultural question, showing only that
+        head to the auditor makes missing cultures unrecoverable even when they
+        are already in the recall pool. This sampler changes no relevance
+        score and approves nothing; it only exposes a bounded, more informative
+        candidate set to the evidence auditor.
+        """
+
+        obligations = cultural_obligations or []
+        if len(candidates) <= top_k:
+            return candidates[:top_k]
+        # Keep most of the highest-ranked candidates. Four reserved slots are
+        # enough to surface three or more comparison regions without letting
+        # low-ranked catalogue geography crowd out semantic precision.
+        diversity_slots = (
+            min(
+                max(4, len(obligations)),
+                max(1, top_k // 3),
+            )
+            if cross_cultural
+            else 0
+        )
+        # Every open-vocabulary question, not only a cross-cultural one, needs
+        # quote-ready candidates. A thin title match can rank highly yet be
+        # impossible to admit under the exact-source contract. Reserve a small
+        # window for candidates with a matched institution row or substantial
+        # curatorial evidence. This exposes evidence; it never approves it.
+        candidate_rank = {
+            result.obj.id: rank for rank, result in enumerate(candidates)
+        }
+
+        def quote_ready(result: SearchResult) -> bool:
+            matched = set(result.matched_evidence_ids)
+            for chunk in result.obj.evidence:
+                if chunk.source_kind == "institution_provenance":
+                    continue
+                text = (chunk.text or "").strip()
+                if len(text) < 40:
+                    continue
+                if chunk.id in matched or chunk.source_kind == "institution_curatorial_text":
+                    return True
+            return False
+
+        source_rich = [result for result in candidates if quote_ready(result)]
+        source_rich.sort(
+            key=lambda result: (
+                not bool(result.matched_evidence_ids),
+                -(result.evidence_score or -1.0),
+                candidate_rank[result.obj.id],
+                result.obj.id,
+            )
+        )
+        evidence_slots = min(
+            len(source_rich),
+            max(0, min(6, top_k // 3)),
+        )
+        head_count = max(1, top_k - diversity_slots - evidence_slots)
+        selected = list(candidates[:head_count])
+        selected_ids = {result.obj.id for result in selected}
+        added_evidence = 0
+        for result in source_rich:
+            if result.obj.id in selected_ids:
+                continue
+            selected.append(result)
+            selected_ids.add(result.obj.id)
+            added_evidence += 1
+            if added_evidence >= evidence_slots:
+                break
+        seen_origins = {
+            origin
+            for result in selected
+            if (origin := cls._canonical_object_origin(result.obj))
+        }
+        # A generic origin-diversity slot can still miss a culture explicitly
+        # named by the visitor. Reserve the first available topical candidate
+        # for every named leg before filling generic regional diversity.
+        for obligation in obligations:
+            if len(selected) >= top_k:
+                break
+            if any(
+                cls._object_satisfies_cultural_obligation(
+                    result.obj,
+                    obligation,
+                )
+                for result in selected
+            ):
+                continue
+            candidate = next(
+                (
+                    result
+                    for result in candidates[head_count:]
+                    if result.obj.id not in selected_ids
+                    and cls._object_satisfies_cultural_obligation(
+                        result.obj,
+                        obligation,
+                    )
+                ),
+                None,
+            )
+            if candidate is not None:
+                selected.append(candidate)
+                selected_ids.add(candidate.obj.id)
+                if origin := cls._canonical_object_origin(candidate.obj):
+                    seen_origins.add(origin)
+        for result in candidates[head_count:]:
+            if len(selected) >= top_k:
+                break
+            origin = cls._canonical_object_origin(result.obj)
+            if origin and origin not in seen_origins:
+                selected.append(result)
+                selected_ids.add(result.obj.id)
+                seen_origins.add(origin)
+        for result in candidates[head_count:]:
+            if len(selected) >= top_k:
+                break
+            if result.obj.id not in selected_ids:
+                selected.append(result)
+                selected_ids.add(result.obj.id)
+        return selected
+
+    def _enforce_audited_cultural_coverage(
+        self,
+        agenda: AgendaInput,
+        audit: RetrievalAudit,
+    ) -> RetrievalAudit:
+        """Do not let five objects from one culture answer a comparison.
+
+        The model judges semantic relevance; this deterministic postcondition
+        checks whether the accepted pool actually contains the comparison legs
+        named by the visitor.  It never adds objects or upgrades a model
+        decision, and therefore remains a constraint rather than a topic rule.
+        """
+
+        if audit.answerability != AnswerabilityStatus.SUPPORTED.value:
+            return audit
+
+        named = self._cultural_coverage_obligations(agenda.question)
+        missing = [
+            obligation
+            for obligation in named
+            if not any(
+                self._object_satisfies_cultural_obligation(result.obj, obligation)
+                for result in audit.accepted
+            )
+        ]
+        gap = ""
+        if missing:
+            labels = "、".join(obligation.label_zh for obligation in missing)
+            gap = (
+                f"The audited pool is missing requested cultural leg(s): {labels}."
+                if agenda.language == "en"
+                else f"语义审查后的候选仍缺少明确要求的文化比较腿：{labels}。"
+            )
+        elif not named and _requests_cross_cultural(agenda.question):
+            culture_buckets: set[str] = set()
+            for result in audit.accepted:
+                origin = self._canonical_object_origin(result.obj)
+                if origin:
+                    culture_buckets.add(origin)
+            if len(culture_buckets) < 3:
+                gap = (
+                    "The audited pool covers fewer than three cultural regions, so it cannot support the requested cross-cultural comparison."
+                    if agenda.language == "en"
+                    else "语义审查后的候选不足三个文化区域，不能支撑所要求的跨文化比较。"
+                )
+
+        if not gap:
+            return audit
+        combined_gap = " ".join(
+            part for part in (audit.coverage_gap.strip(), gap) if part
+        )[:500]
+        return replace(
+            audit,
+            answerability=AnswerabilityStatus.PARTIALLY_SUPPORTED.value,
+            coverage_gap=combined_gap,
+        )
+
+    @staticmethod
+    def _enforce_audited_object_count(
+        audit: RetrievalAudit,
+        *,
+        required_count: int,
+        language: str,
+    ) -> RetrievalAudit:
+        """A model cannot declare support with too few evidence-bound IDs."""
+
+        if (
+            audit.answerability != AnswerabilityStatus.SUPPORTED.value
+            or len(audit.accepted) >= required_count
+        ):
+            return audit
+        count_gap = (
+            f"Only {len(audit.accepted)} evidence-bound objects passed audit; "
+            f"the visit requires {required_count}."
+            if language == "en"
+            else f"只有 {len(audit.accepted)} 件藏品通过证据绑定审查，"
+            f"当前参观需要 {required_count} 件。"
+        )
+        return replace(
+            audit,
+            answerability=AnswerabilityStatus.PARTIALLY_SUPPORTED.value,
+            coverage_gap=" ".join(
+                part for part in (audit.coverage_gap.strip(), count_gap) if part
+            )[:500],
+        )
+
     @staticmethod
     def _retrieval_contract(results: list[SearchResult]) -> tuple[str, str]:
         """Record the retrieval route that actually supplied this candidate set."""
@@ -202,32 +1514,348 @@ class ExhibitionGenerator:
         sources = {
             source for result in results for source in result.retrieval_sources
         }
+        if "llm_relevance_audit" in sources:
+            return AGENTIC_RETRIEVAL_METHOD, AGENTIC_RETRIEVAL_VERSION
+        if "question_card" in sources:
+            return QUESTION_CARD_RETRIEVAL_METHOD, QUESTION_CARD_RETRIEVAL_VERSION
         if any(source.startswith("dense") for source in sources) or "evidence_rerank" in sources:
             return HYBRID_RETRIEVAL_METHOD, HYBRID_RETRIEVAL_VERSION
         return BM25_RETRIEVAL_METHOD, BM25_RETRIEVAL_VERSION
 
     @staticmethod
     def probe_answerability(
-        collections: CollectionRepository, agenda: AgendaInput
+        collections: CollectionRepository,
+        agenda: AgendaInput,
+        *,
+        audit_available: bool = False,
     ) -> AgendaCheckResponse:
         """Run the gate without constructing a generator.
 
         Used by the interview to decide whether to open a negotiation turn, so
-        it must not require a model provider or any settings.
+        it must not construct a model provider. The caller supplies the real
+        runtime capability: when an audit is unavailable, dense-only nearest
+        neighbours are removed before the interview makes any promise.
         """
         probe = ExhibitionGenerator.__new__(ExhibitionGenerator)
         probe.collections = collections
         probe.provider = None  # type: ignore[assignment]
         probe.settings = None  # type: ignore[assignment]
-        return ExhibitionGenerator.check_agenda(probe, agenda)
+        probe._audit_available_override = audit_available
+        collection = collections.get(agenda.collection_id)
+        results = collections.search(agenda, collection)
+        return ExhibitionGenerator.check_agenda(
+            probe,
+            agenda,
+            results_override=results,
+        )
 
-    def check_agenda(self, agenda: AgendaInput) -> AgendaCheckResponse:
+    @staticmethod
+    def _results_with_predicate_evidence(
+        results: list[SearchResult],
+        pattern: re.Pattern[str],
+    ) -> list[SearchResult]:
+        """Keep only objects whose institution text supports the asked action.
+
+        Acquisition snippets are excluded: a credit line can document how the
+        museum received an object, but it cannot support a conservation,
+        ritual-practice or present-day community claim.
+        """
+
+        qualified: list[SearchResult] = []
+        for result in results:
+            evidence_ids = [
+                chunk.id
+                for chunk in result.obj.evidence
+                if chunk.source_kind != "institution_provenance"
+                and pattern.search(" ".join(filter(None, (chunk.text, chunk.supports))))
+            ]
+            if evidence_ids:
+                qualified.append(
+                    replace(
+                        result,
+                        matched_evidence_ids=tuple(dict.fromkeys(evidence_ids)),
+                    )
+                )
+        return qualified
+
+    @classmethod
+    def _predicate_assessment(
+        cls,
+        question: str,
+        results: list[SearchResult],
+    ) -> PredicateAssessment | None:
+        """Gate a few high-cost predicates that topic counts cannot answer."""
+
+        bronze = re.search(r"青铜(?:器)?|\bbronze\b", question, re.IGNORECASE)
+        corrosion = re.search(
+            r"生锈|锈蚀|腐蚀|\b(?:corrosion|rust(?:ed|ing)?)\b",
+            question,
+            re.IGNORECASE,
+        )
+        repair = re.search(
+            r"修复|修补|保育|保护处理|\b(?:restor(?:ation|ed)?|conserv(?:ation|ed)?|repair(?:ed)?|treat(?:ment|ed)?)\b",
+            question,
+            re.IGNORECASE,
+        )
+        if bronze and corrosion and repair:
+            matched = cls._results_with_predicate_evidence(
+                results,
+                BRONZE_REPAIR_EVIDENCE,
+            )
+            matched = [
+                result
+                for result in matched
+                if re.search(
+                    r"\b(?:bronze|copper\s+alloy)\b|青铜|铜合金",
+                    " ".join(
+                        filter(
+                            None,
+                            (
+                                result.obj.title,
+                                result.obj.medium,
+                                result.obj.material,
+                                result.obj.type,
+                                result.obj.classification,
+                            ),
+                        )
+                    ),
+                    re.IGNORECASE,
+                )
+            ]
+            return PredicateAssessment(
+                status=AnswerabilityStatus.PARTIALLY_SUPPORTED,
+                matched=matched,
+                gap=(
+                    "馆藏可定位少数青铜器的已记录锈蚀或修补，但不能据此解释锈蚀机理，"
+                    "也不足以概括不同文化的修复方法。可改问“馆方如何记录这些器物的修补／保存痕迹？”"
+                ),
+            )
+
+        museum_context = re.search(
+            r"入馆|进入博物馆|博物馆|馆藏|展陈|展示|\bmuseum\b",
+            question,
+            re.IGNORECASE,
+        )
+        sacredness = re.search(
+            r"神圣性|神圣|\bsacredness\b|\b(?:remain|still)\s+sacred\b",
+            question,
+            re.IGNORECASE,
+        )
+        continuing_claim = re.search(
+            r"能否|还能|是否|保持|失去|延续|改变|吗|\b(?:remain|still|continue|lose)\b",
+            question,
+            re.IGNORECASE,
+        )
+        if museum_context and sacredness and continuing_claim:
+            matched = cls._results_with_predicate_evidence(
+                results,
+                RITUAL_PRACTICE_EVIDENCE,
+            )
+            return PredicateAssessment(
+                status=(
+                    AnswerabilityStatus.PARTIALLY_SUPPORTED
+                    if matched
+                    else AnswerabilityStatus.UNSUPPORTED
+                ),
+                matched=matched,
+                gap=(
+                    "馆方记录可支持历史礼仪用途的比较，但不能由物件记录判断今天是否仍被相关社群视为神圣；"
+                    "这需要社群观点与实际展陈语境材料。"
+                ),
+            )
+
+        colonial_or_looted = re.search(
+            r"殖民(?:时期|主义|统治)?|被殖民|\bcolonial(?:ism)?\b|\bcolonized\b|\blooted\b|掠夺|流失",
+            question,
+            re.IGNORECASE,
+        )
+        normative = re.search(
+            r"该不该|应不应该|是否应该|要不要|\bshould\b",
+            question,
+            re.IGNORECASE,
+        )
+        restitution = re.search(
+            r"归还|返还|遣返|\brepatriat(?:e|ion|ed)\b|\brestitut(?:ion|e|ed)\b|\breturn\b",
+            question,
+            re.IGNORECASE,
+        )
+        if colonial_or_looted and normative and restitution:
+            return PredicateAssessment(
+                status=AnswerabilityStatus.UNSUPPORTED,
+                matched=[],
+                gap=(
+                    "馆藏可呈现部分来源与入藏记录，但不能仅凭这些记录裁定是否归还；"
+                    "该判断需要原属社群、权属与采集情境、法律及机构政策材料。"
+                ),
+            )
+
+        return None
+
+    def _hard_generation_boundary(
+        self,
+        agenda: AgendaInput,
+        collection: LoadedCollection,
+        results: list[SearchResult],
+    ) -> PredicateAssessment | None:
+        """Return only evidence boundaries that more retrieval cannot repair.
+
+        Raw candidate count and missing cultural legs are intentionally absent:
+        the bounded agent may recover those with translated or decomposed
+        queries. Exact reviewed negative policies, prohibited requests and
+        predicates requiring external legal/clinical/community evidence cannot
+        be repaired by finding more visually similar museum objects.
+        """
+
+        policy_match = self.collections.match_question_policy(
+            collection, agenda.question
+        )
+        if policy_match is not None and policy_match[1] == 1.0:
+            policy = policy_match[0]
+            if policy.status != AnswerabilityStatus.SUPPORTED.value:
+                return PredicateAssessment(
+                    status=AnswerabilityStatus(policy.status),
+                    matched=results,
+                    gap=(
+                        policy.rationale
+                        or "；".join(policy.coverage_limits)
+                        or "经审定的问题边界不支持按当前问法生成展览。"
+                    ),
+                )
+
+        # A fuzzy question-card match may supply useful retrieval vocabulary,
+        # but it cannot erase an added legal, conservation or living-sacredness
+        # predicate. Only the exact negative policy above is a complete reviewed
+        # boundary in its own right.
+        predicate = self._predicate_assessment(agenda.question, results)
+        if predicate is not None:
+            return predicate
+
+        if any(
+            re.search(pattern, agenda.question, re.IGNORECASE)
+            for pattern in UNSUPPORTED_BOUNDARY_PATTERNS
+        ):
+            return PredicateAssessment(
+                status=AnswerabilityStatus.UNSUPPORTED,
+                matched=[],
+                gap="该问题需要馆藏之外的数据、效果证据或产品明确禁止的能力。",
+            )
+        if any(
+            re.search(pattern, agenda.question, re.IGNORECASE)
+            for pattern in PARTIAL_SCOPE_PATTERNS
+        ):
+            return PredicateAssessment(
+                status=(
+                    AnswerabilityStatus.PARTIALLY_SUPPORTED
+                    if results
+                    else AnswerabilityStatus.UNSUPPORTED
+                ),
+                matched=results,
+                gap="馆藏可支持局部对象比较，但不能支持总体化、排他性或完整因果结论。",
+            )
+        return None
+
+    def check_agenda(
+        self,
+        agenda: AgendaInput,
+        *,
+        results_override: list[SearchResult] | None = None,
+    ) -> AgendaCheckResponse:
         collection = self.collections.get(agenda.collection_id)
-        results = self.collections.search(agenda, collection)
+        results = (
+            results_override
+            if results_override is not None
+            else self.collections.search(agenda, collection)
+        )
+        policy_match = self.collections.match_question_policy(
+            collection, agenda.question
+        )
+        policy_similarity = policy_match[1] if policy_match is not None else 0.0
+        exact_policy = (
+            policy_match[0]
+            if policy_match is not None and policy_similarity == 1.0
+            else None
+        )
+        audit_available_override = getattr(
+            self, "_audit_available_override", None
+        )
+        audit_available = (
+            bool(audit_available_override)
+            if audit_available_override is not None
+            else bool(
+                self.provider is not None
+                and self.provider.configured
+                and getattr(self.provider, "supports_retrieval_audit", False)
+                and self.settings is not None
+                and self.settings.rag_llm_audit_enabled
+            )
+        )
+        query_plan = _query_plan(
+            agenda.question,
+            getattr(collection, "concept_aliases", {}),
+        )
+        required_count = VisitorProfile(
+            durationMinutes=agenda.duration_minutes
+        ).item_count
         eligible_objects = self.collections.eligible_objects(collection)
+        eligible_ids = {obj.id for obj in eligible_objects}
+        exact_starter_count = (
+            sum(
+                object_id in eligible_ids
+                for object_id in exact_policy.starter_object_ids
+            )
+            if exact_policy is not None
+            else 0
+        )
+        policy_usable_without_audit = bool(
+            exact_policy is not None
+            and (
+                (
+                    exact_policy.source == "question_card"
+                    and exact_policy.status == AnswerabilityStatus.SUPPORTED.value
+                    and exact_starter_count >= required_count
+                )
+                or exact_policy.status != AnswerabilityStatus.SUPPORTED.value
+            )
+        )
+        audit_required_but_unavailable = bool(
+            not audit_available
+            and not query_plan.browse_all
+            and not policy_usable_without_audit
+        )
+        if not audit_available:
+            if query_plan.browse_all:
+                results = [
+                    result
+                    for result in results
+                    if "browse_all" in result.retrieval_sources
+                ]
+            elif audit_required_but_unavailable:
+                results = []
+            else:
+                results = [
+                    result
+                    for result in results
+                    if "bm25" in result.retrieval_sources
+                    or "question_card" in result.retrieval_sources
+                    or "browse_all" in result.retrieval_sources
+                ]
         eligible_count = len(eligible_objects)
-        policy_match = self.collections.match_question_policy(collection, agenda.question)
-        policy = policy_match[0] if policy_match else None
+        # A near match is useful retrieval vocabulary, not a reviewed answer to
+        # the visitor's changed question.  Only exact policy text may supply a
+        # frozen status, evidence domain or starter set.  This keeps an added
+        # legal/conservation/living-practice predicate from inheriting the
+        # answerability of a simpler public question card.
+        policy = (
+            exact_policy
+            if exact_policy is not None
+            and policy_usable_without_audit
+            else None
+        )
+        predicate = (
+            None
+            if policy is not None
+            else self._predicate_assessment(agenda.question, results)
+        )
         direct_results = self._direct_results(results)
         # A free-form subject is already hard-gated by retrieval.  Forcing it
         # into whichever broad routing domain happens to dominate (often
@@ -255,9 +1883,13 @@ class ExhibitionGenerator:
             if policy.rationale and status != AnswerabilityStatus.SUPPORTED:
                 gaps.insert(0, policy.rationale)
             if status == AnswerabilityStatus.SUPPORTED and policy.starter_object_ids:
-                if len(policy_objects) != 5:
+                if len(policy_objects) < required_count:
                     status = AnswerabilityStatus.PARTIALLY_SUPPORTED
-                    gaps.insert(0, "预验证问题卡的五件角色藏品不完整，当前禁止生成。")
+                    gaps.insert(
+                        0,
+                        f"当前参观时长需要 {required_count} 件藏品，"
+                        f"预验证问题卡只有 {len(policy_objects)} 件可用角色藏品。",
+                    )
                 matched = [
                     SearchResult(obj=obj, score=float("inf"))
                     for obj in policy_objects
@@ -277,6 +1909,20 @@ class ExhibitionGenerator:
                 gaps = ["馆藏只能支持问题的局部方面，不能形成五角色证据链。"]
             if not gaps and status == AnswerabilityStatus.UNSUPPORTED:
                 gaps = ["该问题超出单一馆藏和当前产品边界。"]
+        elif predicate is not None:
+            status = predicate.status
+            matched = predicate.matched
+            gaps = [predicate.gap]
+        elif audit_required_but_unavailable:
+            status = AnswerabilityStatus.UNSUPPORTED
+            gaps = [
+                (
+                    "The evidence relevance audit is temporarily unavailable. "
+                    "This does not mean the collection lacks the topic; retry when the audit service is available."
+                    if agenda.language == "en"
+                    else "证据相关性审查暂不可用；这不代表馆藏没有这个主题，请在审查服务恢复后重试。"
+                )
+            ]
         elif len(results) < 5:
             status = AnswerabilityStatus.UNSUPPORTED
             gaps = ["与问题主题直接匹配的可用藏品不足五件；系统不会用无关藏品补位。"]
@@ -343,12 +1989,56 @@ class ExhibitionGenerator:
             if covered_labels:
                 supported_aspects.append("已覆盖文化／地点：" + "、".join(covered_labels))
         can_generate = status == AnswerabilityStatus.SUPPORTED
+        result_sources = {
+            source for result in results for source in result.retrieval_sources
+        }
+        frozen_question_card = bool(
+            policy is not None
+            and policy_similarity == 1.0
+            and policy.source == "question_card"
+            and status == AnswerabilityStatus.SUPPORTED
+            and len(policy_objects) >= required_count
+        )
+        exact_negative_policy = bool(
+            policy is not None
+            and policy_similarity == 1.0
+            and status != AnswerabilityStatus.SUPPORTED
+        )
+        if frozen_question_card:
+            decision_basis = "reviewed_question_card"
+        elif exact_negative_policy:
+            decision_basis = "reviewed_policy"
+        elif predicate is not None:
+            decision_basis = "predicate_boundary"
+        elif results and all("browse_all" in result.retrieval_sources for result in results):
+            decision_basis = "browse"
+        elif audit_required_but_unavailable:
+            decision_basis = "audit_unavailable"
+        elif "dense_open_query" in result_sources and audit_available:
+            decision_basis = "open_dense_provisional"
+        elif can_generate and audit_available:
+            # Known lexical aliases and non-frozen regression positives still
+            # enter the same runtime evidence audit as open dense candidates.
+            # Calling their hit count "reviewed" here would disagree with the
+            # generation path and recreate a late-failure UX.
+            decision_basis = "runtime_audit_provisional"
+        else:
+            decision_basis = "lexical_retrieval"
+        requires_runtime_audit = bool(
+            can_generate
+            and decision_basis
+            in {"open_dense_provisional", "runtime_audit_provisional"}
+        )
         return AgendaCheckResponse(
             status=status,
             can_generate=can_generate,
+            requires_runtime_audit=requires_runtime_audit,
+            decision_basis=decision_basis,
             exhibition_theme=exhibition_theme,
             answerable_part=(
-                "可用馆藏能够组成五件藏品的证据链。"
+                "初步召回到足量候选，仍需逐件核查馆方证据。"
+                if requires_runtime_audit
+                else "可用馆藏能够组成五件藏品的证据链。"
                 if can_generate
                 else ("馆藏只能支持问题的局部方面。" if matched else None)
             ),
@@ -459,38 +2149,280 @@ class ExhibitionGenerator:
         obj: MuseumObject,
         obligation: CulturalCoverageObligation,
     ) -> bool:
-        """Match only catalogue origin fields or reviewed broad culture packs."""
+        """Match one leg from controlled origin, never from auxiliary facets.
 
-        if set(obj.culture_pack_ids) & set(obligation.culture_pack_ids):
-            return True
+        ``culturePackIds`` is multi-valued in the imported corpus: a Chinese
+        object can carry an auxiliary Europe or Americas facet. Such a facet
+        cannot make the same object stand in for two origins. A single pack is
+        used only when the institution supplied no controlled origin text.
+        """
+
         controlled_origin = " ".join(
             value
             for value in (
                 obj.culture,
                 obj.culture_display,
                 obj.place,
-                obj.creator,
-                obj.maker,
             )
             if value
         )
-        return any(
+        if any(
             re.search(pattern, controlled_origin, re.IGNORECASE)
             for pattern in obligation.origin_patterns
+        ):
+            return True
+        if controlled_origin and any(
+            re.search(pattern, controlled_origin, re.IGNORECASE)
+            for pattern in obligation.question_patterns
+        ):
+            return True
+        if controlled_origin and obligation.culture_pack_ids:
+            controlled_regions = {
+                region
+                for region, pattern in CANONICAL_ORIGIN_REGIONS
+                if pattern.search(controlled_origin)
+            }
+            if controlled_regions.intersection(obligation.culture_pack_ids):
+                return True
+        return bool(
+            not controlled_origin
+            and len(obj.culture_pack_ids) == 1
+            and obj.culture_pack_ids[0] in obligation.culture_pack_ids
         )
 
+    def _ensure_final_cultural_coverage(
+        self,
+        agenda: AgendaInput,
+        selected: list[MuseumObject],
+        pool: list[SearchResult],
+        *,
+        allow_repair: bool,
+    ) -> list[MuseumObject]:
+        """Keep audited comparison legs in the actual room, not only its pool."""
+
+        obligations = self._cultural_coverage_obligations(agenda.question)
+        if not obligations:
+            if not _requests_cross_cultural(agenda.question):
+                return selected
+            origins = {
+                value
+                for obj in selected
+                if (value := self._canonical_object_origin(obj))
+            }
+            if len(origins) >= 3:
+                return selected
+            raise CollectionDataError(
+                "CROSS_CULTURAL_SELECTION_INSUFFICIENT",
+                "The final room retained fewer than three audited cultural regions.",
+                selectedRegionCount=len(origins),
+                requiredRegionCount=3,
+            )
+
+        working = list(selected)
+
+        def covered(objects: list[MuseumObject]) -> set[int]:
+            return {
+                index
+                for index, obligation in enumerate(obligations)
+                if any(
+                    self._object_satisfies_cultural_obligation(obj, obligation)
+                    for obj in objects
+                )
+            }
+
+        if allow_repair:
+            chosen_ids = {obj.id for obj in working}
+            for result in pool:
+                before = covered(working)
+                if len(before) == len(obligations):
+                    break
+                candidate = result.obj
+                candidate_legs = {
+                    index
+                    for index, obligation in enumerate(obligations)
+                    if self._object_satisfies_cultural_obligation(
+                        candidate,
+                        obligation,
+                    )
+                }
+                if candidate.id in chosen_ids or not (candidate_legs - before):
+                    continue
+                full_count = sum(
+                    obj.evidence_depth == EvidenceDepth.FULL.value for obj in working
+                )
+                victim_index = next(
+                    (
+                        index
+                        for index in range(len(working) - 1, -1, -1)
+                        if (
+                            working[index].evidence_depth
+                            != EvidenceDepth.FULL.value
+                            or candidate.evidence_depth == EvidenceDepth.FULL.value
+                            or full_count > 1
+                        )
+                        and len(
+                            covered(
+                                [
+                                    candidate if offset == index else obj
+                                    for offset, obj in enumerate(working)
+                                ]
+                            )
+                        )
+                        > len(before)
+                    ),
+                    None,
+                )
+                if victim_index is None:
+                    continue
+                chosen_ids.remove(working[victim_index].id)
+                working[victim_index] = self._prioritized_object(result)
+                chosen_ids.add(candidate.id)
+
+        final_covered = covered(working)
+        if len(final_covered) != len(obligations):
+            missing = "、".join(
+                obligation.label_zh
+                for index, obligation in enumerate(obligations)
+                if index not in final_covered
+            )
+            raise CollectionDataError(
+                "CROSS_CULTURAL_SELECTION_INSUFFICIENT",
+                "The final room did not retain every explicitly requested cultural leg.",
+                missingCulturalLegs=missing,
+            )
+        return working
+
+    @staticmethod
+    def _canonical_object_origin(obj: MuseumObject) -> str:
+        """Return one normalized catalogue-backed culture region per object."""
+
+        controlled_origin = next(
+            (
+                value
+                for value in (obj.culture, obj.culture_display, obj.place)
+                if value and value.strip()
+            ),
+            "",
+        )
+        if controlled_origin:
+            compact = re.sub(r"\s+", " ", controlled_origin).strip()
+            for region, pattern in CANONICAL_ORIGIN_REGIONS:
+                if pattern.search(compact):
+                    return region
+        pack_roots = {
+            pack.strip().casefold()
+            for pack in obj.culture_pack_ids
+            if pack.strip().casefold() in CANONICAL_ORIGIN_PACKS
+        }
+        if len(pack_roots) == 1:
+            return next(iter(pack_roots))
+        # Unknown catalogue strings are not cultural regions. A date, street,
+        # city, workshop or period label may occupy a source's culture/place
+        # field; returning that raw value falsely turns five records from one
+        # country into five "regions". Unknowns therefore remain uncounted
+        # until a controlled region pattern or one unambiguous culture pack is
+        # available.
+        return ""
+
     async def generate(self, agenda: AgendaInput) -> Exhibition:
-        check = self.check_agenda(agenda)
-        if not check.can_generate:
+        collection = self.collections.get(agenda.collection_id)
+        retrieval_deadline = perf_counter() + float(
+            self.settings.rag_retrieval_timeout_seconds
+        )
+        initial_results = await self._search_async(
+            agenda,
+            collection,
+            deadline=retrieval_deadline,
+        )
+        hard_boundary = self._hard_generation_boundary(
+            agenda,
+            collection,
+            initial_results,
+        )
+        if hard_boundary is not None:
             raise CollectionDataError(
                 "QUESTION_UNSUPPORTED",
                 "The current collection cannot support a five-object evidence chain for this question.",
-                status=check.status,
-                coverageGaps=check.coverage_gaps,
-                recommendedQuestions=check.recommended_questions,
+                status=hard_boundary.status,
+                coverageGaps=[hard_boundary.gap],
+                recommendedQuestions=self.collections.recommend_questions(collection),
             )
-        context = self._context(agenda)
+        retrieval_outcome = await self._agentic_retrieve(
+            agenda,
+            collection,
+            initial_results,
+            required_count=5,
+            deadline=retrieval_deadline,
+        )
+        if retrieval_outcome.failure_code:
+            raise CollectionDataError(
+                retrieval_outcome.failure_code,
+                "The semantic relevance audit did not complete successfully.",
+                coverageGap=retrieval_outcome.coverage_gap,
+            )
+        if retrieval_outcome.answerability is not None and (
+            len(retrieval_outcome.results) < 5
+            or retrieval_outcome.answerability
+            == AnswerabilityStatus.UNSUPPORTED.value
+        ):
+            raise CollectionDataError(
+                "QUESTION_UNSUPPORTED_AFTER_AUDIT",
+                "The relevance audit could not verify five collection objects for this question.",
+                availableObjectCount=len(retrieval_outcome.results),
+                answerability=retrieval_outcome.answerability,
+                coverageGap=retrieval_outcome.coverage_gap or None,
+                expandedQueries=list(retrieval_outcome.expanded_queries),
+            )
+        if len(retrieval_outcome.results) < 5:
+            raise CollectionDataError(
+                (
+                    "QUESTION_UNSUPPORTED_AFTER_AUDIT"
+                    if retrieval_outcome.audit_applied
+                    else "QUESTION_UNSUPPORTED"
+                ),
+                "The retrieval gate could not verify five collection objects for this question.",
+                availableObjectCount=len(retrieval_outcome.results),
+                coverageGap=retrieval_outcome.coverage_gap or None,
+                expandedQueries=list(retrieval_outcome.expanded_queries),
+            )
+        context = self._context(agenda, all_results=retrieval_outcome.results)
+        if (
+            retrieval_outcome.answerability
+            == AnswerabilityStatus.PARTIALLY_SUPPORTED.value
+        ):
+            partial_boundary = retrieval_outcome.coverage_gap or (
+                "馆藏记录只能支持问题中的具体对象案例；本展不把这些案例扩大为普遍结论。"
+            )
+            context = replace(
+                context,
+                question_card_limits=list(
+                    dict.fromkeys(
+                        [*context.question_card_limits, partial_boundary]
+                    )
+                ),
+            )
+        final_selected = self._ensure_final_cultural_coverage(
+            agenda,
+            context.selected,
+            context.results,
+            allow_repair=not bool(retrieval_outcome.forced_object_ids),
+        )
+        final_ids = {obj.id for obj in final_selected}
+        context = replace(
+            context,
+            selected=final_selected,
+            remaining_results=[
+                result
+                for result in context.results
+                if result.obj.id not in final_ids
+            ],
+        )
         exhibition = self._deterministic_exhibition(agenda, context)
+        if (
+            retrieval_outcome.coverage_gap
+            and retrieval_outcome.coverage_gap not in exhibition.coverage_limits
+        ):
+            exhibition.coverage_limits.append(retrieval_outcome.coverage_gap)
         if self.provider.configured:
             try:
                 model_output = await self.provider.generate_json(
@@ -541,7 +2473,44 @@ class ExhibitionGenerator:
                 await emit(key, finding)
 
         agenda = profile.to_agenda(collection_id)
+        preference_browse = _is_affective_browse_profile(profile, agenda.question)
+        retrieval_agenda = (
+            agenda.model_copy(
+                update={
+                    "question": (
+                        "surprise me"
+                        if profile.language == "en"
+                        else "随便带我逛逛"
+                    )
+                }
+            )
+            if preference_browse
+            else agenda
+        )
         collection = self.collections.get(collection_id)
+        retrieval_deadline = perf_counter() + float(
+            self.settings.rag_retrieval_timeout_seconds
+        )
+        initial_results = await self._search_async(
+            retrieval_agenda,
+            collection,
+            deadline=retrieval_deadline,
+        )
+        # Only non-recoverable boundaries fail before the model. Sparse recall
+        # and missing cultural legs continue into agentic query expansion.
+        hard_boundary = self._hard_generation_boundary(
+            retrieval_agenda,
+            collection,
+            initial_results,
+        )
+        if hard_boundary is not None:
+            raise CollectionDataError(
+                "QUESTION_UNSUPPORTED",
+                "The current collection cannot support the requested evidence chain.",
+                status=hard_boundary.status,
+                coverageGaps=[hard_boundary.gap],
+                recommendedQuestions=self.collections.recommend_questions(collection),
+            )
         # Every finding below is on screen for the whole generation, so it is
         # written in the language the visit was curated in.
         en = profile.language == "en"
@@ -559,24 +2528,86 @@ class ExhibitionGenerator:
         )
 
         # -- retrieval ---------------------------------------------------
-        all_results = self.collections.search(agenda, collection)
+        retrieval_outcome = await self._agentic_retrieve(
+            retrieval_agenda,
+            collection,
+            initial_results,
+            required_count=profile.item_count,
+            deadline=retrieval_deadline,
+        )
+        if retrieval_outcome.failure_code:
+            raise CollectionDataError(
+                retrieval_outcome.failure_code,
+                "The semantic relevance audit did not complete successfully.",
+                coverageGap=retrieval_outcome.coverage_gap,
+            )
+        all_results = retrieval_outcome.results
         domain_id = profile.curiosity_domain_id
         pool = self._filter_evidence_domain(all_results, domain_id)
         # A narrow free-text question can starve the pool; widen before failing.
         if len(pool) < profile.item_count:
             pool = self._filter_evidence_domain(all_results, None)
-        if len(pool) < profile.item_count:
+        if retrieval_outcome.answerability is not None and (
+            retrieval_outcome.answerability
+            == AnswerabilityStatus.UNSUPPORTED.value
+        ):
             raise CollectionDataError(
-                "COLLECTION_DATA_INSUFFICIENT",
-                "Not enough eligible objects remain after exclusions to fill this exhibition.",
+                "QUESTION_UNSUPPORTED_AFTER_AUDIT",
+                "The retrieval gate found topical objects but insufficient evidence for the question's requested claim.",
                 requestedItemCount=profile.item_count,
                 availableObjectCount=len(pool),
+                answerability=retrieval_outcome.answerability,
+                coverageGap=retrieval_outcome.coverage_gap or None,
+                expandedQueries=list(retrieval_outcome.expanded_queries),
+            )
+        if len(pool) < profile.item_count:
+            raise CollectionDataError(
+                (
+                    "QUESTION_UNSUPPORTED_AFTER_AUDIT"
+                    if retrieval_outcome.audit_applied
+                    else "COLLECTION_DATA_INSUFFICIENT"
+                ),
+                (
+                    "The relevance audit could not verify enough collection objects for this question."
+                    if retrieval_outcome.audit_applied
+                    else "Not enough eligible objects remain after exclusions to fill this exhibition."
+                ),
+                requestedItemCount=profile.item_count,
+                availableObjectCount=len(pool),
+                coverageGap=retrieval_outcome.coverage_gap or None,
+                expandedQueries=list(retrieval_outcome.expanded_queries),
             )
 
-        objects = curation.order_for_narrative(
+        if retrieval_outcome.forced_object_ids:
+            pool_by_id = {result.obj.id: result for result in pool}
+            forced_results = [
+                pool_by_id[object_id]
+                for object_id in retrieval_outcome.forced_object_ids
+                if object_id in pool_by_id
+            ]
+            if len(forced_results) != profile.item_count:
+                raise CollectionDataError(
+                    "QUESTION_CARD_INCOMPLETE",
+                    "The reviewed question-card spine is not available in the current filtered pool.",
+                    requiredObjectIds=list(retrieval_outcome.forced_object_ids),
+                    availableObjectIds=[result.obj.id for result in forced_results],
+                )
+            objects = [
+                self._prioritized_object(result) for result in forced_results
+            ]
+        else:
+            objects = curation.order_for_narrative(
+                pool,
+                profile.item_count,
+                prefer_culture_diversity=_requests_cross_cultural(
+                    retrieval_agenda.question
+                ),
+            )
+        objects = self._ensure_final_cultural_coverage(
+            retrieval_agenda,
+            objects,
             pool,
-            profile.item_count,
-            prefer_culture_diversity=_requests_cross_cultural(agenda.question),
+            allow_repair=not bool(retrieval_outcome.forced_object_ids),
         )
         full_depth = sum(
             1 for obj in objects if obj.evidence_depth == EvidenceDepth.FULL.value
@@ -585,23 +2616,65 @@ class ExhibitionGenerator:
             "these objects" if profile.language == "en" else "这批藏品"
         )
         eligible = len(self.collections.eligible_objects(collection))
-        await step(
-            "retrieve",
-            (
+        if retrieval_outcome.audit_applied:
+            audit_detail = (
+                f" Semantic audit retained {len(all_results)} directly relevant objects"
+                if en
+                else f"；语义审查保留 {len(all_results)} 件直接相关藏品"
+            )
+            if retrieval_outcome.expanded_queries:
+                audit_detail += (
+                    f" after {len(retrieval_outcome.expanded_queries)} bounded query expansions."
+                    if en
+                    else f"，并执行 {len(retrieval_outcome.expanded_queries)} 条受限扩展检索。"
+                )
+            elif en:
+                audit_detail += "."
+            else:
+                audit_detail += "。"
+        else:
+            audit_detail = ""
+        if preference_browse:
+            retrieval_finding = (
+                f"From {eligible} eligible objects, {len(objects)} were selected "
+                "as an exploratory, unhurried route. This is a preference, not "
+                "evidence that an object has a therapeutic effect."
+                if en
+                else f"从 {eligible} 件可用藏品中选定 {len(objects)} 件，"
+                "编成一条可慢慢看的探索路线；这是对当下偏好的回应，"
+                "不声称藏品具有疗愈或放松效果。"
+            )
+        else:
+            retrieval_finding = (
                 f"From {eligible} eligible objects, {len(pool)} relate to "
                 f"“{topic}”; {len(objects)} selected, {full_depth} of them with "
-                "an institution-written description."
+                f"an institution-written description.{audit_detail}"
                 if en
                 else f"从 {eligible} 件可用藏品中筛出 "
                 f"{len(pool)} 件与「{topic}」相关，选定 {len(objects)} 件，"
-                f"其中 {full_depth} 件带机构撰写的说明。"
-            ),
-        )
+                f"其中 {full_depth} 件带机构撰写的说明{audit_detail}"
+            )
+        await step("retrieve", retrieval_finding)
 
         # -- deterministic skeleton --------------------------------------
         exhibition = self._profile_skeleton(
             profile, agenda, collection, objects, domain_id, pool
         )
+        if (
+            retrieval_outcome.coverage_gap
+            and retrieval_outcome.coverage_gap not in exhibition.coverage_limits
+        ):
+            exhibition.coverage_limits.append(retrieval_outcome.coverage_gap)
+        if preference_browse:
+            preference_limit = (
+                "This exploratory route responds to the visitor's desired pace; "
+                "it does not claim a therapeutic or universal emotional effect."
+                if en
+                else "这条探索路线回应的是参观者当下想放慢节奏的偏好；"
+                "不声称任何藏品具有疗愈性或普遍情绪效果。"
+            )
+            if preference_limit not in exhibition.coverage_limits:
+                exhibition.coverage_limits.append(preference_limit)
 
         # -- model pass ---------------------------------------------------
         # Two calls, not one. The frame is small and returns quickly, so the
@@ -632,6 +2705,7 @@ class ExhibitionGenerator:
                         exhibition.items,
                         exhibition.chapters,
                         exhibition.curatorial_brief,
+                        evidence_boundaries=exhibition.coverage_limits,
                     ),
                     stage="frame",
                     timeout_seconds=min(
@@ -641,7 +2715,19 @@ class ExhibitionGenerator:
                 )
                 if not isinstance(frame.get("curatorialBrief"), dict):
                     raise ValueError("frame output missing required curatorialBrief")
-                exhibition = curation.apply_frame(exhibition, frame)
+                framed_exhibition = curation.apply_frame(exhibition, frame)
+                frame_validation = validate_exhibition(framed_exhibition)
+                blocking_copy_codes = {
+                    issue.code
+                    for issue in frame_validation.errors
+                    if issue.code == "PUBLIC_COPY_ITEM_COUNT_MISMATCH"
+                }
+                if blocking_copy_codes:
+                    raise ValueError(
+                        "frame output states an item count that disagrees with "
+                        "the selected exhibition structure"
+                    )
+                exhibition = framed_exhibition
                 exhibition.versions.provider = "deepseek"
                 model_applied = True
             except (ProviderError, ValueError, TypeError, KeyError) as error:
@@ -829,6 +2915,10 @@ class ExhibitionGenerator:
                         else ([] if visual_provider else None)
                     ),
                 )
+                # Tombstone translations have a separate, field-level safety
+                # contract and remain useful even if a visual sentence fails
+                # the stricter evidence validator below.
+                curation.apply_localized_metadata([item], output)
                 return curation.apply_labels(
                     [item],
                     output,
@@ -893,7 +2983,11 @@ class ExhibitionGenerator:
                     ),
                     relation=self._relation(index, role_label),
                     label_sentences=curation.label_sentences(
-                        exhibition_obj, item_id, role_label, profile.label_max_chars
+                        exhibition_obj,
+                        item_id,
+                        role_label,
+                        profile.label_max_chars,
+                        profile.language,
                     ),
                     alternatives=rotated[:3],
                     order=index,
@@ -1031,16 +3125,57 @@ class ExhibitionGenerator:
 
     async def refocus(self, exhibition: Exhibition, focus: str) -> Exhibition:
         candidate_agenda = exhibition.agenda.model_copy(update={"question": focus.strip()})
-        check = self.check_agenda(candidate_agenda)
-        if not check.can_generate:
+        collection = self.collections.get(candidate_agenda.collection_id)
+        retrieval_deadline = perf_counter() + float(
+            self.settings.rag_retrieval_timeout_seconds
+        )
+        initial_results = await self._search_async(
+            candidate_agenda,
+            collection,
+            deadline=retrieval_deadline,
+        )
+        hard_boundary = self._hard_generation_boundary(
+            candidate_agenda,
+            collection,
+            initial_results,
+        )
+        if hard_boundary is not None:
             raise CollectionDataError(
                 "QUESTION_UNSUPPORTED",
                 "The revised focus cannot be supported by five objects in this collection.",
-                status=check.status,
-                coverageGaps=check.coverage_gaps,
-                recommendedQuestions=check.recommended_questions,
+                status=hard_boundary.status,
+                coverageGaps=[hard_boundary.gap],
+                recommendedQuestions=self.collections.recommend_questions(collection),
             )
-        revised_context = self._context(candidate_agenda)
+        retrieval_outcome = await self._agentic_retrieve(
+            candidate_agenda,
+            collection,
+            initial_results,
+            required_count=len(exhibition.items),
+            deadline=retrieval_deadline,
+        )
+        if retrieval_outcome.failure_code:
+            raise CollectionDataError(
+                retrieval_outcome.failure_code,
+                "The revised focus could not complete semantic evidence audit.",
+                coverageGap=retrieval_outcome.coverage_gap,
+            )
+        if (
+            retrieval_outcome.answerability is not None
+            and retrieval_outcome.answerability
+            != AnswerabilityStatus.SUPPORTED.value
+        ) or len(retrieval_outcome.results) < len(exhibition.items):
+            raise CollectionDataError(
+                "QUESTION_UNSUPPORTED_AFTER_AUDIT",
+                "The revised focus did not retain enough audited object evidence.",
+                answerability=retrieval_outcome.answerability,
+                availableObjectCount=len(retrieval_outcome.results),
+                coverageGap=retrieval_outcome.coverage_gap or None,
+            )
+        revised_context = self._context(
+            candidate_agenda,
+            all_results=retrieval_outcome.results,
+        )
         if (
             exhibition.evidence_domain_id
             and revised_context.evidence_domain_id
@@ -1053,7 +3188,23 @@ class ExhibitionGenerator:
                 requestedEvidenceDomain=revised_context.evidence_domain_id,
             )
 
-        selected_ids = {item.object.id for item in exhibition.items}
+        selected_in_order = tuple(item.object.id for item in exhibition.items)
+        selected_ids = set(selected_in_order)
+        # A reviewed question card freezes a five-role evidence spine, not just
+        # an unordered bag of objects. Refocus does not silently reorder the
+        # current visit, so both membership and order must already match.
+        if (
+            retrieval_outcome.forced_object_ids
+            and selected_in_order != retrieval_outcome.forced_object_ids
+        ):
+            raise CollectionDataError(
+                "FOCUS_REQUIRES_NEW_EXHIBITION",
+                "The revised focus is a reviewed question card whose required evidence spine differs from the current objects.",
+                currentSelectedObjectIds=sorted(selected_ids),
+                requiredStarterObjectIds=sorted(
+                    retrieval_outcome.forced_object_ids
+                ),
+            )
         revised_result_ids = {result.obj.id for result in revised_context.results}
         unsupported_selected_ids = sorted(selected_ids - revised_result_ids)
         if unsupported_selected_ids:
@@ -1077,7 +3228,13 @@ class ExhibitionGenerator:
             item.sub_question = exhibition.sub_questions[index % len(exhibition.sub_questions)]
             item.why_selected = self._why_selected(item.role_label, item.sub_question)
             item.relation = self._relation(index, item.role_label)
-            item.label_sentences = self._label_sentences(item.object, item.id, item.role_label, item.sub_question)
+            item.label_sentences = self._label_sentences(
+                item.object,
+                item.id,
+                item.role_label,
+                item.sub_question,
+                exhibition.agenda.language,
+            )
         self._refresh_curatorial_brief(exhibition, revised_context.results)
         exhibition.revisions.append(
             Revision(
@@ -1135,8 +3292,14 @@ class ExhibitionGenerator:
         previous_alternatives = list(target.alternatives)
         before = {"itemId": target.id, "objectId": previous_object.id}
         target.object = replacement
+        target.display_title = curation.display_title(replacement)
+        target.localized_metadata = LocalizedObjectMetadata()
         target.label_sentences = self._label_sentences(
-            replacement, target.id, target.role_label, target.sub_question
+            replacement,
+            target.id,
+            target.role_label,
+            target.sub_question,
+            exhibition.agenda.language,
         )
         target.why_selected = self._why_selected(target.role_label, target.sub_question)
         used_ids = {item.object.id for item in exhibition.items}
@@ -1232,15 +3395,39 @@ class ExhibitionGenerator:
         self._reset_after_edit(exhibition)
         return exhibition
 
-    def _context(self, agenda: AgendaInput) -> GenerationContext:
+    def _context(
+        self,
+        agenda: AgendaInput,
+        *,
+        all_results: list[SearchResult] | None = None,
+    ) -> GenerationContext:
         collection = self.collections.get(agenda.collection_id)
-        all_results = self.collections.search(agenda, collection)
+        results_were_supplied = all_results is not None
+        if all_results is None:
+            all_results = self.collections.search(agenda, collection)
         eligible_by_id = {
             obj.id: obj for obj in self.collections.require_generation_ready(collection)
         }
         policy_match = self.collections.match_question_policy(collection, agenda.question)
-        policy = policy_match[0] if policy_match else None
-        direct_results = self._direct_results(all_results)
+        # Only the exact reviewed question may force starter objects or a
+        # frozen evidence domain. A fuzzy match can help retrieval upstream,
+        # but substituting its starters here would bypass the LLM-audited
+        # candidate set for the visitor's materially different question.
+        policy = (
+            policy_match[0]
+            if policy_match is not None and policy_match[1] == 1.0
+            else None
+        )
+        # Runtime retrieval already applied the source-ID-bound evidence audit.
+        # A relative BM25 threshold must not discard those accepted objects a
+        # second time merely because tokenization or query fusion changed their
+        # numeric score. Only an internally fetched, unaudited pool needs the
+        # legacy direct-score heuristic.
+        direct_results = (
+            list(all_results)
+            if results_were_supplied
+            else self._direct_results(all_results)
+        )
         evidence_domain_id = policy.evidence_domain_id if policy else None
         if policy and policy.starter_object_ids:
             starter_objects = [
@@ -1341,17 +3528,40 @@ class ExhibitionGenerator:
         seen_culture_packs: set[str] = set()
         seen_culture_roots: set[str] = set()
         seen_institutions: set[str] = set()
+        selected_title_families: dict[str, int] = {}
+        title_family_cache: dict[str, str] = {}
         strongest = max((result.score for result in remaining), default=1.0)
         available_culture_packs = {
             pack for result in remaining for pack in result.obj.culture_pack_ids
         }
 
         def culture_root(obj: MuseumObject) -> str:
-            # Importers use both ASCII and full-width punctuation.  The first
-            # catalogue segment is the broad culture/place label; dynasties and
-            # periods after it should not turn “Egypt” into two cultures.
-            root = re.split(r"[,;\uFF0C\uFF1B]", obj.culture or "", maxsplit=1)[0]
-            return re.sub(r"\s+", " ", root).strip().casefold()
+            # Use the same canonical regions as the evidence audit gate. Raw
+            # labels such as China/Japan/Korea are cultures, but for the
+            # product's “cross-cultural” minimum they are one East Asia region.
+            return ExhibitionGenerator._canonical_object_origin(obj)
+
+        def title_family(obj: MuseumObject) -> str:
+            """Collapse trivial article/plural variants for selection only."""
+
+            if obj.id in title_family_cache:
+                return title_family_cache[obj.id]
+            value = unicodedata.normalize(
+                "NFKC", (obj.title or obj.title_original or "")
+            ).casefold()
+            english: list[str] = []
+            for token in re.findall(r"[a-z0-9]+", value):
+                if token in {"a", "an", "the", "of", "in", "on", "from"}:
+                    continue
+                if token.endswith("ies") and len(token) > 4:
+                    token = token[:-3] + "y"
+                elif token.endswith("s") and len(token) > 3 and not token.endswith("ss"):
+                    token = token[:-1]
+                english.append(token)
+            chinese = "".join(re.findall(r"[\u3400-\u9fff]+", value))
+            family = "|".join(filter(None, (" ".join(english), chinese)))
+            title_family_cache[obj.id] = family
+            return family
 
         available_culture_roots = {
             root
@@ -1399,6 +3609,20 @@ class ExhibitionGenerator:
                         if set(result.obj.culture_pack_ids) - seen_culture_packs
                     ]
                     candidates = unseen_pack or unseen
+
+            # Relevance can legitimately produce several variants from one
+            # series, but a five-object room should not become four near-
+            # identical catalogue titles when other audited evidence exists.
+            # Cap a normalized title family at two until no alternative remains;
+            # later cultural-leg repair may still override this soft selector.
+            non_repeating = [
+                result
+                for result in candidates
+                if selected_title_families.get(title_family(result.obj), 0) < 2
+                or not title_family(result.obj)
+            ]
+            if non_repeating:
+                candidates = non_repeating
 
             def selection_score(result: SearchResult) -> tuple[float, str]:
                 if prefer_culture_diversity:
@@ -1462,6 +3686,10 @@ class ExhibitionGenerator:
                 seen_culture_roots.add(root)
             if best.obj.institution_id:
                 seen_institutions.add(best.obj.institution_id)
+            if family := title_family(best.obj):
+                selected_title_families[family] = (
+                    selected_title_families.get(family, 0) + 1
+                )
             remaining.remove(best)
         if len(selected) < count:
             raise CollectionDataError(
@@ -1500,7 +3728,13 @@ class ExhibitionGenerator:
                     sub_question=sub_question,
                     why_selected=self._why_selected(role_label, sub_question),
                     relation=self._relation(index, role_label),
-                    label_sentences=self._label_sentences(obj, item_id, role_label, sub_question),
+                    label_sentences=self._label_sentences(
+                        obj,
+                        item_id,
+                        role_label,
+                        sub_question,
+                        agenda.language,
+                    ),
                     alternatives=role_alternatives,
                     order=index,
                 )
@@ -1575,10 +3809,14 @@ class ExhibitionGenerator:
 
     @staticmethod
     def _label_sentences(
-        obj: MuseumObject, item_id: str, role_label: str, sub_question: str
+        obj: MuseumObject,
+        item_id: str,
+        role_label: str,
+        sub_question: str,
+        language: str = "zh",
     ) -> list[LabelSentence]:
         del sub_question
-        return curation.label_sentences(obj, item_id, role_label, 140)
+        return curation.label_sentences(obj, item_id, role_label, 140, language)
 
     @staticmethod
     def _system_prompt() -> str:
@@ -1589,6 +3827,7 @@ class ExhibitionGenerator:
             "items 必须严格使用给定的五个 objectId 与 role；每个 labelSentence 必须包含 text, type, evidenceIds，"
             "且 evidenceIds 只能来自同一对象。不要生成或改写 institution_fact；馆方事实句由系统保留原文。"
             "你只能补充明确标为 system_inference 或 uncertain 的关系文本。"
+            "输入 evidenceBoundaries 若非空，标题、论点与展签都不得越过这些边界。"
         )
 
     @staticmethod
@@ -1597,6 +3836,7 @@ class ExhibitionGenerator:
             "agenda": agenda.model_dump(mode="json", by_alias=True),
             "requiredRoles": [role.value for role in ROLE_ORDER],
             "objects": [obj.model_dump(mode="json", by_alias=True) for obj in context.selected],
+            "evidenceBoundaries": list(context.question_card_limits),
         }
 
     @staticmethod

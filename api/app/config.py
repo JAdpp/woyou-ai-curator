@@ -40,6 +40,18 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw in (None, ""):
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 def _bounded_float_env(name: str, default: float, minimum: float, maximum: float) -> float:
     raw = os.getenv(name)
     if raw in (None, ""):
@@ -75,6 +87,17 @@ class Settings:
     rag_evidence_min_score: float = 0.30
     rag_rrf_k: int = 60
     rag_max_results: int = 250
+    # A bounded model pass audits semantic candidates before object selection.
+    # If fewer than the requested number survive, it may issue at most three
+    # intent-preserving catalogue queries and audit the fused candidates once.
+    rag_llm_audit_enabled: bool = True
+    rag_llm_audit_top_k: int = 18
+    # One wall-clock budget shared by initial hybrid recall, model relevance
+    # audit, batched query expansion and the final audit.  A shared deadline
+    # prevents each stage from silently receiving a fresh timeout.
+    rag_retrieval_timeout_seconds: float = 40.0
+    rag_llm_audit_timeout_seconds: float = 22.0
+    rag_agentic_max_queries: int = 5
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-v4-flash"
     # The public wall-label pass is visual.  Keeping its model separate means
@@ -94,7 +117,7 @@ class Settings:
     # Poster generation starts after the final title is known.  It may use this
     # short grace period after text is ready, then continues in the background
     # instead of preventing an otherwise valid exhibition from opening.
-    generation_poster_wait_seconds: float = 20.0
+    generation_poster_wait_seconds: float = 2.0
     aliyun_image_api_key: str | None = None
     aliyun_image_api_host: str | None = None
     aliyun_image_model: str = "qwen-image-3.0-pro"
@@ -133,7 +156,7 @@ class Settings:
         ).strip()
         if rag_embedding_model != DEFAULT_EMBEDDING_MODEL:
             raise ValueError(
-                "RAG_EMBEDDING_MODEL is pinned for hybrid-rag-v1; rebuild and "
+                "RAG_EMBEDDING_MODEL is pinned for hybrid-rag-v2; rebuild and "
                 "version the retrieval policy before changing models"
             )
 
@@ -149,17 +172,27 @@ class Settings:
         deepseek_labels_timeout_seconds = _bounded_float_env(
             "DEEPSEEK_LABELS_TIMEOUT_SECONDS", 45.0, 1.0, 180.0
         )
+        rag_llm_audit_enabled = _bool_env("RAG_LLM_AUDIT_ENABLED", True)
+        rag_llm_audit_timeout_seconds = _bounded_float_env(
+            "RAG_LLM_AUDIT_TIMEOUT_SECONDS", 22.0, 2.0, 60.0
+        )
+        rag_retrieval_timeout_seconds = _bounded_float_env(
+            "RAG_RETRIEVAL_TIMEOUT_SECONDS", 40.0, 5.0, 120.0
+        )
         generation_job_timeout_seconds = _bounded_float_env(
             "GENERATION_JOB_TIMEOUT_SECONDS", 180.0, 30.0, 600.0
         )
         generation_poster_wait_seconds = _bounded_float_env(
-            "GENERATION_POSTER_WAIT_SECONDS", 20.0, 0.0, 120.0
+            "GENERATION_POSTER_WAIT_SECONDS", 2.0, 0.0, 120.0
         )
         # Keep a deterministic reserve for retrieval, validation and store
         # writes. Labels run concurrently, so only one label budget is counted.
         generation_budget = (
             min(deepseek_timeout_seconds, deepseek_frame_timeout_seconds)
             + min(deepseek_timeout_seconds, deepseek_labels_timeout_seconds)
+            # Initial local retrieval runs even when the optional model audit
+            # is disabled, so its wall-clock ceiling always belongs here.
+            + rag_retrieval_timeout_seconds
             + generation_poster_wait_seconds
             + 10.0
         )
@@ -200,6 +233,13 @@ class Settings:
             ),
             rag_rrf_k=_positive_int_env("RAG_RRF_K", 60),
             rag_max_results=_positive_int_env("RAG_MAX_RESULTS", 250),
+            rag_llm_audit_enabled=rag_llm_audit_enabled,
+            rag_llm_audit_top_k=_positive_int_env("RAG_LLM_AUDIT_TOP_K", 18),
+            rag_retrieval_timeout_seconds=rag_retrieval_timeout_seconds,
+            rag_llm_audit_timeout_seconds=rag_llm_audit_timeout_seconds,
+            rag_agentic_max_queries=_positive_int_env(
+                "RAG_AGENTIC_MAX_QUERIES", 5
+            ),
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
             deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
             deepseek_labels_model=os.getenv(

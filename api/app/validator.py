@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import re
+import unicodedata
 
 from .models import (
     CuratorialRole,
@@ -23,6 +24,225 @@ MAX_ITEMS = 12
 MIN_EVIDENCE_CHUNKS_FULL = 3
 MIN_EVIDENCE_CHUNKS_THIN = 2
 COLLECTION_IMAGE_SOURCE_KIND = "collection_image"
+
+# Public copy occasionally invents a four-object exhibition after the selected
+# list has already been fixed at five.  Only explicit ``number + 件`` phrases
+# are treated as counts; other numerals (dates, chapter numbers, "three ways")
+# remain ordinary prose.
+_ITEM_COUNT_MENTION = re.compile(
+    r"(?P<count>[0-9]{1,3}|[零〇一二两兩三四五六七八九十百]{1,6})\s*件(?!件|事)"
+)
+_NON_TOTAL_COUNT_PREFIX = re.compile(
+    r"(?:第|每|其中|另有|至少|至多|最多|超过|多于|少于|不足|约|近|逾)\s*$"
+)
+_TOTAL_COUNT_CONTEXT = re.compile(
+    r"(?:共|总计|合计|本章|这一章|全章|本展|展览|陈列|展出|选取|选择|汇集|呈现|组成|构成|串联|并置)"
+)
+
+# Four highly repetitive objects are enough to collapse a five-object argument
+# into a near-duplicate grid.  Validation blocks release rather than swapping
+# objects here, so it cannot silently discard a required cultural leg or an
+# evidence-qualified core object.
+MAX_REPEATED_TITLE_OR_SERIES = 3
+_EXPLICIT_SERIES_PATTERNS = (
+    re.compile(
+        r"\b(?:from|part\s+of)\s+(?:the\s+)?(?:series|set)\s*[:\-–—]?\s*"
+        r"[\"'“‘]?(?P<name>[^\"'”’\[\](),;]{2,100})",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:series|set)\s*[:：]\s*(?P<name>[^\[\](),;]{2,100})",
+        re.IGNORECASE,
+    ),
+    re.compile(r"[《“](?P<name>[^》”]{2,80})[》”]\s*(?:系列|组|套)"),
+)
+_EXPLICIT_PART_PATTERNS = (
+    re.compile(
+        r"^(?P<base>.+?)[\s,;:\-–—]+"
+        r"(?:no\.?|number|plate|panel|part|sheet|leaf)\s*"
+        r"(?:[0-9]+|[ivxlcdm]+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?P<base>.+?)第[0-9零〇一二两兩三四五六七八九十百]+"
+        r"(?:幅|件|张|页|卷|号)$"
+    ),
+)
+
+
+def _parse_chinese_count(value: str) -> int | None:
+    digits = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "兩": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    if not value or any(character not in digits and character not in "十百" for character in value):
+        return None
+    if not any(character in "十百" for character in value):
+        try:
+            return int("".join(str(digits[character]) for character in value))
+        except ValueError:
+            return None
+
+    total = 0
+    pending = 0
+    for character in value:
+        if character in digits:
+            pending = digits[character]
+            continue
+        unit = 10 if character == "十" else 100
+        total += (pending or 1) * unit
+        pending = 0
+    return total + pending
+
+
+def _explicit_item_counts(text: str, *, require_total_context: bool = False) -> list[int]:
+    counts: list[int] = []
+    for match in _ITEM_COUNT_MENTION.finditer(text or ""):
+        prefix = text[: match.start()]
+        if _NON_TOTAL_COUNT_PREFIX.search(prefix):
+            continue
+        suffix = text[match.end() :]
+        if require_total_context and not (
+            not prefix.strip()
+            or _TOTAL_COUNT_CONTEXT.search(prefix[-24:])
+            or _TOTAL_COUNT_CONTEXT.search(suffix[:24])
+        ):
+            continue
+        raw = match.group("count")
+        count = int(raw) if raw.isascii() and raw.isdigit() else _parse_chinese_count(raw)
+        if count is not None:
+            counts.append(count)
+    return counts
+
+
+def _validate_public_copy_item_counts(
+    exhibition: Exhibition,
+) -> tuple[bool, list[ValidationIssue]]:
+    actual = len(exhibition.items)
+    surfaces: list[tuple[str, str, set[int], bool]] = [
+        ("title", exhibition.title, {actual}, False),
+        ("subtitle", exhibition.subtitle, {actual}, False),
+    ]
+    for chapter in exhibition.chapters:
+        allowed = {actual, len(chapter.item_ids)}
+        surfaces.extend(
+            (
+                (f"chapter {chapter.order + 1} title", chapter.title, allowed, False),
+                (
+                    f"chapter {chapter.order + 1} lead-in",
+                    chapter.lead_in,
+                    allowed,
+                    True,
+                ),
+            )
+        )
+
+    errors: list[ValidationIssue] = []
+    for surface, text, allowed, require_total_context in surfaces:
+        for mentioned in _explicit_item_counts(
+            text, require_total_context=require_total_context
+        ):
+            if mentioned in allowed:
+                continue
+            expected = " or ".join(str(value) for value in sorted(allowed))
+            errors.append(
+                ValidationIssue(
+                    code="PUBLIC_COPY_ITEM_COUNT_MISMATCH",
+                    message=(
+                        f"The {surface} says {mentioned} items, but its actual "
+                        f"item count is {expected}."
+                    ),
+                )
+            )
+    return not errors, errors
+
+
+def _normalized_title_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "").casefold().strip()
+    normalized = re.sub(r"^(?:the|a|an)\s+", "", normalized)
+    return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", normalized)
+
+
+def _explicit_series_keys(title: str, creator: str) -> set[str]:
+    keys: set[str] = set()
+    for pattern in _EXPLICIT_SERIES_PATTERNS:
+        if match := pattern.search(title or ""):
+            key = _normalized_title_key(match.group("name"))
+            if key:
+                keys.add(f"named:{key}")
+    creator_key = _normalized_title_key(creator)
+    if creator_key:
+        for pattern in _EXPLICIT_PART_PATTERNS:
+            if match := pattern.match((title or "").strip()):
+                base = _normalized_title_key(match.group("base"))
+                if base:
+                    keys.add(f"parts:{creator_key}:{base}")
+    return keys
+
+
+def _validate_selection_variety(
+    exhibition: Exhibition,
+) -> tuple[bool, list[ValidationIssue]]:
+    title_groups: dict[str, set[str]] = {}
+    series_groups: dict[str, set[str]] = {}
+    for item in exhibition.items:
+        titles = (item.object.title, item.object.title_original or "")
+        for title in titles:
+            title_key = _normalized_title_key(title)
+            if title_key:
+                title_groups.setdefault(title_key, set()).add(item.id)
+            for series_key in _explicit_series_keys(
+                title, item.object.creator or item.object.maker
+            ):
+                series_groups.setdefault(series_key, set()).add(item.id)
+
+    errors: list[ValidationIssue] = []
+    repeated_titles = [
+        item_ids
+        for item_ids in title_groups.values()
+        if len(item_ids) > MAX_REPEATED_TITLE_OR_SERIES
+    ]
+    if repeated_titles:
+        largest = max(len(item_ids) for item_ids in repeated_titles)
+        errors.append(
+            ValidationIssue(
+                code="OVERCONCENTRATED_NORMALIZED_TITLE",
+                message=(
+                    f"{largest} selected objects share the same normalized "
+                    "institution title; the exhibition needs a less repetitive evidence chain."
+                ),
+            )
+        )
+
+    repeated_series = [
+        item_ids
+        for item_ids in series_groups.values()
+        if len(item_ids) > MAX_REPEATED_TITLE_OR_SERIES
+    ]
+    if repeated_series:
+        largest = max(len(item_ids) for item_ids in repeated_series)
+        errors.append(
+            ValidationIssue(
+                code="OVERCONCENTRATED_OBJECT_SERIES",
+                message=(
+                    f"{largest} selected objects are explicitly catalogued as "
+                    "parts of one series or set; the exhibition needs a less "
+                    "repetitive evidence chain."
+                ),
+            )
+        )
+    return not errors, errors
 
 
 def _normalized_source_text(value: str) -> str:
@@ -295,6 +515,11 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
             )
         )
 
+    public_copy_counts_ok, count_errors = _validate_public_copy_item_counts(
+        exhibition
+    )
+    errors.extend(count_errors)
+
     # Roles repeat in a longer exhibition; what must hold is that every role is
     # represented at least once.
     role_values = [str(item.role) for item in exhibition.items]
@@ -360,6 +585,9 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
                 message="An object cannot occupy more than one role in an exhibition.",
             )
         )
+
+    selection_variety_ok, variety_errors = _validate_selection_variety(exhibition)
+    errors.extend(variety_errors)
 
     evidence_binding_ok = True
     publication_metadata_ok = True
@@ -525,6 +753,12 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
             detail=f"当前 {item_count} 件（按浏览时长为 5／8／12 件）。",
         ),
         ValidationCheck(
+            key="public-copy-item-counts",
+            label="展览文案件数一致",
+            passed=public_copy_counts_ok,
+            detail="标题、副标题与章节文案不得声称与实际展品不一致的明确件数。",
+        ),
+        ValidationCheck(
             key="curatorial-roles",
             label="策展角色齐备",
             passed=roles_ok,
@@ -565,6 +799,12 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
             label="藏品不重复",
             passed=unique_objects_ok,
             detail="每个展位使用不同藏品。",
+        ),
+        ValidationCheck(
+            key="selection-variety",
+            label="选品避免高度重复",
+            passed=selection_variety_ok,
+            detail="不得让四件或以上同规范题名或明确同系列对象占据展览。",
         ),
         ValidationCheck(
             key="sub-questions",

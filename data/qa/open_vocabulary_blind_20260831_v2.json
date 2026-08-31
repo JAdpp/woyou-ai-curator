@@ -1,0 +1,192 @@
+{
+  "version": "20260831-v2",
+  "createdAt": "2026-08-31",
+  "status": "frozen_unrun",
+  "description": "全新开放词汇盲测题集。问题、expectedAnswerability 与理由在首次运行前同时冻结；不得根据运行结果回改标签。",
+  "blindProtocol": {
+    "existingQuestionTextReviewed": false,
+    "existingRunResultsReviewed": false,
+    "executedBeforeFreeze": false,
+    "labelPolicy": "supported 要求冻结馆藏记录可以直接支撑五件对象的证据链；partially_supported 表示馆藏可提供相关对象，但无法支撑问题中的普遍、因果、客观或方法可靠性结论；unsupported 表示所需证据类型不在当前对象记录中。"
+  },
+  "excludedPriorThemes": [
+    "猫狗",
+    "皇帝／统治者",
+    "象",
+    "亲子",
+    "漆器",
+    "贝壳",
+    "梳妆",
+    "姿态地位",
+    "朝圣纪念品",
+    "遗骸",
+    "圣像同意",
+    "象牙",
+    "量子",
+    "天象",
+    "饮酒器",
+    "游戏",
+    "风",
+    "湖泊地图",
+    "织物修复",
+    "工具磨损",
+    "机器声音",
+    "三类面具",
+    "无署名归属",
+    "疲惫偏好",
+    "来源同意",
+    "DNA 伪考古",
+    "机器人固件"
+  ],
+  "cases": [
+    {
+      "id": "v2-ordinary-forming",
+      "category": "ordinary",
+      "question": "馆藏记录如何区分陶器的轮制、模制与手塑三种成形方法？",
+      "expectedAnswerability": "supported",
+      "expectedRationale": "成形方法属于对象材料、技法和机构说明可直接记录的层面；问题只要求比较馆藏证据，不要求外部因果结论。",
+      "retrievalRoute": "open_vocabulary",
+      "minAccepted": 5,
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-ordinary-botanical",
+      "category": "ordinary",
+      "question": "馆藏记录如何描述植物纹样在绘画、陶瓷与金属对象中的材料和制作差异？",
+      "expectedAnswerability": "supported",
+      "expectedRationale": "题名、对象类型、材料、纹样主题与机构说明可以为跨媒介比较提供直接对象证据。",
+      "retrievalRoute": "open_vocabulary",
+      "minAccepted": 5,
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-ordinary-inscription",
+      "category": "ordinary",
+      "question": "馆方记录如何区分对象上的纪年文字、祝愿语与装饰性文字？",
+      "expectedAnswerability": "supported",
+      "expectedRationale": "这三类文字功能可由对象记录中的 inscription、date、题名和机构文本直接支撑，可组成多对象证据链。",
+      "retrievalRoute": "open_vocabulary",
+      "minAccepted": 5,
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-cross-storage",
+      "category": "cross_cultural",
+      "question": "不同文化中的盒、篮和箱如何通过材料与结构回应储存和携带？",
+      "expectedAnswerability": "supported",
+      "expectedRationale": "对象类型、材料、用途和结构说明可以支撑具体比较；在冻结馆藏中应有足够的跨文化容器对象构成五件证据链。",
+      "retrievalRoute": "open_vocabulary",
+      "minAccepted": 5,
+      "maxAccepted": 12,
+      "minCanonicalOrigins": 3
+    },
+    {
+      "id": "v2-cross-print-narrative",
+      "category": "cross_cultural",
+      "question": "不同文化（东亚、欧洲与美洲）的版画如何利用边框、文字和重复图像组织叙事？",
+      "expectedAnswerability": "supported",
+      "expectedRationale": "问题限定可观察的版式特征与馆藏文本，不要求证明普遍心理效果；三个明确文化腿均需在候选与最终选品中出现。",
+      "retrievalRoute": "open_vocabulary",
+      "minAccepted": 5,
+      "maxAccepted": 12,
+      "minCanonicalOrigins": 3,
+      "requiredCulturalLegs": [
+        "east_asia",
+        "europe",
+        "americas"
+      ]
+    },
+    {
+      "id": "v2-cross-entrance",
+      "category": "cross_cultural",
+      "question": "不同文化的建筑构件是否都把入口装饰理解为具有保护意义的边界？",
+      "expectedAnswerability": "partially_supported",
+      "expectedRationale": "馆藏可提供入口构件、装饰与部分功能说明，但“都”与跨文化的统一保护意义是普遍解释性结论，不能由对象数量直接证明。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12,
+      "minCanonicalOrigins": 3
+    },
+    {
+      "id": "v2-method-influence",
+      "category": "methodological",
+      "question": "仅凭题名、年代、材料与机构说明，能否判定两件对象之间存在直接的形式影响关系？",
+      "expectedAnswerability": "partially_supported",
+      "expectedRationale": "部分记录可能明言 after、inspired by 或相关关系，但仅靠时间、材料和形式相似不能普遍推导直接影响。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-method-missing-culture",
+      "category": "methodological",
+      "question": "当文化字段缺失而地点字段存在时，馆藏记录能否可靠确定对象的文化归属？",
+      "expectedAnswerability": "partially_supported",
+      "expectedRationale": "记录可以展示地点与已填文化字段的个案，但 place 不等于 culture，当前对象记录不提供可验证的统一推断方法。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-method-standards",
+      "category": "methodological",
+      "question": "这些对象记录能否证明三家机构采用同一套分类标准，并以相同规则填写所有字段？",
+      "expectedAnswerability": "unsupported",
+      "expectedRationale": "对象级 API 记录不是三家机构的编目政策、字段手册或标准映射证据，因而无法证明“同一套”与“所有字段”。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-scope-fading",
+      "category": "out_of_scope",
+      "question": "能否根据馆藏描述准确预测含颜料对象在未来一百年的褪色速度？",
+      "expectedAnswerability": "unsupported",
+      "expectedRationale": "该预测需要颜料成分、光照、温湿度、保存历史和加速老化数据；对象描述和图像不提供这类纵向测量。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-scope-market",
+      "category": "out_of_scope",
+      "question": "馆藏记录能否给出这些对象当前的准确市场价格，并预测下一年的涨幅？",
+      "expectedAnswerability": "unsupported",
+      "expectedRationale": "冻结馆藏包含机构对象记录而非实时交易、估值、市场流动性或预测数据，因此两个要求都超出证据范围。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-scope-reconstruction",
+      "category": "out_of_scope",
+      "question": "仅凭馆藏图像和简短说明，能否重建一座已毁建筑的内部尺寸、承重结构与施工顺序？",
+      "expectedAnswerability": "unsupported",
+      "expectedRationale": "工程重建需要测绘、建筑图、材料检测和考古上下文；对象图像与简短记录不足以产生可验证的尺寸和施工顺序。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-pref-minimal",
+      "category": "preference",
+      "question": "如果我偏爱极简构图，哪些对象可能符合这个偏好，系统又能依据哪些馆藏字段说明选择？",
+      "expectedAnswerability": "partially_supported",
+      "expectedRationale": "构图、对象类型和机构描述可以提供候选线索，但“极简”是需要用户确认的解释性标签，不能伪装成机构事实或客观排名。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-pref-handmade",
+      "category": "preference",
+      "question": "如果我更想看到手工制作痕迹而不是贵重材料，哪些对象可以组成一条有证据的观看线索？",
+      "expectedAnswerability": "supported",
+      "expectedRationale": "这是一个明确的选品约束，可用制作技法、材料与机构说明筛选五件对象；问题不要求证明该偏好对所有人都更好。",
+      "retrievalRoute": "open_vocabulary",
+      "minAccepted": 5,
+      "maxAccepted": 12
+    },
+    {
+      "id": "v2-pref-universal-beauty",
+      "category": "preference",
+      "question": "在没有任何个人信息时，系统能否客观判定所有访客都会把哪五件作品评为最美？",
+      "expectedAnswerability": "unsupported",
+      "expectedRationale": "馆藏记录不包含所有访客的美学评分或可以证明普遍偏好的用户研究；对象再多也不能支撑客观且全称的审美结论。",
+      "retrievalRoute": "open_vocabulary",
+      "maxAccepted": 12
+    }
+  ]
+}

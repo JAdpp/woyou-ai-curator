@@ -26,6 +26,11 @@ import {
   generationProviderLabel,
 } from "@/lib/generationRecord";
 import { getImageLicenseLabel, getLegacyRightsLabel } from "@/lib/rights";
+import {
+  publicInstitutionName,
+  publicObjectMetadata,
+  publicObjectTitle,
+} from "@/lib/localizedMetadata";
 import { EpilogueConversation } from "./EpilogueConversation";
 import { buildHallLayout } from "./hall/layout";
 import { clampStopIndex, stopAnchor } from "./hall/progress";
@@ -218,6 +223,9 @@ function ItemBlock({
   const [sourceOpen, setSourceOpen] = useState(false);
   const imageLicenseLabel = getImageLicenseLabel(item.object);
   const legacyRightsLabel = getLegacyRightsLabel(item.object);
+  const publicTitle = publicObjectTitle(item, contentLang);
+  const publicMetadata = publicObjectMetadata(item, contentLang);
+  const institutionName = publicInstitutionName(item, contentLang);
 
   return (
     <article
@@ -254,7 +262,7 @@ function ItemBlock({
             rel="noreferrer"
             onClick={() => logEvent("institution_page_opened", exhibitionId, { itemId: item.id })}
           >
-            {item.object.institution || t.institutionPage} ↗
+            {institutionName || (contentLang.startsWith("zh") ? t.institutionPage : item.object.institution) || t.institutionPage} ↗
           </a>
         </p>
       </div>
@@ -267,10 +275,14 @@ function ItemBlock({
             <span className={styles.depthTag}>{t.tombstoneOnly}</span>
           )}
         </p>
-        <h3 lang={contentLang}>{item.displayTitle || item.object.titleOriginal || item.object.title}</h3>
+        <h3 lang={contentLang}>{publicTitle}</h3>
         <p className={styles.original}>{item.object.title}</p>
         <p className={styles.tombstone}>
-          {[item.object.date, item.object.medium, item.object.culture].filter(Boolean).join(" · ")}
+          {publicMetadata.length > 0
+            ? publicMetadata.join(" · ")
+            : contentLang.startsWith("zh")
+              ? "中文著录暂缺，馆方原文见来源"
+              : ""}
         </p>
 
         <div className={styles.label} lang={contentLang}>

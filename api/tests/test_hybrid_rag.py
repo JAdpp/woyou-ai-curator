@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+import app.collections as collections_module
+
 from app.collections import (
+    CollectionDataError,
     CollectionRepository,
     _contextual_anchor_suppressions,
+    _atomic_catalogue_query_plan,
     _query_plan,
+    _tokens,
 )
 from app.dense_retrieval import (
     INDEX_FORMAT_VERSION,
     TEXT_RECIPE_SHA256,
     TEXT_RECIPE_VERSION,
     DenseHit,
+    DenseIndex,
     DenseIndexManager,
     DenseRetrievalError,
     DenseStatus,
@@ -25,6 +32,126 @@ from app.dense_retrieval import (
     collection_fingerprint,
 )
 from app.models import AgendaInput
+
+
+def test_catalogue_tokenization_bridges_compounds_and_spelling_variants() -> None:
+    tokens = _tokens("hand-built mould-made potter's catalogue")
+
+    assert {"hand-built", "hand", "built"}.issubset(tokens)
+    assert {"mould-made", "mould", "mold", "made"}.issubset(tokens)
+    assert {"potter's", "potter"}.issubset(tokens)
+    assert {"catalogue", "catalog"}.issubset(tokens)
+
+
+def test_atomic_catalogue_query_requires_each_content_leg() -> None:
+    plan = _atomic_catalogue_query_plan(
+        "mould-made pottery technique",
+        _query_plan("mould-made pottery technique"),
+    )
+
+    assert len(plan.strict_anchor_groups) == 2
+    assert any({"mould", "mold"}.issubset(group) for group in plan.strict_anchor_groups)
+    assert any({"pottery", "potteries"} & group for group in plan.strict_anchor_groups)
+    assert all("made" not in group for group in plan.strict_anchor_groups)
+    assert all("technique" not in group for group in plan.strict_anchor_groups)
+
+
+def test_atomic_batch_search_does_not_let_generic_object_noun_swamp_axis(
+    tmp_path: Path,
+) -> None:
+    collection_root = _write_collection(
+        tmp_path,
+        extra_subjects=[
+            (
+                "pottery-noise",
+                "Pottery fragment",
+                "A pottery fragment with no recorded forming method.",
+            ),
+            (
+                "moulded-figurine",
+                "Figurine",
+                "This pottery figure was made in a two-part mold.",
+            ),
+        ],
+    )
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+        rag_mode="bm25",
+    )
+    agenda = _agenda("mould-made pottery")
+
+    results = repository.search_many(
+        [agenda],
+        repository.get(),
+        atomic=True,
+    )[0]
+
+    assert [result.obj.id for result in results] == ["fixture:moulded-figurine"]
+
+
+def test_atomic_batch_search_uses_dense_prefilter_then_lexical_precision(
+    tmp_path: Path,
+) -> None:
+    collection_root = _write_collection(
+        tmp_path,
+        extra_subjects=[
+            (
+                "finger-marks",
+                "Coiled vessel",
+                "Finger marks remain visible on this hand-built pottery vessel.",
+            ),
+        ],
+    )
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+        rag_mode="hybrid",
+    )
+
+    class _AtomicPrefilterIndex:
+        def embed_queries(self, queries):
+            return list(queries)
+
+        def search_vector(self, _query_vector, *, top_k, allowed_object_ids=None):
+            assert top_k > 0
+            assert "fixture:finger-marks" in allowed_object_ids
+            return [DenseHit("fixture:finger-marks", 0.99)]
+
+        def search_evidence_vector(self, _query_vector, *, top_k):
+            assert top_k > 0
+            return []
+
+    class _AtomicPrefilterManager:
+        def __init__(self) -> None:
+            self.index = _AtomicPrefilterIndex()
+
+        def cache_signature(self, _collection):
+            return ("atomic-prefilter", 1, 1)
+
+        def get(self, _collection):
+            return self.index
+
+        def mark_query_success(self, _collection, _index):
+            return None
+
+        def mark_query_failure(self, _collection, _error):
+            return None
+
+    repository._dense_manager = _AtomicPrefilterManager()  # type: ignore[assignment]
+
+    results = repository.search_many(
+        [_agenda("finger marks pottery")],
+        repository.get(),
+        atomic=True,
+    )[0]
+
+    assert [result.obj.id for result in results] == ["fixture:finger-marks"]
+    assert results[0].retrieval_sources == (
+        "bm25",
+        "dense_atomic_prefilter",
+        "exact_atomic_prefilter",
+    )
 
 
 def _write_collection(
@@ -144,6 +271,226 @@ class _FakeManager:
         pass
 
 
+class _BatchProviderStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], int]] = []
+
+    def embed(self, texts, batch_size=64):
+        import numpy as np
+
+        values = list(texts)
+        self.calls.append((values, batch_size))
+        vectors = {
+            "first query": np.asarray([3.0, 4.0], dtype=np.float32),
+            "second query": np.asarray([0.0, 2.0], dtype=np.float32),
+        }
+        yield from (vectors[value] for value in values)
+
+
+def test_dense_index_embeds_multiple_queries_in_one_provider_batch() -> None:
+    import numpy as np
+
+    provider = _BatchProviderStub()
+    index = object.__new__(DenseIndex)
+    index.provider = provider
+    index.manifest = {"dimension": 2}
+
+    vectors = index.embed_queries(["first query", "second query"])
+
+    assert provider.calls == [
+        (["first query", "second query"], 2),
+    ]
+    np.testing.assert_allclose(vectors[0], [0.6, 0.8])
+    np.testing.assert_allclose(vectors[1], [0.0, 1.0])
+    assert index.embed_queries([]) == []
+    assert len(provider.calls) == 1
+
+
+class _BatchFakeIndex(_FakeIndex):
+    batch_calls: list[tuple[str, ...]]
+    single_calls: list[str]
+
+    def embed_query(self, query: str) -> str:
+        self.single_calls.append(query)
+        return query
+
+    def embed_queries(self, queries):
+        query_list = list(queries)
+        self.batch_calls.append(tuple(query_list))
+        return query_list
+
+
+def test_search_many_batches_uncached_queries_and_reuses_result_cache(
+    tmp_path: Path,
+) -> None:
+    collection_root = _write_collection(tmp_path)
+    index = _BatchFakeIndex(
+        hits=[DenseHit("fixture:gaze", 0.99)],
+        evidence_recall=[
+            EvidenceDenseHit("fixture:gaze", "fixture:gaze:e1", 0.99)
+        ],
+        evidence={"fixture:gaze": EvidenceHit(0.99, ("fixture:gaze:e1",))},
+    )
+    index.batch_calls = []
+    index.single_calls = []
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+        rag_mode="hybrid",
+        dense_manager=_FakeManager(index),
+    )
+    collection = repository.get()
+    first_question = _agenda("spectral ancestors")
+    second_question = _agenda("maritime memory")
+
+    first = repository.search_many(
+        [first_question, second_question, first_question],
+        collection,
+    )
+
+    assert index.batch_calls == [
+        ("spectral ancestors", "maritime memory"),
+    ]
+    assert index.single_calls == []
+    assert first[0] == first[2]
+    assert all(
+        [result.obj.id for result in results] == ["fixture:gaze"]
+        for results in first
+    )
+
+    cached = repository.search_many(
+        [second_question, first_question],
+        collection,
+    )
+    assert index.batch_calls == [
+        ("spectral ancestors", "maritime memory"),
+    ]
+    assert cached == [first[1], first[0]]
+
+    repository.search(_agenda("ritual thresholds"), collection)
+    assert index.single_calls == ["ritual thresholds"]
+
+
+def test_batched_lexical_search_matches_independent_queries(
+    tmp_path: Path,
+) -> None:
+    collection_root = _write_collection(tmp_path)
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+    )
+    collection = repository.get()
+    eligible = repository.require_generation_ready(collection)
+    agendas = [
+        _agenda("猫在不同文化里如何出现？", excluded=["狗"]),
+        _agenda("visibility in a room", excluded=["portrait"]),
+        _agenda("我没想好，随便带我逛逛", excluded=["dog"]),
+    ]
+    requests = [
+        (
+            _query_plan(agenda.question, collection.concept_aliases),
+            [
+                _query_plan(topic, collection.concept_aliases).anchor_tokens
+                for topic in agenda.excluded_topics
+            ],
+        )
+        for agenda in agendas
+    ]
+
+    expected = [
+        repository._lexical_search(query, excluded, eligible)
+        for query, excluded in requests
+    ]
+    actual = repository._lexical_search_many(requests, eligible)
+
+    assert actual == expected
+
+
+def test_search_many_builds_each_lexical_document_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection_root = _write_collection(tmp_path)
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+        rag_mode="bm25",
+    )
+    collection = repository.get()
+    eligible_count = len(repository.require_generation_ready(collection))
+    build_calls = 0
+    original_build = collections_module._build_search_document
+
+    def counted_build(obj):
+        nonlocal build_calls
+        build_calls += 1
+        return original_build(obj)
+
+    monkeypatch.setattr(
+        collections_module,
+        "_build_search_document",
+        counted_build,
+    )
+
+    results = repository.search_many(
+        [
+            _agenda("cat figure"),
+            _agenda("sustained gaze"),
+            _agenda("ceremonial mask"),
+        ],
+        collection,
+    )
+
+    assert build_calls == eligible_count
+    assert len(results) == 3
+
+
+def test_search_many_propagates_deadline_after_batch_embedding(
+    tmp_path: Path,
+) -> None:
+    collection_root = _write_collection(tmp_path)
+    index = _BatchFakeIndex(
+        hits=[DenseHit("fixture:gaze", 0.99)],
+        evidence_recall=[
+            EvidenceDenseHit("fixture:gaze", "fixture:gaze:e1", 0.99)
+        ],
+        evidence={"fixture:gaze": EvidenceHit(0.99, ("fixture:gaze:e1",))},
+    )
+    index.batch_calls = []
+    index.single_calls = []
+    original_embed = index.embed_queries
+
+    def slow_embed(queries):
+        time.sleep(0.3)
+        return original_embed(queries)
+
+    index.embed_queries = slow_embed  # type: ignore[method-assign]
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+        rag_mode="hybrid",
+        dense_manager=_FakeManager(index),
+    )
+    collection = repository.get()
+    agenda = _agenda("spectral ancestors")
+
+    with pytest.raises(CollectionDataError) as raised:
+        repository.search_many(
+            [agenda],
+            collection,
+            deadline=time.perf_counter() + 0.2,
+        )
+
+    assert raised.value.code == "RETRIEVAL_SEARCH_TIMEOUT"
+    assert index.batch_calls == [("spectral ancestors",)]
+    # The timed-out vector result was not cached as a successful BM25 result.
+    repository.search_many([agenda], collection)
+    assert index.batch_calls == [
+        ("spectral ancestors",),
+        ("spectral ancestors",),
+    ]
+
+
 def _agenda(question: str, excluded: list[str] | None = None) -> AgendaInput:
     return AgendaInput(
         question=question,
@@ -168,9 +515,142 @@ def test_single_character_chinese_concepts_do_not_match_inside_other_words(
 ) -> None:
     plan = _query_plan(question)
 
-    assert plan.dense_fallback_allowed is False
+    # The accidental single-character alias remains suppressed, but the whole
+    # visitor question is still eligible for open-vocabulary embeddings.
+    assert plan.dense_fallback_allowed is True
+    assert plan.open_semantic_query is True
     assert not (plan.anchor_tokens & forbidden)
     assert plan.strict_anchor_groups == ()
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "我没想好，随便带我逛逛",
+        "给我看点有意思的藏品",
+        "没有想好，先带我看看",
+    ],
+)
+def test_casual_browse_language_routes_to_browse_mode(question: str) -> None:
+    plan = _query_plan(question)
+
+    assert plan.browse_all is True
+    assert plan.anchor_tokens == set()
+    assert plan.open_semantic_query is False
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "随便给我看看海豚在不同文化中的形象",
+        "给我看点拓扑量子纠错相关藏品",
+        "这些藏品与气候危机有什么关系？",
+        "推荐几个海豚展品",
+    ],
+)
+def test_browse_wording_cannot_hide_a_topical_question(question: str) -> None:
+    plan = _query_plan(question)
+
+    assert plan.browse_all is False
+    assert plan.open_semantic_query is True
+    assert plan.dense_fallback_allowed is True
+
+
+@pytest.mark.parametrize(
+    "question,state_term",
+    [
+        ("博物馆如何判断无署名作品的作者归属？", "unsigned"),
+        ("没有签名的器物怎么判断是谁做的？", "unsigned"),
+        ("这东西没签名，怎么知道是谁做的？", "unsigned"),
+        ("How do museums attribute an unsigned object?", "unsigned"),
+        ("作者不明时，博物馆通过什么确定归属？", "anonymous"),
+        ("How can a museum identify the maker of an anonymous object?", "anonymous"),
+    ],
+)
+def test_creator_uncertainty_with_method_intent_adds_attribution_vocabulary(
+    question: str,
+    state_term: str,
+) -> None:
+    plan = _query_plan(question)
+
+    assert plan.browse_all is False
+    assert plan.open_semantic_query is True
+    assert plan.strict_anchor_groups == ()
+    assert plan.anchor_tokens & {
+        "attribution",
+        "reattributed",
+        "stylistic",
+        "connoisseurship",
+        "authorship",
+    }
+    assert state_term in plan.scoring_tokens
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        ("展示一些没有签名的画"),
+        ("这幅画的签名在哪里？"),
+        ("没有签名的画如何保存？"),
+        ("Show me unsigned paintings"),
+        ("How do museums conserve an unsigned painting?"),
+        ("Signing the Declaration of Independence"),
+    ],
+)
+def test_signature_mentions_without_attribution_method_intent_are_not_broadened(
+    question: str,
+) -> None:
+    plan = _query_plan(question)
+
+    assert not (
+        plan.anchor_tokens
+        & {
+            "attribution",
+            "reattributed",
+            "stylistic",
+            "connoisseurship",
+            "authorship",
+        }
+    )
+
+
+def test_unsigned_attribution_method_query_prefers_method_evidence_over_signature(
+    tmp_path: Path,
+) -> None:
+    collection_root = _write_collection(
+        tmp_path,
+        extra_subjects=[
+            (
+                "signed-work",
+                "Signed painting",
+                "The artist's signature is present in the lower right corner.",
+            ),
+            (
+                "attribution-study",
+                "Study of a shepherd",
+                "The attribution of this unsigned painting remains unsettled. "
+                "Curators compared its stylistic characteristics with works "
+                "assigned to several proposed artists.",
+            ),
+        ],
+    )
+    repository = CollectionRepository(
+        collection_root,
+        default_collection_id="hybrid_fixture",
+        rag_mode="bm25",
+    )
+
+    results = repository.search(
+        _agenda("博物馆怎么判断一件没有签名的东西是谁做的？"),
+        repository.get(),
+    )
+
+    assert results
+    assert results[0].obj.id == "fixture:attribution-study"
+    assert "fixture:signed-work" not in {result.obj.id for result in results}
+    assert results[0].matched_evidence_ids == (
+        "fixture:attribution-study:e1",
+    )
 
 
 @pytest.mark.parametrize(
@@ -211,6 +691,120 @@ def test_colloquial_dog_questions_request_cross_cultural_diversity(
     assert plan.dense_fallback_allowed is True
     assert plan.strict_anchor_groups
     assert plan.anchor_tokens & {"dog", "dogs", "puppy", "puppies", "canine", "hound"}
+
+
+def test_different_regions_phrase_requests_cross_cultural_diversity() -> None:
+    plan = _query_plan("不同地区的母子像在姿态与材料上有什么差别？", {})
+
+    assert plan.cross_cultural is True
+
+
+def test_named_cross_cultural_legs_are_not_per_object_and_anchors() -> None:
+    aliases = {
+        "东亚": ("east asia", "china", "japan", "korea"),
+        "欧洲": ("europe", "european"),
+        "美洲": ("americas", "american"),
+        "文字": ("text", "script", "inscription"),
+        "叙事": ("narrative", "story"),
+    }
+    plan = _query_plan(
+        "不同文化（东亚、欧洲与美洲）的版画如何利用边框、文字和重复图像组织叙事？",
+        aliases,
+    )
+    cultural_terms = {
+        "east",
+        "asia",
+        "china",
+        "japan",
+        "korea",
+        "europe",
+        "european",
+        "americas",
+        "american",
+    }
+
+    assert plan.cross_cultural is True
+    assert all(not (group & cultural_terms) for group in plan.anchor_groups)
+    assert any(group & {"text", "script", "inscription"} for group in plan.anchor_groups)
+    assert any(group & {"narrative", "story"} for group in plan.anchor_groups)
+
+    compact_plan = _query_plan(
+        "东亚、欧洲和美洲的版画如何组织叙事？",
+        aliases,
+    )
+    assert compact_plan.cross_cultural is True
+    assert all(not (group & cultural_terms) for group in compact_plan.anchor_groups)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "不同地方的章鱼在艺术里是什么样？",
+        "猫在各地艺术里如何出现？",
+        "多个地方怎样描绘母亲与孩子？",
+        "几个地区的狗有什么不同？",
+        "来自各处的鸟被做成了什么？",
+    ],
+)
+def test_colloquial_place_phrases_request_cross_cultural_diversity(
+    question: str,
+) -> None:
+    assert _query_plan(question, {}).cross_cultural is True
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "母亲抱着孩子的形象，在相隔很远的社会里分别被用来表达什么？",
+        "来自远隔重洋的作品里，小孩子都在做什么？",
+        "相隔很远的漆器，在做法和装饰上有什么差别？",
+        "不同社会如何表现家庭关系？",
+    ],
+)
+def test_distance_language_requests_cross_cultural_diversity(
+    question: str,
+) -> None:
+    assert _query_plan(question, {}).cross_cultural is True
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "不同地方的章鱼如何出现在艺术里？",
+        "地方艺术中的拓扑量子纠错是什么？",
+        "互不相识的地方，蛇分别怎样出现在护身符和画面里？",
+    ],
+)
+def test_generic_alias_cannot_close_an_arbitrary_free_form_question(
+    question: str,
+) -> None:
+    plan = _query_plan(question, {"地方": ("place", "region")})
+
+    assert plan.browse_all is False
+    assert plan.open_semantic_query is True
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("皇帝在不同的文化象征是什么", {"emperor", "empress", "monarch", "sovereign"}),
+        ("不同文明的皇帝象征什么", {"emperor", "empress", "monarch", "sovereign"}),
+        ("帝王在各国文化中的形象", {"emperor", "empress", "monarch", "sovereign"}),
+        ("君主在世界各地怎样被描绘", {"monarch", "sovereign", "king", "queen"}),
+        ("国王在不同文化中是什么象征", {"king", "queen", "monarch", "sovereign"}),
+    ],
+)
+def test_rulership_questions_use_reviewed_title_subject_anchors(
+    question: str,
+    expected: set[str],
+) -> None:
+    plan = _query_plan(question)
+
+    assert plan.cross_cultural is True
+    assert plan.dense_fallback_allowed is True
+    assert plan.strict_anchor_groups
+    assert plan.title_anchor_groups
+    assert plan.anchor_tokens & expected
 
 
 def test_dental_canine_cannot_satisfy_dog_anchor_but_companion_can(
@@ -351,13 +945,13 @@ def test_dense_only_candidates_require_evidence_and_keep_trace(tmp_path: Path) -
         for result in results
         if result.obj.id in supported
     )
-    # Object-dense recall may retain a candidate whose highest evidence vector
-    # inherited context from the object, but that row is not exposed as query
-    # evidence unless the raw excerpt itself overlaps the expanded query.
+    # The repository is now a recall layer for unknown concepts: a fake high
+    # semantic score may keep the cat as a candidate. The LLM relevance audit,
+    # tested separately, is the precision boundary before object selection.
     cat = next(result for result in results if result.obj.id == "fixture:cat")
-    assert "evidence_rerank" not in cat.retrieval_sources
-    assert cat.matched_evidence_ids == ()
-    assert cat.evidence_score is None
+    assert "evidence_rerank" in cat.retrieval_sources
+    assert cat.matched_evidence_ids == ("fixture:cat:e1",)
+    assert cat.evidence_score == pytest.approx(0.72)
     assert "fixture:dog" not in {result.obj.id for result in results}
 
 
@@ -382,6 +976,7 @@ def test_rrf_rewards_agreement_between_sparse_and_dense_channels(tmp_path: Path)
     assert results[0].retrieval_sources == (
         "bm25",
         "dense_object",
+        "dense_open_query",
         "evidence_rerank",
     )
     assert dict(results[0].field_scores)["rrf"] > dict(results[1].field_scores)["rrf"]
@@ -426,6 +1021,7 @@ def test_global_evidence_recall_finds_object_missed_by_object_vectors(
         "fixture:mask",
         "fixture:screen",
         "fixture:portrait",
+        "fixture:cat",
     }
     assert all(
         "dense_evidence_recall" in result.retrieval_sources for result in results
@@ -434,7 +1030,7 @@ def test_global_evidence_recall_finds_object_missed_by_object_vectors(
     assert all(result.matched_evidence_ids for result in results)
 
 
-def test_unknown_multi_term_english_query_cannot_use_nearest_dense_objects(
+def test_unknown_multi_term_english_query_enters_open_dense_candidate_pool(
     tmp_path: Path,
 ) -> None:
     collection_root = _write_collection(tmp_path)
@@ -449,12 +1045,14 @@ def test_unknown_multi_term_english_query_cannot_use_nearest_dense_objects(
         dense_manager=_FakeManager(index),
     )
 
-    assert repository.search(
+    results = repository.search(
         _agenda("topological qubit error correction"), repository.get()
-    ) == []
+    )
+    assert [result.obj.id for result in results] == ["fixture:gaze"]
+    assert "dense_open_query" in results[0].retrieval_sources
 
 
-def test_unknown_chinese_query_has_the_same_refusal_gate(tmp_path: Path) -> None:
+def test_unknown_chinese_query_uses_the_same_open_dense_route(tmp_path: Path) -> None:
     collection_root = _write_collection(tmp_path)
     index = _FakeIndex(
         hits=[DenseHit("fixture:gaze", 0.99)],
@@ -470,7 +1068,9 @@ def test_unknown_chinese_query_has_the_same_refusal_gate(tmp_path: Path) -> None
         dense_manager=_FakeManager(index),
     )
 
-    assert repository.search(_agenda("拓扑量子比特纠错"), repository.get()) == []
+    results = repository.search(_agenda("拓扑量子比特纠错"), repository.get())
+    assert [result.obj.id for result in results] == ["fixture:gaze"]
+    assert "dense_open_query" in results[0].retrieval_sources
 
 
 def test_concrete_cat_alias_retains_lexical_subject_gate(tmp_path: Path) -> None:
@@ -517,7 +1117,11 @@ def test_low_score_dense_evidence_is_not_reported_as_matched(
     results = repository.search(_agenda("有没有猫的藏品"), repository.get())
 
     assert len(results) == 1
-    assert results[0].retrieval_sources == ("bm25", "dense_object")
+    assert results[0].retrieval_sources == (
+        "bm25",
+        "dense_object",
+        "dense_open_query",
+    )
     assert results[0].matched_evidence_ids == ()
     assert results[0].evidence_score is None
     assert dict(results[0].field_scores)["evidence_cosine_unverified"] == 0.10

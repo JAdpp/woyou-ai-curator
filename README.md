@@ -62,14 +62,14 @@ AI 策展人叫 **彦远**，取自张彦远（约 815–877）——《历代�
 
 推荐链路是 `冻结馆藏 → 检索 → 重排 → 证据片段 → 大模型写作`。运行时不临时抓取博物馆 API，也不让模型凭常识先挑藏品：
 
-1. 17,246 件冻结对象走原有字段化 BM25：题名、文化包与证据域、材料/类型/标签、馆方说明分别赋权；中英文概念展开和“所有主题锚点必须命中”的硬门仍保留。
-2. 同一问题由本地多语 embedding 同时检索对象级文档和全局馆方 `evidence[]`；后一条通路避免对象长文在 512-token 窗口后部被截断。两条 dense 排名先融合，再与 BM25 用 RRF 融合，不用余弦分数直接覆盖精确字段命中。
-3. 对融合候选再逐条比较馆方 `evidence[]`；**仅由 dense 找到**的对象必须有至少一条机构证据越过语义阈值，否则不能入选。dense-only 只对显式维护了多语别名策略的概念开放；未知的中英文主题都保留词法门控，避免向量库永远返回“最接近的五件”。猫、狗等具体实体即使开启 dense，也保留词法实体锚点。
-4. 跨文化请求最后使用 MMR，减少媒材、机构与文化区域重复。命中的证据片段排到对象证据列表前部，再进入受 `evidenceIds` 约束的写作阶段。
+1. 17,246 件冻结对象先走字段化 BM25：题名、文化包与证据域、材料/类型/标签、馆方说明分别赋权。中英文别名现在只用于稀疏召回加权和猫／犬齿、King 姓氏等歧义保护，**不再充当访客问题白名单**。
+2. 每个非漫游问题都由本地多语 embedding 同时检索对象级文档和 61,620 条馆方 `evidence[]`；后一条通路避免对象长文在 512-token 窗口后部被截断。两条 dense 排名先融合，再与 BM25 用 RRF 融合。没有人工别名的新主题也能进入 dense，但使用更高的开放问法阈值。
+3. 向量近邻只负责候选召回。进入展览前，DeepSeek 对最多 20 件候选做一次证据级相关性审查，分别判断对象是否直接承载主题、馆方证据是否支持问题所问的关系，以及问题是否需要馆藏之外的伦理、法律、社群、效果或完整因果材料。模型只能返回本轮看过的对象 ID 和同对象、非 provenance 的证据 ID；缺失、猜测、跨对象或入藏来源引用都不能计入五件证据链。
+4. 如果直接相关对象不足，审查模型最多给出 3 条保持原意的双语馆藏检索式，系统对 BM25＋embedding 结果做一次 RRF 融合并复审；仍不足就拒绝生成，不拿最近邻补位。跨文化 MMR 只在审查通过的候选池中运行，避免用多样性换掉主题相关性。
 
-`hybrid-rag-v1` 固定使用 [`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)（384 维、约 50 种语言、Apache-2.0）；FastEmbed 使用 Qdrant 发布的等价 ONNX 运行制品。v1 不接受任意替换模型，防止配置名变化却沿用旧阈值与错误 provenance。索引 manifest 固定馆藏 ID/版本/`objects.json` 实际 SHA-256、文本配方 SHA-256、模型来源/许可/制品 revision 与 SHA-256、维度和对象/证据数量。运行时仅以只读内存映射加载匹配缓存，**不会下载模型或现场重建**；缓存缺失、过期、损坏、模型哈希变化或查询运行错误都会写明原因并完整降级到 BM25，瞬时查询错误不会被缓存，下一次会重试。
+`hybrid-rag-v2` 固定使用 [`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)（384 维、约 50 种语言、Apache-2.0）；FastEmbed 使用 Qdrant 发布的等价 ONNX 运行制品。`agentic-rag-v2` 记录 LLM 查询规划、原子词法轴、独立英文 semanticQuery、向量＋精确短语预筛、来源 ID／原文短引文审查与有界扩展是否实际参与。当前 1.7 万件规模没有引入 pgvector：对象与证据矩阵是版本化 `.npy`，运行时以只读 mmap 做精确余弦扫描。这仍是真实 embedding 检索，只是没有为了“叫向量数据库”而增加不必要的服务。索引 manifest 固定馆藏 ID/版本/`objects.json` SHA-256、文本配方、模型来源/许可/制品 revision 与 SHA-256、维度和对象/证据数量；请求期间不会下载模型或重建索引。
 
-这种混合方案扩大抽象、跨语言问题的召回，但不把向量相似度当作史实关系。最终拒答仍由硬门和证据充分性控制；`SearchResult` 同时记录 `retrieval_sources`、BM25 字段分数、dense/evidence 余弦分数与 RRF 分数，供 `CuratorialBrief` 审计。
+缓存缺失、过期、损坏或查询运行错误会明确降级到 BM25；LLM 审查被停用、超时或返回无效结构时，未经审查的 dense-only 近邻也会被排除，而不是偷偷当作相关藏品。`SearchResult` 记录 BM25、对象／证据余弦、RRF、agentic expansion 与 LLM audit 通道，`CuratorialBrief` 保存本次实际执行的方法和版本。
 
 ## 不可配置的硬约束
 
@@ -150,7 +150,7 @@ DEEPSEEK_LABELS_MODEL=deepseek-v4-flash-vision-exp
 DEEPSEEK_TIMEOUT_SECONDS=90
 DEEPSEEK_FRAME_TIMEOUT_SECONDS=90
 DEEPSEEK_LABELS_TIMEOUT_SECONDS=45
-GENERATION_POSTER_WAIT_SECONDS=20
+GENERATION_POSTER_WAIT_SECONDS=2
 GENERATION_JOB_TIMEOUT_SECONDS=180
 DASHSCOPE_API_KEY=
 ALIYUN_IMAGE_API_HOST=
@@ -174,9 +174,16 @@ RAG_DENSE_MIN_SCORE=0.28
 RAG_EVIDENCE_MIN_SCORE=0.30
 RAG_RRF_K=60
 RAG_MAX_RESULTS=250
+RAG_RETRIEVAL_TIMEOUT_SECONDS=30
+RAG_LLM_AUDIT_ENABLED=true
+RAG_LLM_AUDIT_TOP_K=18
+RAG_LLM_AUDIT_TIMEOUT_SECONDS=18
+RAG_AGENTIC_MAX_QUERIES=5
 ```
 
-策展框架和并发展的签调用分别受 90 秒、45 秒墙钟预算约束；`httpx` 的分段 I/O 超时之外还有真正的整次请求上限。模型慢于预算时会回退到完整的确定性展览，海报最多额外等待 20 秒，之后转入后台继续生成，不再阻塞可浏览展览。180 秒只作为任务状态机的最后安全兜底；若进程中断，已经写入的 `generating` 骨架会恢复成明确的草稿，而不会永久显示生成中。模型失败与回退原因会写入日志，避免静默降级。
+开放问题采用真正的混合 RAG：BM25 与 384 维多语种 embedding 同时召回藏品和馆方证据片段；LLM planner 同时给出短原子检索轴和一条保留全部替代项／关系的英文 semanticQuery。原子轴负责精确短语，semanticQuery 负责找回分散写在题名、用途、材料与馆方说明中的关系；来源丰富的语义候选在审核窗口中有独立名额。随后 LLM 只针对实际返回的 object/evidence ID 做相关性审查，每个强制谓词还必须返回馆方原文短引文，程序机械验证引文确实来自对应证据行。证据仍不足时，审查模型可提出不改变访客原意的有界扩展检索式，并对扩展候选重新审查。规则只保留在拍卖估值、医疗建议、真伪鉴定等硬边界，以及跨文化比较腿数等可验证结构约束中，不再把预设主题词当作召回白名单。当前 17k 级本地索引使用内存映射矩阵精确余弦扫描；它是实质的向量检索，但还不是 pgvector/HNSW 服务。
+
+初始召回、证据审查以及必要时的批量扩展／复审共用 40 秒墙钟预算；策展框架和并行展签调用分别受 90 秒、45 秒墙钟预算约束。`httpx` 的分段 I/O 超时之外还有真正的整次请求上限。相关性审查是自由问题的生成前置条件：若它超时或不可用，系统会明确失败关闭，并提示重试，而不会把未经审核的 BM25／向量近邻当成馆藏证据。只有审查已经通过之后，策展框架或展签模型失败才会回退到确定性文案。海报最多额外等待 2 秒，之后转入后台继续生成，不再阻塞可浏览展览。180 秒只作为任务状态机的最后安全兜底；若进程中断，已经写入的 `generating` 骨架会恢复成明确的草稿，而不会永久显示生成中。模型失败与回退原因会写入日志，避免静默降级。
 
 阿里云图像生成需同时配置 `DASHSCOPE_API_KEY` 与该 Key 所属业务空间的 `ALIYUN_IMAGE_API_HOST`（北京与新加坡端点不可混用）。海报采用 `qwen-image-3.0-pro` 生成 1536×864 横版主题主视觉：服务端先在本地把访客主题路由为白名单内的纯英文视觉母题，模型不会收到原始题名、问题、中文或自由输入，只负责生成与主题相关的无字编辑视觉；它不得复制或伪造具体馆藏，也不得生成文字、Logo 或水印。随后服务端使用 Pillow 将最终中文标题、短副标题及「卧游 · AI 策展人彦远」确定性排入同一张 PNG，避免模型错字与伪文字。页面持续标注主题画面由 AI 生成、文字由系统排版且不代表馆藏实物。瞬时网络失败会受控重试一次；仍失败或浏览器加载失败时，2D 与 3D 入口改用本展馆藏公开图像与同一标题模板，不留空白海报位。
 
@@ -216,29 +223,38 @@ npm.cmd run data:rebuild
 npm.cmd run test
 ```
 
-依次运行 `typecheck` → `test:web`（展览空间、许可呈现与拼图逻辑单测）→ `test:api` → `qa:regression`。
+依次运行 `typecheck` → `test:web`（展览空间、许可呈现与拼图逻辑单测）→ `test:api` → `qa:regression` → `qa:diverse`。
 
-`qa:regression` 完全离线（不读云模型密钥），检查两件事：
+`qa:regression` 完全离线（不读云模型密钥）。它使用一个只能回传本轮候选 object/evidence ID 的合成审核器，检查审查后编排的结构约束；**这不是语义相关性质量证明**。它检查两件事：
 
 1. 答复性门控是否仍复现每一条既定标签，且仍会拒绝（不能变成永远说 yes）；
 2. **覆盖域 × 时长 × 动机**的 48 种组合是否都生成结构合法、可走完的展览——角色齐备、对照声音仍在、`thin` 展品未占核心证据位、展签未超字数预算。
 
-它还输出个性化有效性指标：不同画像所选展品集合的平均 Jaccard 距离（当前 **0.93**，阈值 0.50）。
+它还输出个性化差异指标：不同画像所选展品集合的平均 Jaccard 距离（当前 **0.94**，阈值 0.50）。这只能说明选择集合不同，不能直接推出用户感知到更个性化或学到了更多。
 
 最近一次结果：
 
 ```
 collection      global_open @ 20260826-17246
 objects         17246 loaded, 17246 with evidence
-evidence depth  6126 full / 11119 thin
+evidence depth  6126 full / 11120 thin
+audit fixture   synthetic candidate-bound IDs (not semantic QA)
 ok    answerability   26 questions, {'supported': 20, 'partially_supported': 3, 'unsupported': 3}
-ok    exhibitions     48 generated, roles {opening:48, context:132, core_evidence:124, contrast:48, synthesis:48}
-ok    personalisation mean Jaccard distance 0.93
+ok    exhibitions     48 generated, roles {opening:48, context:128, core_evidence:128, contrast:48, synthesis:48}
+ok    personalisation mean Jaccard distance 0.94
 ```
+
+真实 embedding＋LLM 证据审核另行运行，不混入 keyless CI：
+
+```powershell
+npm.cmd run qa:open-rag
+```
+
+该套件会核对审核是否只接受本轮展示过的对象／证据 ID、跨文化候选池与最终五件展厅是否都保留要求的文化腿，以及 OOD／伦理／完整因果问法是否诚实降级。它依赖真实模型服务，因此同时记录耗时与外部响应漂移，不能拿一次绿灯代替冻结模型上的 P95 或人工内容评审。
 
 ## 已知问题与未验证项
 
-- **2026-08-28 的单次本机真实验收为 34.5 秒**：问题为“狗在不同文化中如何出现？”，在 17,246 件 `global_open` 馆藏上运行混合 RAG，框架调用 14.1 秒，5 件视觉展签并发调用各 3.5–4.3 秒，最终 5/5 件都有图像观察且验证通过。这证明该用例低于 60 秒，但只是一次冒烟，不是冻结环境的 P95；冷缓存、12 件展和上游抖动仍需单独基准。
+- **2026-08-30 的真实语义审核探针**：用户原句“有没有各文化地区的猫的藏品”从 68 个召回候选中接受 12 件，候选池与最终五件展厅都覆盖 4 个规范化文化区域，判为 `supported`（9.37 秒）；“狗狗在各国文化是怎么存在”从 99 个候选中接受 7 件、覆盖 4 个区域，但因馆方记录不足以完整支持“怎么存在”这一关系命题而判为 `partially_supported`（23.28 秒）。这说明对象量不是唯一瓶颈；同一批对象可以支持“有哪些形象／是什么物件与材料”，却未必支持完整象征或因果解释。以上是定向实测，不是冻结环境 P95，也不代表所有开放问题都可生成。
 - **3D 交互与响应式布局已经过真实浏览器运行验收**：覆盖桌面与 433 px 移动端、展签拖拽/键盘移动/缩放/收纳、横版海报与馆藏图回退、上下导航可见性。尚未做长时间帧率、显存占用与不同 GPU 下 WebGL 光照基准测试。
 - 这版全球广度仍主要来自 Cleveland Museum of Art（15,200 / 17,246）；The Met 1,046 件、AIC 1,000 件是分层种子，因此不能把机构分布或文化包件数解释成世界馆藏分布。下一批应优先扩 The Met 全球 Public Domain 池，并引入第四个权利与供图边界清楚的机构。
 - 「交流与流动」虽由 84 件增至 118 件，仍是当前最稀疏的证据域；大洋洲文化包 103 件，也低于每包 200 件的内部目标。两者是下一轮定向补库优先级，而不是用更多欧洲/制作类对象稀释问题。
