@@ -140,6 +140,90 @@ def verify_live():
     result['passed']=all(row['passed'] for row in result['checks'])
     return result
 
+def verify_history(commit):
+    from urllib.error import HTTPError
+    sys.path.insert(0,str(PROD/'api'))
+    from app.models import Exhibition
+    if not re.fullmatch(r'[0-9a-f]{40}',commit): raise ValueError('exact_commit_required')
+    snapshot=PROD/('.rollback-rc11-'+commit[:12])/'store.snapshot.json'
+    original=json.loads(snapshot.read_text())['exhibitions']
+    live=json.loads((PROD/'api/runtime/store.json').read_text())['exhibitions']
+    result={'originalExhibitions':len(original),'liveExhibitions':len(live),
+            'allOriginalIdsPreserved':set(original).issubset(live),
+            'allOriginalRecordsUnchanged':all(live.get(eid)==value for eid,value in original.items()),
+            'allOriginalRecordsEqualAfterSchemaDefaults':all(
+                live.get(eid)==Exhibition.model_validate(value).model_dump(mode='json')
+                for eid,value in original.items()),
+            'checks':[]}
+    def poster_url(value):
+        poster=value.get('poster') or {}
+        return poster.get('backgroundUrl') or poster.get('background_url') or ''
+    samples=list(original)
+    for eid in samples:
+        try:
+            status,body=get('http://127.0.0.1:8081/api/exhibitions/'+eid)
+            record=json.loads(body)
+        except HTTPError as error:
+            status=error.code
+            record={}
+        result['checks'].append({'id':'old_exhibition','exhibitionId':eid,'passed':status==200,
+            'httpStatus':status,'itemCount':len(record.get('items',[]))})
+        url=poster_url(original[eid])
+        if not url.startswith('/generated/posters/'): continue
+        try: status,body=get('http://127.0.0.1:8081'+url)
+        except HTTPError as error: status,body=error.code,b''
+        result['checks'].append({'id':'old_poster','exhibitionId':eid,'url':url,
+            'passed':status==200,'httpStatus':status,'bytes':len(body),
+            'sharedFileExists':(PROD/'api/runtime/media/posters'/url.rsplit('/',1)[-1]).is_file(),
+            'legacyFileExists':(PROD/'public/generated/posters'/url.rsplit('/',1)[-1]).is_file()})
+    result['posterSharedPath']=str((PROD/'.next/standalone/public/generated/posters').resolve())
+    result['existingAudioFiles']=sum(1 for _ in (PROD/'api/runtime/cache/audio-guides').glob('*.mp3'))
+    result['otherServices']=inspect()['otherServices']
+    result['statePreservationPassed']=result['allOriginalIdsPreserved'] and result['allOriginalRecordsEqualAfterSchemaDefaults']
+    result['retainedMediaChecks']=[]
+    for path in sorted((PROD/'api/runtime/media/posters').glob('*.png'))[:3]:
+        status,body=get('http://127.0.0.1:8081/generated/posters/'+path.name)
+        result['retainedMediaChecks'].append({'filename':path.name,'httpStatus':status,
+            'bytes':len(body),'passed':status==200 and hashlib.sha256(body).hexdigest()==sha(path)})
+    result['passed']=bool(samples) and result['statePreservationPassed'] and all(row['passed'] for row in result['checks'])
+    return result
+
+def install_poster_route(source, expected_sha):
+    path=Path('/etc/nginx/sites-available/demo-inquiry.conf')
+    backup=path.with_name('demo-inquiry.conf.prev-rc11-poster')
+    shared=Path('/etc/nginx/conf.d/demo-ratelimit.conf')
+    original=path.read_text()
+    marker='    location ^~ /dev/admin { return 404; }\n'
+    addition='''
+    # Persistent generated media lives outside versioned Next public assets.
+    # Serve it directly so both old and newly generated posters survive swaps.
+    location ^~ /generated/posters/ {
+        alias /opt/demos/inquiry-curator/api/runtime/media/posters/;
+        limit_req zone=demoimg burst=240 nodelay;
+        autoindex off;
+    }
+'''
+    incoming=Path(source)
+    if not incoming.is_file() or sha(incoming)!=expected_sha: raise ValueError('nginx_source_mismatch')
+    if marker not in original or original.replace(marker,marker+addition,1)!=incoming.read_text():
+        raise ValueError('nginx_change_exceeds_poster_route')
+    if backup.exists(): raise ValueError('poster_route_already_attempted')
+    shared_sha=sha(shared)
+    shutil.copy2(path,backup)
+    pending=path.with_name('.demo-inquiry.rc11-next')
+    if pending.exists(): raise ValueError('nginx_pending_exists')
+    shutil.copy2(incoming,pending)
+    os.replace(pending,path)
+    try:
+        checked(['nginx','-t'])
+        checked(['systemctl','reload','nginx'])
+    except BaseException:
+        shutil.copy2(backup,path)
+        command(['nginx','-t']); command(['systemctl','reload','nginx'])
+        raise
+    return {'mode':'poster-route','passed':True,'nginxConfigSha256':sha(path),
+            'sharedRateLimitsUnchanged':sha(shared)==shared_sha,'backup':str(backup)}
+
 def deploy(commit):
     """Preserve shared state, swap three runtime trees, rollback on failed checks."""
     from dotenv import dotenv_values
@@ -277,6 +361,13 @@ def client(args):
                 with sftp.open(remote,'wx') as handle: handle.write(local.read_bytes())
         argv=[(PROD/'.venv/bin/python').as_posix(),'-B',remote,'--remote','--mode',args.mode]
         if args.commit: argv+=['--commit',args.commit]
+        if args.mode=='poster-route':
+            body=(ROOT/'deploy/nginx/demo-inquiry.conf').read_text(encoding='utf8').encode('utf8')
+            digest=hashlib.sha256(body).hexdigest()
+            config='/tmp/inquiry-nginx-'+digest[:16]+'.conf'
+            with c.open_sftp() as sftp:
+                with sftp.open(config,'wx') as handle: handle.write(body)
+            argv+=['--nginx-source',config,'--nginx-sha',digest]
         _,stdout,stderr=c.exec_command(' '.join(shlex.quote(value) for value in argv),timeout=600)
         body=stdout.read(2*1024*1024)
         error_body=stderr.read(65536)
@@ -296,13 +387,18 @@ def client(args):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--remote',action='store_true')
-    parser.add_argument('--mode',choices=['inspect','deploy','verify'],default='inspect')
+    parser.add_argument('--mode',choices=['inspect','deploy','verify','history','poster-route'],default='inspect')
     parser.add_argument('--commit')
+    parser.add_argument('--nginx-source')
+    parser.add_argument('--nginx-sha')
     parser.add_argument('--report',type=Path,default=ROOT/'artifacts/qa/production-rc11/before.json')
     args=parser.parse_args()
     try:
         if args.remote:
-            result=inspect() if args.mode=='inspect' else verify_live() if args.mode=='verify' else deploy(args.commit or '')
+            result=(inspect() if args.mode=='inspect' else verify_live() if args.mode=='verify'
+                    else verify_history(args.commit or '') if args.mode=='history'
+                    else install_poster_route(args.nginx_source,args.nginx_sha) if args.mode=='poster-route'
+                    else deploy(args.commit or ''))
             print(json.dumps(result,ensure_ascii=False))
             return 1 if result.get('passed') is False else 0
         return client(args)

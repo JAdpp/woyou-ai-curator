@@ -31,9 +31,15 @@
 1. `location ^~ /api/images/` 的 **`^~` 不能删**，位置也**必须在** `location ~ ^/(api|...)` **之前**。nginx 里带 `^~` 的前缀匹配优先于正则匹配；去掉 `^~` 就会掉回 `demoapi` 桶，破图立刻复发。
 2. 应用侧已经自己发 `Cache-Control: public, max-age=604800, immutable`，nginx **不要**再 `add_header` 覆盖。
 
-## 第一阶段文本检索上线顺序（尚未应用到服务器）
+## RC11 当前线上状态（2026-09-07）
 
-这次候选链升级不需要修改 nginx，但需要更新 FastAPI 环境变量并同步两类派生索引。当前线上仍应保持 `RAG_MODE=bm25`，不得因本地代码已接入 Qwen 就认定已完成切换。
+已按用户授权切换 `8081` 的 RC11 公开 Demo，实际 `RAG_MODE=hybrid`，Qwen 768 维对象／证据索引与 SQLite 索引匹配 17,246 件馆藏。真实生成、资源验收和证据边界见 [RC11 上线验收](../../data/qa/RC11_上线验收_20260907.md)。这次是收尾版本的 Demo 发布，不表示下面历史方案中的全量开放题质量门槛已全部达到。
+
+`/generated/posters/` 现由 nginx `alias` 直接读取 `/opt/demos/inquiry-curator/api/runtime/media/posters/`。发布时将原 standalone 的海报目录原样迁入此持久目录，新旧 standalone 都链接到这里；已有文件不因更换 Next 构建而消失。Next 对构建外符号链接目录曾返回 404，因此不能只检查文件存在或 API 的 `ready`。新增海报与保留媒体的实际 HTTP GET 另行验收。该 location 沿用 `demoimg` 桶，未改三个 Demo 共用的 `demo-ratelimit.conf`。
+
+## 第一阶段文本检索原始上线方案（历史）
+
+以下是公开切流前的原始方案，保留作为决策历史。当时线上保持 `RAG_MODE=bm25`，不能因本地代码接入 Qwen 就认定完成切换。RC11 实际上线状态以本文件上节和上线验收记录为准。
 
 1. 先确认服务器与构建机的 `global_open` 版本和 `objects.json` SHA-256 一致。
 2. 在有密钥的环境执行 `npm.cmd run rag:index:qwen` 与 `npm.cmd run rag:index:filters`。只同步完成的指纹目录；不同步 `.tmp-*` 中间目录，不在 API 请求或启动期间重建。
