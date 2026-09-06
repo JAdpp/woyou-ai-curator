@@ -1,0 +1,191 @@
+{
+  "schemaVersion": "visitor-release-fresh/v1",
+  "id": "visitor-release-fresh-20260906-rc7",
+  "createdAt": "2026-09-06",
+  "status": "frozen_before_first_run",
+  "purpose": "Small visitor-first retrieval and routing smoke set. This is not object relevance gold, a promise of catalogue coverage, or a population success-rate estimate.",
+  "provenance": {
+    "authorType": "delegated_ai_engineering",
+    "existingQuestionTextReviewedForNovelty": true,
+    "previousQuestionSet": "data/qa/visitor_release_holdout_20260906.json",
+    "historicalFailureReportsRead": true,
+    "catalogueSearchedForTheseQuestions": false,
+    "retrievalResultsSeenForTheseQuestions": false,
+    "objectIdsOrQrelsProvided": false,
+    "selectionMethod": "Questions were written from ordinary visitor interests without searching the catalogue. Earlier questions were read to avoid repeating their subjects. Expectations describe faithful product behavior, not whether particular objects must exist."
+  },
+  "protocol": {
+    "sendToProduct": ["question", "profile"],
+    "neverSendToProduct": ["persona", "coverageTags", "intent", "mustNotDistort", "expectedBehavior", "provenance", "protocol"],
+    "freezeRule": "Freeze the exact UTF-8 file bytes and record their SHA-256 before any model run. Do not edit, remove, replace, or simplify a question after observing results. Store every attempt and its runtime fingerprint separately.",
+    "reuseRule": "After first use this is a fixed regression set, not an unseen set for subsequent iterations.",
+    "scoringRule": "Report faithful retrieval, specific evidence or coverage gaps, scope clarification, correct out-of-scope routing, technical errors, and semantic errors separately. A technical failure is not an evidence gap. Do not require a minimum number of objects, infer a corpus-wide absence from one failed search, or count an honest gap as a completed exhibition.",
+    "entryRule": "Submit questions through the visitor-facing interview or equivalent public routing entry. Clarification and out-of-scope cases must not be evaluated only by directly invoking exhibition generation.",
+    "minimumReview": "Judge final selections and claims against the original question and same-object institution records. Visual claims require actual image inspection or an explicitly attributed institution description. Distinguish missing records supplied to the system from claims that the institution has no information."
+  },
+  "defaultProfile": {
+    "curiosityDomainId": "other",
+    "motivation": "explorer",
+    "priorKnowledge": "some",
+    "durationMinutes": 5,
+    "language": "zh"
+  },
+  "cases": [
+    {
+      "id": "fresh-01-water-reflections",
+      "persona": "散步时喜欢拍水面的上班族",
+      "question": "想看看画家是怎么画水里的倒影的。能带我留意岸上的东西到了水里，形状和颜色变成什么样吗？只有水面、没有倒影的就先不看了。",
+      "coverageTags": ["visual", "spatial_relation", "explicit_exclusion"],
+      "intent": "观察绘画中岸上对象与其水中倒影的对应和画法，而非泛水景浏览。",
+      "mustNotDistort": [
+        "不能仅因标题含湖、河或水，就把作品当作有倒影的例子。",
+        "要在同一作品内确认岸上对象与水中形象的关系；不是把不同作品的水面和建筑拼成证据。",
+        "形状与颜色描述须来自实际图像或明确的馆方描述，不擅自解释画家的心理。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-02-decorated-shoes",
+      "persona": "喜欢看鞋服细节的年轻访客",
+      "question": "以前的人会在鞋子上写字或者做图案吗？想看看保存下来的鞋，字和图案放在鞋的什么位置。不是画着鞋子的画哦。",
+      "coverageTags": ["carrier_relation", "alternatives", "explicit_exclusion"],
+      "intent": "看实物鞋上的文字或装饰图案及其位置，文字和图案是可选的两种情况。",
+      "mustNotDistort": [
+        "核心对象必须是保存下来的鞋；不能用画中鞋、鞋形器物或独立纹样替代。",
+        "不要求每双鞋同时有字和图案，也不要求馆藏必须提供两类。",
+        "不把无法辨认的装饰认作可读文字；没有记录时不编造文字含义或穿用身份。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-03-old-games",
+      "persona": "周末喜欢玩桌游的访客",
+      "question": "想逛逛以前的人玩的棋和桌上游戏。留下来的棋盘、棋子都行，讲讲有资料能确认的玩法；玩法失传的也可以看，但别替它编一套规则。",
+      "coverageTags": ["historical_function_record", "known_unknown", "alternatives"],
+      "intent": "浏览有游戏身份依据的棋盘或棋子，区分已知玩法与无法确认玩法的实例。",
+      "mustNotDistort": [
+        "不能只凭小巧或像棋子的外形，将小雕像、砝码等当作游戏用具。",
+        "规则已知不是每件对象的准入条件；资料不足的游戏用具仍可展示。",
+        "玩法讲解须有同一游戏或对象的可核对记录，不能把现代或别种游戏的规则移植过来。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-04-repaired-objects",
+      "persona": "舍不得扔旧物的普通观众",
+      "question": "我对那些坏了以后又补好的老物件挺好奇。想看修补留下的接缝、补片之类的痕迹；如果知道是谁、什么时候修的也讲讲，不知道就算了。",
+      "coverageTags": ["visual", "historical_record", "optional_detail", "known_unknown"],
+      "intent": "观察有修补依据的旧物及修补痕迹；修补者和年代是可选的补充信息。",
+      "mustNotDistort": [
+        "不能把所有裂纹、原始拼接或制作接缝直接认作后来的修补。",
+        "不能将未知修补者或年代变成剔除对象的硬条件，也不能把当代修复说成古代修补。",
+        "用户未限定材质、地区或修补工艺，不得默默收窄成某一种工艺专题。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-05-making-music",
+      "persona": "刚开始学乐器的成年人",
+      "question": "想看画里的人怎么演奏乐器，手放在哪里、身体怎么配合。不用给我猜声音好不好听，只有乐器摆着、没有人在演奏的先不要。",
+      "coverageTags": ["visual", "actor_action_relation", "explicit_exclusion"],
+      "intent": "看图像中的演奏动作及手与乐器、身体与演奏的配合。",
+      "mustNotDistort": [
+        "乐器静物、独立乐器实物或仅携带乐器的人不能自动算作正在演奏。",
+        "手部位置和姿态须有同件图像或明确记录支持，不能借另一件演奏图作证。",
+        "不从静态图像编造音色、音量、旋律或演奏水平。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-06-masks-across-cultures",
+      "persona": "想了解陌生文化的中文读者",
+      "question": "能把埃及和墨西哥的面具放在一起看看吗？我想知道这些面具是给谁用、在什么场合用的，不只是看起来像不像。有哪边的资料找不到就直接告诉我。",
+      "coverageTags": ["cross_cultural", "historical_function_record", "named_scope"],
+      "intent": "比较埃及和墨西哥面具的有据用途、使用者与使用场合，并明示资料缺口。",
+      "mustNotDistort": [
+        "埃及和墨西哥是用户明确的两边；不能用其他地区默默代替。",
+        "不能把丧葬、舞蹈、戏剧或其他用途混为一谈，也不能假定每件面具都由活人戴在脸上。",
+        "外形相似不能证明用途相同或存在传播关系；具体使用者未知不应自动排除有明确面具身份的对象。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-07-light-on-the-move",
+      "persona": "喜欢夜间散步的访客",
+      "question": "没有电灯的时候，人们晚上走路带什么照明？想看能拿着或提着走的灯具，也可以看有人带着它走的画面，固定在屋里的灯先不看。",
+      "coverageTags": ["historical_function_record", "carrier_relation", "alternatives", "explicit_exclusion"],
+      "intent": "了解可携带照明器具及其在行走场景中的表现，实物与描绘均可。",
+      "mustNotDistort": [
+        "不能因为有提手就认定物品是照明灯具，也不能把固定室内灯作为移动照明的核心例子。",
+        "实物的照明及便携身份需有记录或足够的可见结构依据；画面中要确认人与灯的携带关系。",
+        "不把礼仪性持灯或白昼场景直接说成夜路实用照明；需区分记录支持的用途与可见姿态。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-08-old-maps",
+      "persona": "喜欢旅行地图的学生",
+      "question": "想看以前的人怎么画地图：他们把哪些地方画得很大，哪些地方只带过？能从几张地图带我看起吗，不用按今天的导航标准给它们打分。",
+      "coverageTags": ["visual", "object_identity", "historical_context"],
+      "intent": "观察历史地图对地理对象的选择和视觉强调，理解其表现方式。",
+      "mustNotDistort": [
+        "核心例子需确为地图或明确的地图式表现，不能用任意风景画替代。",
+        "视觉大小和简略程度不自动证明政治动机、制图目的或地理知识水平。",
+        "不能把用户请求改写为导航精度排名，也不预先限定必须是世界地图或某个国家。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-09-remembered-names",
+      "persona": "会留意碑文的散步者",
+      "question": "看到墓碑或纪念碑上的名字，总会想那个人是谁。能找些这样的藏品，讲讲记录里知道的人和事吗？有的只能认出名字、身世不清楚，也可以如实说。",
+      "coverageTags": ["inscription_relation", "historical_record", "known_unknown"],
+      "intent": "从墓碑或纪念碑上的姓名进入有记录的被纪念者故事，也容纳身份信息有限的例子。",
+      "mustNotDistort": [
+        "姓名须与该碑的纪念对象建立联系；不能把制作者、捐赠者或馆藏登记人员的名字当成被纪念者。",
+        "不要求每件都能完整复原生平，不能编造家庭关系、职业或死亡原因。",
+        "资料仅给出名字时应说明当前证据边界，不可断言机构或世界上绝无其他资料。"
+      ],
+      "expectedBehavior": "retrieve_or_explain_gap"
+    },
+    {
+      "id": "fresh-10-a-sense-of-strength",
+      "persona": "尚未确定兴趣方向的新访客",
+      "question": "有没有那种特别有力量感的作品？我一时也说不清想看哪一种。",
+      "coverageTags": ["ambiguous_exploration", "guided_clarification"],
+      "intent": "把尚未确定的力量感兴趣转成可选择的方向，而不是替用户认定一种含义。",
+      "mustNotDistort": [
+        "不能直接把力量感等同于肌肉、暴力、政治权力或某种风格。",
+        "提供少量易懂的方向供选择或明确标为试探的起点，不要求用户先掌握艺术术语。",
+        "范围尚未确认时不声称已经理解了用户的具体主题。"
+      ],
+      "expectedBehavior": "clarify"
+    },
+    {
+      "id": "fresh-11-the-one-in-a-video",
+      "persona": "记不清短视频内容的手机用户",
+      "question": "昨天刷到一个博物馆里的东西，造型挺奇怪的，我想围绕那个逛逛。现在找不到视频了，你能帮我找找方向吗？",
+      "coverageTags": ["underspecified_reference", "guided_clarification"],
+      "intent": "帮助用户补充尚未提供的外形、用途、场景等线索，逐步形成探索方向。",
+      "mustNotDistort": [
+        "不能假装看过用户的视频，不能凭奇怪二字确定某件藏品、机构或文化。",
+        "用简短、容易回答的线索问题帮助回忆，允许记不清；不要立即生成一个声称就是该对象的展览。",
+        "不把资料不足误报为全库没有该对象，也不把模糊问题变成长篇必填问卷。"
+      ],
+      "expectedBehavior": "clarify"
+    },
+    {
+      "id": "fresh-12-this-weeks-acquisitions",
+      "persona": "想追踪博物馆新动态的读者",
+      "question": "这周世界各地的博物馆新买了哪些文物？我想看最新的消息和成交价，不是以前就有的馆藏。",
+      "coverageTags": ["current_information", "outside_frozen_catalogue", "explicit_exclusion"],
+      "intent": "获取本周最新购藏新闻及公开成交价，而非静态馆藏检索。",
+      "mustNotDistort": [
+        "静态馆藏的入藏年份、登记日期或近期索引日期不能冒充本周购藏新闻。",
+        "没有实时可靠来源时需明确说明当前能力边界，并指向官方购藏公告等可行下一步，不编造新闻或价格。",
+        "如果产品确有可核验的实时搜索能力，应明确来源和发布日期，并承认未公开价格；不能宣称覆盖全球所有交易。"
+      ],
+      "expectedBehavior": "out_of_scope"
+    }
+  ]
+}

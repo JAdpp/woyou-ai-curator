@@ -11,10 +11,10 @@ Question design follows the visitor typologies in 01b §3.1:
   * duration    — Véron & Levasseur (1983) circulation styles, via DURATION_PLAN
   * label budget— Serrell (1997) on actual visitor attention
 
-Hard ceiling of seven turns, four of them required. A visitor-written core
-question is collected either in the opening turn or in one later follow-up,
-never both. The seventh turn exists only when the answerability gate needs to
-negotiate a broader or better-supported route.
+Hard ceiling of seven turns, four of them required. A concrete visitor-written
+question is collected either in the opening turn or one later follow-up, never
+both. An opening with only a generic referent can use that follow-up for one
+optional scope clarification; the evidence gate remains a separate final turn.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from . import i18n
 from .collections import CollectionRepository, LoadedCollection
+from .interview_clarification import needs_scope_clarification
 from .models import (
     AnswerabilityStatus,
     InterviewAnswer,
@@ -105,6 +106,8 @@ EXCLUSION_CHOICES = (
 
 NO_OPEN_QUESTION_VALUE = "__no_question__"
 RECOMMENDED_QUESTION_PREFIX = "__recommended_question__:"
+SCOPE_DIRECTION_PREFIX = "__scope_direction__:"
+KEEP_SCOPE_VALUE = "__keep_scope_open__"
 
 # Shown when the model is unavailable. Deliberately about how one looks at
 # objects rather than about any particular subject, so they stay true whatever
@@ -263,6 +266,42 @@ class InterviewService:
             ),
             step=3,
             total_steps=TOTAL_STEPS,
+        )
+
+    def _scope_clarification_question(
+        self, state: InterviewState, collection: LoadedCollection,
+    ) -> InterviewQuestion:
+        """One optional scope follow-up, using the existing custom-question UI.
+
+        Choices are explicitly tentative corpus-backed directions, not claims
+        to have inferred the visitor's meaning. Keep NEGOTIATION available for
+        the later, distinct evidence-coverage check.
+        """
+        language = state.profile.language
+        original = (state.profile.free_form_question or "").strip()[:90]
+        options = [InterviewOption(
+            value=f"{SCOPE_DIRECTION_PREFIX}{domain_id}",
+            label=i18n.pick(language, f"从「{label}」试逛", f"Try “{label}”"),
+            hint=hint,
+        ) for domain_id, label, hint in self._available_domains(collection, language)[:3]]
+        options.append(InterviewOption(
+            value=KEEP_SCOPE_VALUE,
+            label=i18n.pick(language, "还没想好，先保留这个偏好", "Keep this as an open preference"),
+            hint=i18n.pick(language, "不把它当作确定事实或客观排名", "Not a factual claim or an objective ranking"),
+        ))
+        return InterviewQuestion(
+            id=InterviewQuestionId.CUSTOM_QUESTION,
+            prompt=i18n.pick(
+                language,
+                f"你说的“{original}”还可以指不同方向，我先不替你猜。"
+                "你更在意外观给人的感觉、当时的生活与用途，还是馆方确实记录了什么？"
+                "可以补充一种物件、时代或地点，也可以选一个方向试逛。",
+                f"“{original}” could mean several things, so I won't assume a subject. "
+                "Do you mean how things look, how people used them, or what museum records confirm? "
+                "Add an object, period or place, or try one of these directions.",
+            ),
+            options=options, allow_free_text=True, skippable=True,
+            free_text_placeholder=i18n.pick(language, "比如：我指的是……；我更想看……", "I mean…; I'd rather see…"),
         )
 
     @staticmethod
@@ -580,6 +619,10 @@ class InterviewService:
         if (
             current.id == InterviewQuestionId.CUSTOM_QUESTION
             and not (answer.free_text or "").strip()
+            and not (
+                current.skippable
+                and (answer.skipped or answer.value in {option.value for option in current.options})
+            )
         ):
             # The visitor explicitly chose "there is a question I want to
             # figure out".  Do not record an empty turn and silently move on;
@@ -644,9 +687,36 @@ class InterviewService:
                 )
 
         elif question_id == InterviewQuestionId.CUSTOM_QUESTION:
-            profile.open_question = free_text[:300]
-            turn.answer_label = free_text[:60]
-            self._replace_auto_domain_from_question(state, free_text, collection)
+            if free_text:
+                profile.open_question = free_text[:300]
+                turn.answer_label = free_text[:60]
+                if state.next_question and state.next_question.skippable:
+                    # A clarification supersedes an inferred opening domain;
+                    # the visitor never explicitly selected that inference.
+                    matched = self._match_domain(free_text, collection)
+                    profile.curiosity_domain_id = matched
+                    profile.curiosity_label = (
+                        domain_choices_for(collection, language)[matched][0] if matched else ""
+                    )
+                else:
+                    self._replace_auto_domain_from_question(state, free_text, collection)
+            elif answer.value and answer.value.startswith(SCOPE_DIRECTION_PREFIX):
+                domain_id = answer.value[len(SCOPE_DIRECTION_PREFIX):]
+                label = domain_choices_for(collection, language)[domain_id][0]
+                profile.curiosity_domain_id = domain_id
+                profile.curiosity_label = label
+                # Selection makes this a visitor-authorised scope, unlike the
+                # old silent assignment from whichever domain was richest.
+                profile.open_question = i18n.pick(
+                    language,
+                    f"先从{label}试逛；最初的偏好是“{profile.free_form_question}”。"
+                    "这是观看方向，不是确定事实或客观排名。",
+                    f"Start with {label}; my initial preference was “{profile.free_form_question}”. "
+                    "This is a viewing direction, not a factual claim or objective ranking.",
+                )[:300]
+                turn.answer_label = i18n.pick(language, f"从「{label}」试逛", f"Try “{label}”")
+            else:
+                turn.answer_label = i18n.pick(language, "先保留这个偏好", "Keep the preference open")
 
         elif question_id == InterviewQuestionId.PRIOR_KNOWLEDGE:
             if answer.value in {"none", "some", "familiar"}:
@@ -766,6 +836,12 @@ class InterviewService:
         has_specific_question = bool(
             (state.profile.open_question or state.profile.free_form_question or "").strip()
         )
+        if (
+            InterviewQuestionId.CUSTOM_QUESTION not in asked
+            and InterviewQuestionId.MOTIVATION not in asked
+            and needs_scope_clarification(state.profile.free_form_question or "")
+        ):
+            return self._with_progress(state, self._scope_clarification_question(state, collection))
         if InterviewQuestionId.MOTIVATION not in asked:
             return self._with_progress(state, self._motivation_question(language))
         if (
@@ -851,6 +927,8 @@ class InterviewService:
             or InterviewQuestionId.OPEN_QUESTION in asked
         )
         total = 5 if opening_already_specific else TOTAL_STEPS
+        if opening_already_specific and question.id == InterviewQuestionId.CUSTOM_QUESTION:
+            total += 1
         if InterviewQuestionId.NEGOTIATION in asked or state.negotiation_note:
             total += 1
         question.step = len(state.transcript) + 1

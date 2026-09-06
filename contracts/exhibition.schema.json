@@ -23,6 +23,7 @@
     "slug": { "type": ["string", "null"] },
     "title": { "type": "string" },
     "question": { "type": "string" },
+    "exhibitionSetCoverage": { "type": "object", "description": "Source-bound aggregate coverage of the final selected objects; not semantic ground truth." },
     "exhibitionTheme": {
       "type": "string",
       "minLength": 1,

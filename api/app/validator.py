@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
+from hashlib import sha256
 import re
 import unicodedata
+from .set_coverage import persisted_set_coverage_valid
 
 from .models import (
     CuratorialRole,
@@ -279,9 +281,8 @@ def _validate_curatorial_brief(
     warnings: list[ValidationIssue] = []
     brief = exhibition.curatorial_brief
     if brief is None:
-        if exhibition.versions.prompt.startswith(
-            ("v3-curatorial-brief", "v4-vision-public-copy")
-        ):
+        prompt_revision = re.match(r"^v(\d+)(?:[-_]|$)", exhibition.versions.prompt)
+        if prompt_revision and int(prompt_revision.group(1)) >= 3:
             errors.append(
                 ValidationIssue(
                     code="CURATORIAL_BRIEF_REQUIRED",
@@ -494,6 +495,12 @@ def _validate_curatorial_brief(
 def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
     errors: list[ValidationIssue] = []
     warnings: list[ValidationIssue] = []
+    set_coverage_ok = persisted_set_coverage_valid(exhibition)
+    if not set_coverage_ok:
+        errors.append(ValidationIssue(
+            code="EXHIBITION_SET_EVIDENCE_MISSING",
+            message="The selected exhibition no longer retains the required, source-bound core witnesses.",
+        ))
 
     curatorial_brief_ok, brief_errors, brief_warnings = _validate_curatorial_brief(
         exhibition
@@ -539,7 +546,17 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
     for item in exhibition.items:
         if (
             str(item.role) == CuratorialRole.CORE_EVIDENCE.value
-            and item.object.evidence_depth == EvidenceDepth.THIN.value
+            and not (
+                item.object.evidence_depth == EvidenceDepth.FULL.value
+                or (item.object.supports_core_evidence
+                    and item.object.visual_core_evidence is not None
+                    and item.object.visual_core_evidence.question_sha256
+                    == sha256(exhibition.question.encode("utf-8")).hexdigest()
+                    and any(chunk.id == item.object.visual_core_evidence.image_evidence_id
+                            and chunk.source_kind == "collection_image"
+                            and chunk.source_url == item.object.visual_core_evidence.source_url
+                            for chunk in item.object.evidence))
+            )
         ):
             core_evidence_depth_ok = False
             errors.append(
@@ -586,7 +603,15 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
             )
         )
 
-    selection_variety_ok, variety_errors = _validate_selection_variety(exhibition)
+    _variety_ok, variety_issues = _validate_selection_variety(exhibition)
+    # A shared catalogue noun is not duplicate identity or a shared series.
+    # Cross-cultural comparisons often legitimately contain several "Fan" or
+    # "Bowl" records; keep the diagnostic without blocking their exhibition.
+    variety_errors = [issue for issue in variety_issues
+                      if issue.code != "OVERCONCENTRATED_NORMALIZED_TITLE"]
+    warnings.extend(issue for issue in variety_issues
+                    if issue.code == "OVERCONCENTRATED_NORMALIZED_TITLE")
+    selection_variety_ok = not variety_errors
     errors.extend(variety_errors)
 
     evidence_binding_ok = True
@@ -740,6 +765,11 @@ def validate_exhibition(exhibition: Exhibition) -> ValidationResult:
         )
 
     checks = [
+        ValidationCheck(
+            key="exhibition-set-coverage", label="展览目标与核心例子",
+            passed=set_coverage_ok,
+            detail="集合目标在最终展品中逐项保留同一对象的来源证据，不以候选数量代替。",
+        ),
         ValidationCheck(
             key="curatorial-brief",
             label="策展任务书与证据映射",

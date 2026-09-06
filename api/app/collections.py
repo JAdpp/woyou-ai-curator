@@ -11,13 +11,23 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from threading import RLock
 from time import perf_counter
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .models import AgendaInput, EvidenceChunk, EvidenceDepth, MuseumObject
+from .retrieval_trace import RetrievalTraceWriter
+from .retrieval_filters import FilterSpec
+from .cultural_normalization import effective_culture_pack_ids
+from .structured_filters import (
+    EvidenceSearchHit,
+    StructuredFilterError,
+    StructuredFilterIndex,
+    filter_index_path,
+)
 from .dense_retrieval import (
     DEFAULT_EMBEDDING_MODEL,
     DenseIndexManager,
     DenseStatus,
+    EmbeddingProviderSpec,
 )
 
 
@@ -26,8 +36,14 @@ CC0_RIGHTS_URI = "https://creativecommons.org/publicdomain/zero/1.0/"
 CC_BY_4_0_LICENSE = "CC BY 4.0"
 CC_BY_4_0_RIGHTS_URI = "https://creativecommons.org/licenses/by/4.0/"
 FIELD_LEVEL_OPEN_ACCESS_INSTITUTIONS = frozenset({"aic", "cma", "met"})
-HYBRID_RETRIEVAL_METHOD = "hybrid_bm25_dense_rrf_evidence_mmr"
-HYBRID_RETRIEVAL_VERSION = "hybrid-rag-v2"
+HYBRID_RETRIEVAL_METHOD = (
+    "sqlite_object_bm25_evidence_bm25_qwen_embedding_rrf_qwen_rerank"
+)
+HYBRID_RETRIEVAL_VERSION = "hybrid-rag-v4"
+AGENTIC_HYBRID_RETRIEVAL_METHOD = (
+    "fielded_bm25_evidence_bm25_dense_rrf_qwen_rerank"
+)
+AGENTIC_HYBRID_RETRIEVAL_VERSION = "agentic-hybrid-rag-v3"
 BM25_RETRIEVAL_METHOD = "fielded_bm25_hard_anchor"
 BM25_RETRIEVAL_VERSION = "bm25-v1"
 
@@ -40,6 +56,22 @@ BM25_RETRIEVAL_VERSION = "bm25-v1"
 OPEN_QUERY_DENSE_MIN_SCORE = 0.44
 OPEN_QUERY_EVIDENCE_MIN_SCORE = 0.46
 logger = logging.getLogger("app.retrieval")
+
+
+def _call_with_optional_deadline(
+    callback: Any,
+    *args: Any,
+    deadline: float | None,
+    **kwargs: Any,
+) -> Any:
+    """Pass cooperative deadlines to production adapters without breaking fakes."""
+
+    code = getattr(callback, "__code__", None)
+    if deadline is not None and code is not None:
+        accepts_kwargs = bool(code.co_flags & 0x08)
+        if accepts_kwargs or "deadline" in code.co_varnames:
+            kwargs["deadline"] = deadline
+    return callback(*args, **kwargs)
 
 
 class CollectionDataError(RuntimeError):
@@ -84,6 +116,10 @@ class SearchResult:
     retrieval_sources: tuple[str, ...] = ("bm25",)
     dense_score: float | None = None
     evidence_score: float | None = None
+    # Set-level requirements are separate from this object's admission gate.
+    # Only the current source-bound audit may populate these witnesses; recall
+    # scores, inherited audit state and collection metadata cannot create them.
+    set_witnesses: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -871,6 +907,7 @@ def normalize_object(raw: dict[str, Any]) -> MuseumObject | None:
     culture = culture_display or ("; ".join(culture_values) if culture_values else "")
     place = _string(_first(raw, ALIASES["place"]))
     culture_pack_ids = _string_list(_first(raw, ALIASES["culture_pack_ids"], []))
+    culture_pack_ids = effective_culture_pack_ids({"culture": culture, "place": place}, culture_pack_ids)
     # Taxonomy 1.1.0 treated AIC's broad "Arts of Asia" department as a
     # strong East-Asia signal.  Correct that frozen-data artefact at load time
     # when controlled origin fields explicitly and exclusively identify Iran;
@@ -1533,17 +1570,32 @@ class CollectionRepository:
         dense_index_dir: Path | None = None,
         embedding_model_cache_dir: Path | None = None,
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
+        embedding_provider_spec: EmbeddingProviderSpec | None = None,
         dense_top_k: int = 200,
         dense_min_score: float = 0.28,
         evidence_min_score: float = 0.30,
         rrf_k: int = 60,
         hybrid_max_results: int = 250,
         dense_manager: DenseIndexManager | None = None,
+        reranker: Any | None = None,
+        rerank_candidate_count: int = 60,
+        rerank_top_n: int = 24,
+        rerank_instruct: str = "",
+        trace_writer: RetrievalTraceWriter | None = None,
+        structured_filters_enabled: bool = True,
+        structured_filter_index_dir: Path | None = None,
+        evidence_bm25_top_k: int = 120,
     ) -> None:
-        if rag_mode not in {"bm25", "hybrid"}:
-            raise ValueError("rag_mode must be either 'bm25' or 'hybrid'")
+        if rag_mode not in {"bm25", "hybrid", "shadow"}:
+            raise ValueError("rag_mode must be 'bm25', 'hybrid', or 'shadow'")
         if dense_top_k <= 0 or rrf_k <= 0 or hybrid_max_results <= 0:
             raise ValueError("dense_top_k, rrf_k and hybrid_max_results must be positive")
+        if rerank_candidate_count <= 0 or rerank_top_n <= 0:
+            raise ValueError("rerank candidate and output counts must be positive")
+        if rerank_top_n > rerank_candidate_count or rerank_candidate_count > 500:
+            raise ValueError("rerank counts must satisfy top_n <= candidates <= 500")
+        if not 1 <= evidence_bm25_top_k <= 500:
+            raise ValueError("evidence_bm25_top_k must be between 1 and 500")
         if not -1.0 <= dense_min_score <= 1.0:
             raise ValueError("dense_min_score must be between -1 and 1")
         if not -1.0 <= evidence_min_score <= 1.0:
@@ -1556,12 +1608,25 @@ class CollectionRepository:
         self.evidence_min_score = evidence_min_score
         self.rrf_k = rrf_k
         self.hybrid_max_results = hybrid_max_results
+        self.reranker = reranker
+        self.rerank_candidate_count = rerank_candidate_count
+        self.rerank_top_n = rerank_top_n
+        self.rerank_instruct = rerank_instruct.strip()
+        self.trace_writer = trace_writer
         runtime_root = collections_dir.parent.parent / "api" / "runtime" / "cache"
+        self.structured_filters_enabled = structured_filters_enabled
+        self.structured_filter_index_dir = (
+            structured_filter_index_dir or runtime_root / "filters"
+        )
+        self.evidence_bm25_top_k = evidence_bm25_top_k
+        self._structured_indexes: dict[tuple[str, str, str], StructuredFilterIndex] = {}
+        self._structured_index_failures: set[tuple[str, str, str]] = set()
         self._dense_manager = dense_manager or DenseIndexManager(
-            enabled=rag_mode == "hybrid",
+            enabled=rag_mode in {"hybrid", "shadow"},
             index_root=dense_index_dir or runtime_root / "rag",
             model_cache_dir=embedding_model_cache_dir or runtime_root / "fastembed",
             model_name=embedding_model,
+            provider_spec=embedding_provider_spec,
         )
         self._cache_lock = RLock()
         self._cached_signature: tuple[tuple[str, int, int], ...] | None = None
@@ -1880,6 +1945,7 @@ class CollectionRepository:
         dense_signature: tuple[Any, ...],
         *,
         atomic: bool = False,
+        filters: FilterSpec | None = None,
     ) -> tuple[Any, ...]:
         return (
             collection.id,
@@ -1900,24 +1966,333 @@ class CollectionRepository:
             ),
             self.rag_mode,
             atomic,
+            filters or FilterSpec(),
             dense_signature,
         )
 
-    def search(self, agenda: AgendaInput, collection: LoadedCollection) -> list[SearchResult]:
+    @staticmethod
+    def _structured_index_key(
+        collection: LoadedCollection,
+    ) -> tuple[str, str, str]:
+        return (
+            collection.id,
+            collection.version,
+            str(collection.objects_sha256 or ""),
+        )
+
+    def _structured_index(
+        self,
+        collection: LoadedCollection,
+        *,
+        required: bool,
+    ) -> StructuredFilterIndex | None:
+        """Load one verified read-only derivative, failing closed for filters."""
+
+        key = self._structured_index_key(collection)
+        if not self.structured_filters_enabled:
+            if required:
+                raise CollectionDataError(
+                    "STRUCTURED_FILTER_UNAVAILABLE",
+                    "The query requested hard catalogue filters, but structured filtering is disabled.",
+                    collectionId=collection.id,
+                )
+            return None
+        cached = self._structured_indexes.get(key)
+        if cached is not None:
+            expected_directory = filter_index_path(
+                self.structured_filter_index_dir,
+                collection,
+            ).resolve()
+            if cached.directory == expected_directory:
+                return cached
+            # A derivative schema upgrade can intentionally keep the same
+            # collection/version/SHA. Do not pin the process to the old path.
+            self._structured_indexes.pop(key, None)
+        if key in self._structured_index_failures:
+            expected_manifest = (
+                filter_index_path(self.structured_filter_index_dir, collection)
+                / "manifest.json"
+            )
+            if expected_manifest.is_file():
+                # Allow an index repaired/rebuilt while the API stays alive to
+                # be verified on the next query.
+                self._structured_index_failures.discard(key)
+            else:
+                if required:
+                    raise CollectionDataError(
+                        "STRUCTURED_FILTER_UNAVAILABLE",
+                        "The query requested hard catalogue filters, but the verified filter index is unavailable.",
+                        collectionId=collection.id,
+                    )
+                return None
+        try:
+            index = StructuredFilterIndex.for_collection(
+                self.structured_filter_index_dir,
+                collection,
+            )
+        except StructuredFilterError as error:
+            self._structured_index_failures.add(key)
+            logger.warning(
+                "structured retrieval index unavailable for %s: %s",
+                collection.id,
+                error,
+            )
+            if required:
+                raise CollectionDataError(
+                    "STRUCTURED_FILTER_UNAVAILABLE",
+                    "The query requested hard catalogue filters, but the verified filter index is unavailable.",
+                    collectionId=collection.id,
+                    reason=type(error).__name__,
+                ) from error
+            return None
+        self._structured_indexes[key] = index
+        return index
+
+    def _retrieval_cache_signature(
+        self,
+        collection: LoadedCollection,
+        index: StructuredFilterIndex | None,
+    ) -> tuple[Any, ...]:
+        structured = (
+            (
+                index.manifest.get("formatVersion"),
+                index.manifest.get("schemaVersion"),
+                index.manifest.get("databaseSha256"),
+                index.manifest.get("objectSearchMode"),
+                index.manifest.get("evidenceSearchMode"),
+            )
+            if index is not None
+            else (None,)
+        )
+        reranker = (
+            type(self.reranker).__name__ if self.reranker is not None else None,
+            getattr(self.reranker, "rerank_model", None),
+            self.rerank_candidate_count,
+            self.rerank_top_n,
+            self.rerank_instruct,
+        )
+        return (
+            self._dense_manager.cache_signature(collection),
+            structured,
+            reranker,
+        )
+
+    def _eligible_with_filters(
+        self,
+        collection: LoadedCollection,
+        eligible: list[MuseumObject],
+        filters: FilterSpec,
+        *,
+        load_for_evidence_search: bool,
+    ) -> tuple[list[MuseumObject], StructuredFilterIndex | None]:
+        required = not filters.empty
+        if not required and not load_for_evidence_search:
+            return eligible, None
+        index = self._structured_index(collection, required=required)
+        if index is None:
+            return eligible, None
+        if filters.empty:
+            return eligible, index
+        try:
+            allowed_ids = set(
+                index.filter_object_ids(
+                    filters,
+                    allowed_object_ids=(obj.id for obj in eligible),
+                )
+            )
+        except StructuredFilterError as error:
+            raise CollectionDataError(
+                "STRUCTURED_FILTER_FAILED",
+                "The verified catalogue filter could not be applied.",
+                collectionId=collection.id,
+                reason=type(error).__name__,
+            ) from error
+        return [obj for obj in eligible if obj.id in allowed_ids], index
+
+    def _structured_candidate_pool(
+        self, eligible: list[MuseumObject], filters: FilterSpec,
+        excluded: list[set[str]],
+    ) -> list[SearchResult]:
+        """Retain a small exact-filter set as recall, not semantic approval.
+
+        A query can express all its criteria in typed fields and contain no
+        useful lexical subject. Requiring a second lexical hit then discards
+        already verified field matches. Large broad filters still use ranked
+        recall; this channel never arbitrarily truncates such a set.
+        """
+        if filters.empty or len(eligible) > min(self.hybrid_max_results, 60):
+            return []
+        return [
+            SearchResult(
+                obj=obj, score=0.01,
+                retrieval_sources=("structured_filter",),
+                field_scores=(("explicit_filter_match", 1.0),),
+            )
+            for obj in eligible
+            if not any(
+                tokens and tokens & _effective_searchable(_build_search_document(obj))
+                for tokens in excluded
+            )
+        ]
+
+    def _object_fts_lexical_search(
+        self,
+        query: QueryPlan,
+        excluded: list[set[str]],
+        eligible: list[MuseumObject],
+        index: StructuredFilterIndex | None,
+        *,
+        fallback_results: list[SearchResult] | None = None,
+    ) -> tuple[list[SearchResult], tuple[str, ...]]:
+        """Recall object candidates with verified SQLite FTS, then re-score them.
+
+        FTS is only a fast candidate generator. The maintained Python BM25
+        implementation still applies exact-title, exclusion and all-anchor
+        gates to the bounded candidate set. If the derivative is unavailable,
+        or a strict lexical query would otherwise be refused, retrieval falls
+        back to the complete fielded-BM25 scan rather than trading correctness
+        for latency silently.
+        """
+
+        def full_fallback(warning: str) -> tuple[list[SearchResult], tuple[str, ...]]:
+            if fallback_results is not None:
+                return list(fallback_results), (warning,)
+            return self._lexical_search(query, excluded, eligible), (warning,)
+
+        if index is None or not index.object_search_available:
+            return full_fallback("object_fts_unavailable")
+        try:
+            indexed_count = int(index.manifest.get("objectCount", -1))
+            allowed_ids: Iterable[str] | None = (
+                None
+                if indexed_count == len(eligible)
+                else (obj.id for obj in eligible)
+            )
+            hits = index.search_objects(
+                sorted(query.scoring_tokens),
+                top_k=500,
+                allowed_object_ids=allowed_ids,
+            )
+        except StructuredFilterError as error:
+            logger.warning("object-level BM25 unavailable: %s", error)
+            return full_fallback("object_fts_failed")
+
+        hit_scores = {hit.object_id: hit.score for hit in hits}
+        candidate_objects = [obj for obj in eligible if obj.id in hit_scores]
+        results = self._lexical_search(query, excluded, candidate_objects)
+        if not results and (
+            not query.dense_fallback_allowed
+            or query.strict_anchor_groups
+            or query.title_anchor_groups
+        ):
+            # A 500-row OR pool can omit the only record satisfying every
+            # strict anchor when one query term is extremely common. Preserve
+            # the original refusal boundary with an observable rare fallback.
+            return full_fallback("object_fts_recall_fallback")
+        return (
+            [
+                replace(
+                    result,
+                    field_scores=tuple(
+                        (
+                            *result.field_scores,
+                            ("object_fts_bm25", hit_scores[result.obj.id]),
+                        )
+                    ),
+                    retrieval_sources=tuple(
+                        dict.fromkeys((*result.retrieval_sources, "bm25_object_fts"))
+                    ),
+                )
+                for result in results
+            ],
+            (),
+        )
+
+    def _trace_search(
+        self,
+        *,
+        question: str,
+        collection: LoadedCollection,
+        served: list[SearchResult],
+        candidate: list[SearchResult],
+        started: float,
+        warnings: Sequence[str] = (),
+        stage_latency_ms: Mapping[str, float] | None = None,
+    ) -> None:
+        if self.trace_writer is None:
+            return
+        try:
+            self.trace_writer.write(
+                question=question,
+                collection=collection,
+                serving_mode=self.rag_mode,
+                served_results=served,
+                candidate_results=candidate,
+                elapsed_ms=(perf_counter() - started) * 1000.0,
+                dense_status=self._dense_manager.status(collection),
+                warnings=warnings,
+                stage_latency_ms=stage_latency_ms,
+            )
+        except Exception as error:  # traces must never break visitor search
+            logger.warning("retrieval trace write failed: %s", error)
+
+    def search(
+        self,
+        agenda: AgendaInput,
+        collection: LoadedCollection,
+        *,
+        deadline: float | None = None,
+        filters: FilterSpec | None = None,
+    ) -> list[SearchResult]:
+        started = perf_counter()
+        stage_latency_ms: dict[str, float] = {}
+        filters = filters or FilterSpec()
+
+        def check_deadline() -> None:
+            if deadline is not None and perf_counter() >= deadline:
+                raise CollectionDataError(
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                    "Collection retrieval exceeded its wall-clock budget.",
+                )
+
+        check_deadline()
         eligible = self.require_generation_ready(collection)
-        dense_signature = self._dense_manager.cache_signature(collection)
-        cache_key = self._search_cache_key(agenda, collection, dense_signature)
+        filter_started = perf_counter()
+        eligible, evidence_index = self._eligible_with_filters(
+            collection,
+            eligible,
+            filters,
+            load_for_evidence_search=self.rag_mode in {"hybrid", "shadow"},
+        )
+        stage_latency_ms["structured_filter"] = (
+            perf_counter() - filter_started
+        ) * 1000.0
+        dense_signature = self._retrieval_cache_signature(
+            collection,
+            evidence_index,
+        )
+        cache_key = self._search_cache_key(
+            agenda,
+            collection,
+            dense_signature,
+            filters=filters,
+        )
         with self._cache_lock:
             cached = self._search_result_cache.get(cache_key)
             if cached is not None:
                 self._search_result_cache.move_to_end(cache_key)
                 return list(cached)
 
+        plan_started = perf_counter()
         query = _query_plan(agenda.question, collection.concept_aliases)
         excluded = [
             _query_plan(topic, collection.concept_aliases).anchor_tokens
             for topic in agenda.excluded_topics
         ]
+        stage_latency_ms["deterministic_query_plan"] = (
+            perf_counter() - plan_started
+        ) * 1000.0
+        structured_pool = self._structured_candidate_pool(eligible, filters, excluded)
 
         if query.browse_all and not excluded:
             results = [
@@ -1931,13 +2306,50 @@ class CollectionRepository:
             with self._cache_lock:
                 self._remember_search(cache_key, results)
             return results
-        if not query.scoring_tokens and not query.browse_all:
+        if not query.scoring_tokens and not query.browse_all and not structured_pool:
             return []
 
-        lexical_results = self._lexical_search(query, excluded, eligible)
-        if self.rag_mode != "hybrid":
+        lexical_warnings: tuple[str, ...] = ()
+        baseline_lexical_results: list[SearchResult] | None = None
+        if self.rag_mode in {"bm25", "shadow"}:
+            lexical_started = perf_counter()
+            baseline_lexical_results = self._lexical_search(query, excluded, eligible)
+            stage_latency_ms["object_bm25"] = (
+                perf_counter() - lexical_started
+            ) * 1000.0
+
+        if self.rag_mode in {"hybrid", "shadow"}:
+            object_fts_started = perf_counter()
+            lexical_results, lexical_warnings = self._object_fts_lexical_search(
+                query,
+                excluded,
+                eligible,
+                evidence_index,
+                fallback_results=baseline_lexical_results,
+            )
+            stage_latency_ms["object_fts_bm25"] = (
+                perf_counter() - object_fts_started
+            ) * 1000.0
+        else:
+            lexical_results = list(baseline_lexical_results or [])
+        if structured_pool:
+            lexical_ids = {result.obj.id for result in lexical_results}
+            lexical_results.extend(result for result in structured_pool if result.obj.id not in lexical_ids)
+            if self.rag_mode == "shadow" and baseline_lexical_results is not None:
+                baseline_ids = {result.obj.id for result in baseline_lexical_results}
+                baseline_lexical_results.extend(result for result in structured_pool if result.obj.id not in baseline_ids)
+        check_deadline()
+        if self.rag_mode not in {"hybrid", "shadow"}:
             with self._cache_lock:
                 self._remember_search(cache_key, lexical_results)
+            self._trace_search(
+                question=agenda.question,
+                collection=collection,
+                served=lexical_results,
+                candidate=lexical_results,
+                started=started,
+                stage_latency_ms=stage_latency_ms,
+            )
             return lexical_results
         if not lexical_results and not query.dense_fallback_allowed:
             # Unknown subjects in either language retain the lexical refusal
@@ -1947,13 +2359,32 @@ class CollectionRepository:
                 self._remember_search(cache_key, [])
             return []
 
+        dense_load_started = perf_counter()
         dense_index = self._dense_manager.get(collection)
+        stage_latency_ms["dense_index_load"] = (
+            perf_counter() - dense_load_started
+        ) * 1000.0
         if dense_index is None:
             # This path is intentionally a complete BM25 result, not a partial
             # approximation.  DenseIndexManager logs the concrete reason once.
+            served_lexical = (
+                list(baseline_lexical_results)
+                if self.rag_mode == "shadow"
+                and baseline_lexical_results is not None
+                else lexical_results
+            )
             with self._cache_lock:
-                self._remember_search(cache_key, lexical_results)
-            return lexical_results
+                self._remember_search(cache_key, served_lexical)
+            self._trace_search(
+                question=agenda.question,
+                collection=collection,
+                served=served_lexical,
+                candidate=lexical_results,
+                started=started,
+                warnings=tuple(dict.fromkeys((*lexical_warnings, "dense_unavailable"))),
+                stage_latency_ms=stage_latency_ms,
+            )
+            return served_lexical
 
         try:
             results = self._hybrid_search(
@@ -1963,7 +2394,12 @@ class CollectionRepository:
                 eligible,
                 lexical_results,
                 dense_index,
+                evidence_index=evidence_index,
+                deadline=deadline,
+                stage_latency_ms=stage_latency_ms,
             )
+        except CollectionDataError:
+            raise
         except Exception as error:
             # A query-time ONNX or cache read error must not make the collection
             # unavailable.  The warning is explicit and BM25 keeps refusal
@@ -1977,11 +2413,58 @@ class CollectionRepository:
             # Do not cache a transient query failure under the hybrid key: the
             # next request must retry dense retrieval instead of silently
             # serving BM25 until the LRU entry expires.
-            return lexical_results
+            self._trace_search(
+                question=agenda.question,
+                collection=collection,
+                served=(
+                    baseline_lexical_results
+                    if self.rag_mode == "shadow"
+                    and baseline_lexical_results is not None
+                    else lexical_results
+                ),
+                candidate=lexical_results,
+                started=started,
+                warnings=tuple(
+                    dict.fromkeys((*lexical_warnings, "dense_query_failed"))
+                ),
+                stage_latency_ms=stage_latency_ms,
+            )
+            return (
+                list(baseline_lexical_results)
+                if self.rag_mode == "shadow"
+                and baseline_lexical_results is not None
+                else lexical_results
+            )
         self._dense_manager.mark_query_success(collection, dense_index)
-        with self._cache_lock:
-            self._remember_search(cache_key, results)
-        return results
+        served = (
+            list(baseline_lexical_results)
+            if self.rag_mode == "shadow" and baseline_lexical_results is not None
+            else results
+        )
+        rerank_failed = any(
+            "qwen_rerank_fallback" in result.retrieval_sources
+            for result in results
+        )
+        if not rerank_failed:
+            with self._cache_lock:
+                self._remember_search(cache_key, served)
+        self._trace_search(
+            question=agenda.question,
+            collection=collection,
+            served=served,
+            candidate=results,
+            started=started,
+            warnings=tuple(
+                dict.fromkeys(
+                    (
+                        *lexical_warnings,
+                        *(("rerank_failed",) if rerank_failed else ()),
+                    )
+                )
+            ),
+            stage_latency_ms=stage_latency_ms,
+        )
+        return served
 
     def search_many(
         self,
@@ -1990,6 +2473,7 @@ class CollectionRepository:
         *,
         deadline: float | None = None,
         atomic: bool = False,
+        filters: FilterSpec | None = None,
     ) -> list[list[SearchResult]]:
         """Search several agendas while batching lexical and dense recall.
 
@@ -2003,6 +2487,7 @@ class CollectionRepository:
         agenda_list = list(agendas)
         if not agenda_list:
             return []
+        filters = filters or FilterSpec()
 
         def check_deadline() -> None:
             if deadline is not None and perf_counter() >= deadline:
@@ -2012,7 +2497,16 @@ class CollectionRepository:
                 )
 
         eligible = self.require_generation_ready(collection)
-        dense_signature = self._dense_manager.cache_signature(collection)
+        eligible, evidence_index = self._eligible_with_filters(
+            collection,
+            eligible,
+            filters,
+            load_for_evidence_search=self.rag_mode in {"hybrid", "shadow"},
+        )
+        dense_signature = self._retrieval_cache_signature(
+            collection,
+            evidence_index,
+        )
         outputs: list[list[SearchResult] | None] = [None] * len(agenda_list)
         pending: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
 
@@ -2023,6 +2517,7 @@ class CollectionRepository:
                 collection,
                 dense_signature,
                 atomic=atomic,
+                filters=filters,
             )
             with self._cache_lock:
                 cached = self._search_result_cache.get(cache_key)
@@ -2070,6 +2565,7 @@ class CollectionRepository:
                 "query": query,
                 "excluded": excluded,
                 "positions": [position],
+                "started": perf_counter(),
             }
 
         if not pending:
@@ -2081,19 +2577,25 @@ class CollectionRepository:
         atomic_exact_prefilter = False
         atomic_dense_index: Any | None = None
         atomic_query_vectors: list[Any] = []
-        if atomic and self.rag_mode == "hybrid":
+        if atomic and self.rag_mode in {"hybrid", "shadow"}:
             dense_index = self._dense_manager.get(collection)
             if dense_index is not None:
                 try:
                     check_deadline()
                     embed_many = getattr(dense_index, "embed_queries", None)
                     if callable(embed_many):
-                        query_vectors = embed_many(
-                            [item[1]["agenda"].question for item in pending_items]
+                        query_vectors = _call_with_optional_deadline(
+                            embed_many,
+                            [item[1]["agenda"].question for item in pending_items],
+                            deadline=deadline,
                         )
                     else:
                         query_vectors = [
-                            dense_index.embed_query(item[1]["agenda"].question)
+                            _call_with_optional_deadline(
+                                dense_index.embed_query,
+                                item[1]["agenda"].question,
+                                deadline=deadline,
+                            )
                             for item in pending_items
                         ]
                     atomic_dense_index = dense_index
@@ -2281,6 +2783,22 @@ class CollectionRepository:
             lexical_eligible,
             deadline=deadline,
         )
+        shadow_served_batches = [list(batch) for batch in lexical_batches]
+        if (
+            self.rag_mode == "shadow"
+            and atomic
+            and (atomic_dense_prefilter or atomic_exact_prefilter)
+        ):
+            # Shadow evaluation must compare against the true full-catalogue
+            # BM25 baseline, not a baseline already narrowed by dense recall.
+            shadow_served_batches = self._lexical_search_many(
+                [
+                    (item["query"], item["excluded"])
+                    for _, item in pending_items
+                ],
+                eligible,
+                deadline=deadline,
+            )
         if (
             atomic
             and atomic_dense_index is not None
@@ -2319,6 +2837,9 @@ class CollectionRepository:
                         [],
                         atomic_dense_index,
                         query_vector=query_vector,
+                        evidence_index=evidence_index,
+                        deadline=deadline,
+                        allow_rerank=False,
                     )
                 except CollectionDataError:
                     raise
@@ -2394,12 +2915,13 @@ class CollectionRepository:
                 for batch in lexical_batches
             ]
         hybrid_pending: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
-        for (cache_key, item), lexical_results in zip(
+        for batch_index, ((cache_key, item), lexical_results) in enumerate(zip(
             pending_items,
             lexical_batches,
             strict=True,
-        ):
+        )):
             item["lexical_results"] = lexical_results
+            item["served_lexical_results"] = shadow_served_batches[batch_index]
             # The visitor's original question already receives hybrid recall.
             # Planner-generated atomic queries are a precision complement:
             # every content leg is an explicit catalogue constraint and every
@@ -2408,11 +2930,24 @@ class CollectionRepository:
             # both redundant and harmful: it can reintroduce objects that do
             # not satisfy the atomic legs, while spending most of the bounded
             # pre-audit budget on a second embedding pass.
-            if self.rag_mode != "hybrid" or atomic:
+            if self.rag_mode == "bm25" or atomic:
+                served_results = (
+                    item["served_lexical_results"]
+                    if self.rag_mode == "shadow"
+                    else lexical_results
+                )
                 with self._cache_lock:
-                    self._remember_search(cache_key, lexical_results)
+                    self._remember_search(cache_key, served_results)
                 for position in item["positions"]:
-                    outputs[position] = list(lexical_results)
+                    outputs[position] = list(served_results)
+                if self.rag_mode == "shadow":
+                    self._trace_search(
+                        question=item["agenda"].question,
+                        collection=collection,
+                        served=served_results,
+                        candidate=lexical_results,
+                        started=item["started"],
+                    )
                 continue
             if not lexical_results and not item["query"].dense_fallback_allowed:
                 with self._cache_lock:
@@ -2429,18 +2964,28 @@ class CollectionRepository:
         dense_index = self._dense_manager.get(collection)
         if dense_index is None:
             for cache_key, item in pending.items():
-                results = item["lexical_results"]
+                results = item["served_lexical_results"]
                 with self._cache_lock:
                     self._remember_search(cache_key, results)
                 for position in item["positions"]:
                     outputs[position] = list(results)
+                self._trace_search(
+                    question=item["agenda"].question,
+                    collection=collection,
+                    served=results,
+                    candidate=item["lexical_results"],
+                    started=item["started"],
+                    warnings=("dense_unavailable",),
+                )
             return [list(result or []) for result in outputs]
 
         items = list(pending.items())
         check_deadline()
         try:
-            query_vectors = dense_index.embed_queries(
-                [item[1]["agenda"].question for item in items]
+            query_vectors = _call_with_optional_deadline(
+                dense_index.embed_queries,
+                [item[1]["agenda"].question for item in items],
+                deadline=deadline,
             )
             check_deadline()
             if len(query_vectors) != len(items):
@@ -2479,7 +3024,11 @@ class CollectionRepository:
                     item["lexical_results"],
                     dense_index,
                     query_vector=query_vector,
+                    evidence_index=evidence_index,
+                    deadline=deadline,
                 )
+            except CollectionDataError:
+                raise
             except Exception as error:
                 logger.warning(
                     "batched hybrid RAG query degraded to BM25 for %s: %s",
@@ -2487,10 +3036,37 @@ class CollectionRepository:
                     error,
                 )
                 failures.append(error)
-                results = item["lexical_results"]
+                results = item["served_lexical_results"]
+                self._trace_search(
+                    question=item["agenda"].question,
+                    collection=collection,
+                    served=results,
+                    candidate=item["lexical_results"],
+                    started=item["started"],
+                    warnings=("dense_query_failed",),
+                )
             else:
-                with self._cache_lock:
-                    self._remember_search(cache_key, results)
+                rerank_failed = any(
+                    "qwen_rerank_fallback" in result.retrieval_sources
+                    for result in results
+                )
+                served_results = (
+                    item["served_lexical_results"]
+                    if self.rag_mode == "shadow"
+                    else results
+                )
+                if not rerank_failed:
+                    with self._cache_lock:
+                        self._remember_search(cache_key, served_results)
+                self._trace_search(
+                    question=item["agenda"].question,
+                    collection=collection,
+                    served=served_results,
+                    candidate=results,
+                    started=item["started"],
+                    warnings=("rerank_failed",) if rerank_failed else (),
+                )
+                results = served_results
             for position in item["positions"]:
                 outputs[position] = list(results)
 
@@ -2807,6 +3383,10 @@ class CollectionRepository:
         dense_index: Any,
         *,
         query_vector: Any | None = None,
+        evidence_index: StructuredFilterIndex | None = None,
+        deadline: float | None = None,
+        allow_rerank: bool = True,
+        stage_latency_ms: dict[str, float] | None = None,
     ) -> list[SearchResult]:
         """Fuse BM25 and dense recall, then rerank against evidence chunks.
 
@@ -2818,6 +3398,15 @@ class CollectionRepository:
         stricter open-query floors below.
         """
 
+        def check_deadline() -> None:
+            if deadline is not None and perf_counter() >= deadline:
+                raise CollectionDataError(
+                    "RETRIEVAL_SEARCH_TIMEOUT",
+                    "Collection retrieval exceeded its wall-clock budget.",
+                )
+
+        check_deadline()
+        stages = stage_latency_ms if stage_latency_ms is not None else {}
         eligible_by_id = {obj.id: obj for obj in eligible}
         dense_floor = (
             max(self.dense_min_score, OPEN_QUERY_DENSE_MIN_SCORE)
@@ -2830,7 +3419,17 @@ class CollectionRepository:
             else self.evidence_min_score
         )
         if query_vector is None:
-            query_vector = dense_index.embed_query(question)
+            embedding_started = perf_counter()
+            query_vector = _call_with_optional_deadline(
+                dense_index.embed_query,
+                question,
+                deadline=deadline,
+            )
+            stages["query_embedding"] = (
+                perf_counter() - embedding_started
+            ) * 1000.0
+        check_deadline()
+        dense_recall_started = perf_counter()
         object_dense_hits = dense_index.search_vector(
             query_vector,
             top_k=self.dense_top_k,
@@ -2842,6 +3441,10 @@ class CollectionRepository:
             query_vector,
             top_k=self.dense_top_k * 2,
         )
+        stages["dense_vector_recall"] = (
+            perf_counter() - dense_recall_started
+        ) * 1000.0
+        check_deadline()
 
         # Evidence vectors deliberately carry a little object context to make
         # catalogue fragments retrievable.  That context must never turn an
@@ -2919,6 +3522,79 @@ class CollectionRepository:
                 continue
             dense_documents[object_id] = document
 
+        # Object-level BM25 and dense recall are not enough when the decisive
+        # catalogue phrase lives only inside one institution evidence row.
+        # Query the verified FTS5 derivative as an independent lexical channel,
+        # then re-apply the same provenance, exclusion and anchor gates used by
+        # dense recall before admitting any new object ID.
+        evidence_bm25_scores: dict[str, float] = {}
+        evidence_bm25_rank: dict[str, int] = {}
+        evidence_bm25_ids: dict[str, list[str]] = {}
+        if evidence_index is not None:
+            evidence_bm25_started = perf_counter()
+            try:
+                indexed_count = int(
+                    evidence_index.manifest.get("objectCount", -1)
+                )
+                evidence_lexical_hits = evidence_index.search_evidence(
+                    sorted(query.scoring_tokens),
+                    top_k=self.evidence_bm25_top_k,
+                    allowed_object_ids=(
+                        None
+                        if indexed_count == len(eligible_by_id)
+                        else eligible_by_id
+                    ),
+                )
+            except StructuredFilterError as error:
+                logger.warning(
+                    "evidence-level BM25 unavailable for %s: %s",
+                    getattr(evidence_index, "manifest", {}).get(
+                        "collectionId", "collection"
+                    ),
+                    error,
+                )
+                evidence_lexical_hits = []
+            stages["evidence_bm25"] = (
+                perf_counter() - evidence_bm25_started
+            ) * 1000.0
+            check_deadline()
+            for hit in evidence_lexical_hits:
+                obj = eligible_by_id.get(hit.object_id)
+                if obj is None or not raw_evidence_matches(obj, hit.evidence_id):
+                    continue
+                document = dense_documents.get(hit.object_id)
+                if document is None:
+                    document = _build_search_document(obj)
+                effective_searchable = _effective_searchable(document)
+                if any(
+                    topic_tokens and topic_tokens & effective_searchable
+                    for topic_tokens in excluded
+                ):
+                    continue
+                if query.strict_anchor_groups and any(
+                    not group & effective_searchable
+                    for group in query.strict_anchor_groups
+                ):
+                    continue
+                if query.title_anchor_groups and any(
+                    not group
+                    & (document.title - document.contextual_anchor_suppressions)
+                    for group in query.title_anchor_groups
+                ):
+                    continue
+                dense_documents.setdefault(hit.object_id, document)
+                evidence_bm25_scores[hit.object_id] = max(
+                    evidence_bm25_scores.get(hit.object_id, 0.0),
+                    hit.score,
+                )
+                evidence_bm25_rank.setdefault(
+                    hit.object_id,
+                    len(evidence_bm25_rank) + 1,
+                )
+                evidence_bm25_ids.setdefault(hit.object_id, []).append(
+                    hit.evidence_id
+                )
+
         # Collapse object-level and evidence-level dense rankings into one
         # dense channel before the outer BM25+dense RRF.  Evidence recall is
         # weighted slightly higher because it points to a citable institution
@@ -2960,6 +3636,7 @@ class CollectionRepository:
             result.obj.id: rank for rank, result in enumerate(lexical_pool, start=1)
         }
         candidate_ids = set(lexical_by_id)
+        candidate_ids.update(evidence_bm25_scores)
         if query.dense_fallback_allowed:
             candidate_ids.update(dense_scores)
         if not candidate_ids:
@@ -2969,11 +3646,15 @@ class CollectionRepository:
         # row can have inherited relevance from object context; inspecting more
         # than the previous top three lets a genuinely matching description
         # survive behind an acquisition/classification fragment.
+        evidence_rescore_started = perf_counter()
         evidence_hits = dense_index.evidence_hits(
             query_vector,
             candidate_ids,
             max_evidence_ids=5,
         )
+        stages["dense_evidence_rescore"] = (
+            perf_counter() - evidence_rescore_started
+        ) * 1000.0
         # Dense-only objects need a non-provenance evidence row that clears the
         # semantic floor. BM25 objects retain their lexical hard gate even when
         # catalogue prose is very short.
@@ -3000,6 +3681,7 @@ class CollectionRepository:
             object_id
             for object_id in candidate_ids
             if object_id in lexical_by_id
+            or object_id in evidence_bm25_scores
             or (
                 object_id in dense_scores
                 and qualified_evidence_by_object.get(object_id)
@@ -3019,10 +3701,16 @@ class CollectionRepository:
                 if object_id in dense_rank
                 else 0.0
             )
+            + (
+                (1.15 / (self.rrf_k + evidence_bm25_rank[object_id]))
+                if object_id in evidence_bm25_rank
+                else 0.0
+            )
             for object_id in candidate_ids
         }
         top_rrf = max(rrf_scores.values(), default=1.0)
         top_bm25 = max((item.score for item in lexical_pool), default=1.0)
+        top_evidence_bm25 = max(evidence_bm25_scores.values(), default=1.0)
 
         def floor_normalise(score: float | None, floor: float) -> float:
             if score is None or score <= floor:
@@ -3044,6 +3732,11 @@ class CollectionRepository:
             evidence_supported = qualified_evidence_score is not None
             dense_score = dense_scores.get(object_id)
             bm25_signal = lexical.score / top_bm25 if lexical else 0.0
+            evidence_bm25_signal = (
+                evidence_bm25_scores[object_id] / top_evidence_bm25
+                if object_id in evidence_bm25_scores and top_evidence_bm25
+                else 0.0
+            )
             dense_signal = floor_normalise(dense_score, dense_floor)
             evidence_signal = floor_normalise(
                 qualified_evidence_score,
@@ -3055,7 +3748,11 @@ class CollectionRepository:
             score = 100.0 * (
                 0.55 * rrf_signal
                 + 0.25 * evidence_signal
-                + 0.20 * max(bm25_signal, dense_signal)
+                + 0.20 * max(
+                    bm25_signal,
+                    evidence_bm25_signal,
+                    dense_signal,
+                )
             )
 
             document = dense_documents.get(object_id)
@@ -3069,6 +3766,7 @@ class CollectionRepository:
                 )
             )
             evidence_ids = list(lexical.matched_evidence_ids if lexical else ())
+            evidence_ids.extend(evidence_bm25_ids.get(object_id, ()))
             evidence_ids.extend(evidence_recall_ids.get(object_id, ()))
             if evidence_supported:
                 evidence_ids.extend(
@@ -3080,7 +3778,9 @@ class CollectionRepository:
                 for evidence_id in dict.fromkeys(evidence_ids)
                 if evidence_id in valid_ids
             )
-            sources = ["bm25"] if lexical else []
+            sources = list(lexical.retrieval_sources if lexical else ())
+            if object_id in evidence_bm25_rank:
+                sources.append("bm25_evidence")
             if object_id in object_dense_rank and object_id in dense_object_ids:
                 sources.append("dense_object")
             if object_id in evidence_recall_rank and object_id in dense_object_ids:
@@ -3092,6 +3792,13 @@ class CollectionRepository:
             if evidence_supported:
                 sources.append("evidence_rerank")
             fields = list(lexical.field_scores if lexical else ())
+            if object_id in evidence_bm25_scores:
+                fields.append(
+                    (
+                        "evidence_bm25",
+                        round(evidence_bm25_scores[object_id], 6),
+                    )
+                )
             if object_id in object_dense_scores:
                 fields.append(
                     ("dense_object_cosine", round(object_dense_scores[object_id], 6))
@@ -3128,12 +3835,233 @@ class CollectionRepository:
             )
 
         results.sort(key=lambda result: (-result.score, result.obj.id))
-        return results[: self.hybrid_max_results]
+        results = results[: self.hybrid_max_results]
+        if not allow_rerank:
+            return results
+        rerank_started = perf_counter()
+        reranked = self._apply_semantic_reranker(
+            question,
+            results,
+            deadline=deadline,
+        )
+        stages["qwen_rerank"] = (perf_counter() - rerank_started) * 1000.0
+        return reranked
+
+    @staticmethod
+    def _rerank_document(result: SearchResult, *, limit: int = 360) -> str:
+        """Build a short evidence-first rerank record under provider limits."""
+
+        obj = result.obj
+        evidence_by_id = {chunk.id: chunk for chunk in obj.evidence}
+        evidence = [
+            evidence_by_id[evidence_id].text
+            for evidence_id in result.matched_evidence_ids
+            if evidence_id in evidence_by_id
+        ][:2]
+        if not evidence:
+            evidence = [chunk.text for chunk in obj.evidence[:2]]
+        text = " | ".join(
+            part
+            for part in (
+                f"title: {obj.title}",
+                f"creator: {obj.creator or obj.maker}",
+                f"date: {obj.date}",
+                f"culture: {obj.culture_display or obj.culture}",
+                f"type: {obj.type or obj.classification}",
+                f"material: {obj.material or obj.medium}",
+                "evidence: " + " ".join(evidence),
+            )
+            if part.split(":", 1)[-1].strip()
+        )
+        # Sixty candidates plus a repeated query must remain below Qwen's
+        # whole-request context budget. Museum evidence is expanded only after
+        # rerank, in the source-bound DeepSeek audit.
+        return re.sub(r"\s+", " ", text).strip()[:limit]
+
+    def _apply_semantic_reranker(
+        self,
+        question: str,
+        results: list[SearchResult],
+        *,
+        deadline: float | None = None,
+    ) -> list[SearchResult]:
+        """Apply Qwen rerank between RRF recall and evidence audit.
+
+        A reranker is an ordering aid, never an evidence authority. Failure is
+        observable on every candidate and preserves the RRF order so the later
+        source-quote audit still controls answerability.
+        """
+
+        if self.reranker is None or not results:
+            return results
+        if deadline is not None and deadline - perf_counter() < 0.5:
+            return [
+                replace(
+                    result,
+                    retrieval_sources=tuple(
+                        dict.fromkeys(
+                            (*result.retrieval_sources, "qwen_rerank_fallback")
+                        )
+                    ),
+                )
+                for result in results
+            ]
+
+        # Model Studio accounts for the query once per candidate and has a
+        # conservative ~30k request budget. Dynamically shrink the window and
+        # evidence record instead of letting perfectly valid long questions
+        # fail a fixed 60 x 360-character request.
+        request_budget = max(
+            0,
+            28_500 - len(self.rerank_instruct) - 128,
+        )
+        candidate_count = min(self.rerank_candidate_count, len(results))
+        while candidate_count > 0:
+            per_document = (
+                request_budget - len(question) * candidate_count
+            ) // candidate_count
+            if per_document >= 120:
+                break
+            candidate_count -= 1
+        if candidate_count <= 0:
+            logger.warning("Qwen rerank skipped because the request cannot fit safely")
+            return [
+                replace(
+                    result,
+                    retrieval_sources=tuple(
+                        dict.fromkeys(
+                            (*result.retrieval_sources, "qwen_rerank_fallback")
+                        )
+                    ),
+                )
+                for result in results
+            ]
+        window = results[:candidate_count]
+        document_limit = min(360, max(120, per_document))
+        documents = [
+            self._rerank_document(result, limit=document_limit)
+            for result in window
+        ]
+        try:
+            kwargs: dict[str, Any] = {
+                "top_n": min(self.rerank_top_n, candidate_count),
+                "instruct": self.rerank_instruct or None,
+            }
+            # The production provider accepts an absolute cooperative
+            # deadline. Test doubles and older adapters remain compatible.
+            batch = _call_with_optional_deadline(
+                self.reranker.rerank,
+                question,
+                documents,
+                deadline=deadline,
+                **kwargs,
+            )
+            decisions = list(batch.results)
+            if not decisions:
+                raise ValueError("reranker returned no candidates")
+        except Exception as error:
+            logger.warning("Qwen rerank unavailable; preserving RRF order: %s", error)
+            return [
+                replace(
+                    result,
+                    retrieval_sources=tuple(
+                        dict.fromkeys(
+                            (*result.retrieval_sources, "qwen_rerank_fallback")
+                        )
+                    ),
+                )
+                for result in results
+            ]
+
+        top_original_score = max((result.score for result in window), default=1.0)
+        reranked: list[SearchResult] = []
+        selected_indices: set[int] = set()
+        for decision in decisions:
+            index = int(decision.index)
+            if index in selected_indices or not 0 <= index < len(window):
+                continue
+            selected_indices.add(index)
+            base = window[index]
+            relevance = max(0.0, min(1.0, float(decision.relevance_score)))
+            prior = base.score / top_original_score if top_original_score else 0.0
+            reranked.append(
+                replace(
+                    base,
+                    score=100.0 * (0.85 * relevance + 0.15 * prior),
+                    field_scores=tuple(
+                        (
+                            *base.field_scores,
+                            ("pre_qwen_rerank", round(base.score, 6)),
+                            ("qwen_rerank", round(relevance, 6)),
+                        )
+                    ),
+                    retrieval_sources=tuple(
+                        dict.fromkeys((*base.retrieval_sources, "qwen3_rerank"))
+                    ),
+                )
+            )
+        if not reranked:
+            logger.warning("Qwen rerank returned only invalid candidate indexes")
+            return results
+
+        # Keep the unselected tail available for cross-cultural quota sampling
+        # and bounded query expansion. The DeepSeek audit sees only its sampled
+        # top window and still requires exact source IDs and quotes.
+        selected_ids = {result.obj.id for result in reranked}
+        return [
+            *reranked,
+            *[result for result in results if result.obj.id not in selected_ids],
+        ][: self.hybrid_max_results]
+
+    def rerank_results(
+        self,
+        question: str,
+        results: list[SearchResult],
+        *,
+        deadline: float | None = None,
+    ) -> list[SearchResult]:
+        """Rerank a fused agentic pool once before its source-bound audit."""
+
+        if self.rag_mode != "hybrid" or self.reranker is None or not results:
+            return results
+        window = results[: min(self.rerank_candidate_count, len(results))]
+        if window and all(
+            "qwen3_rerank" in result.retrieval_sources for result in window
+        ):
+            return results
+        return self._apply_semantic_reranker(
+            question,
+            results,
+            deadline=deadline,
+        )
 
     def retrieval_status(self, collection: LoadedCollection) -> DenseStatus:
         """Return the current retrieval mode/reason for audit and diagnostics."""
 
         return self._dense_manager.status(collection)
+
+    def structured_retrieval_status(
+        self,
+        collection: LoadedCollection,
+    ) -> dict[str, object]:
+        """Report verified sparse derivatives used by the hybrid candidate."""
+
+        index = self._structured_index(collection, required=False)
+        if index is None:
+            return {
+                "available": False,
+                "objectSearchAvailable": False,
+                "evidenceSearchAvailable": False,
+                "formatVersion": None,
+            }
+        return {
+            "available": (
+                index.object_search_available and index.evidence_search_available
+            ),
+            "objectSearchAvailable": index.object_search_available,
+            "evidenceSearchAvailable": index.evidence_search_available,
+            "formatVersion": index.manifest.get("formatVersion"),
+        }
 
     def _remember_search(
         self,

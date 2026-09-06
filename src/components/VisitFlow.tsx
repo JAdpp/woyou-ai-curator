@@ -123,7 +123,9 @@ function CurationRecovery({
           <h2>{t.recovery.heading}</h2>
         </div>
       </div>
-      <p className={styles.recoveryBody}>{t.recovery.body}</p>
+      <p className={styles.recoveryBody} role="status">
+        {failedJob?.error?.trim() || t.recovery.body}
+      </p>
       <p className={styles.retainedInquiry}>
         <span aria-hidden="true">✓</span>
         <span>

@@ -16,11 +16,12 @@ import os
 import re
 import shutil
 import time
-from dataclasses import dataclass
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Callable, Iterable, Iterator, Protocol, Sequence
 from uuid import uuid4
 
 
@@ -47,10 +48,120 @@ DEFAULT_MODEL_RUNTIME_SOURCE = (
     "paraphrase-multilingual-MiniLM-L12-v2-onnx-Q"
 )
 DEFAULT_MODEL_LICENSE = "Apache-2.0"
+DEFAULT_ALIYUN_EMBEDDING_MODEL = "qwen3.7-text-embedding"
+DEFAULT_ALIYUN_EMBEDDING_DIMENSION = 768
+SUPPORTED_ALIYUN_EMBEDDING_DIMENSIONS = frozenset(
+    {256, 512, 768, 1024, 1536, 2048, 2560}
+)
+MAX_EMBEDDING_PROVIDER_ATTEMPTS = 5
+DEFAULT_QUERY_INSTRUCT = (
+    "Given a museum collection question in any language, retrieve collection "
+    "records and evidence passages that help answer it across cultures."
+)
 
 
 class DenseRetrievalError(RuntimeError):
     """A build-time dense retrieval failure."""
+
+
+class EmbeddingBatchLike(Protocol):
+    """Hosted batch shape accepted by the retrieval adapter."""
+
+    @property
+    def vectors(self) -> Sequence[Any]: ...
+
+
+EmbeddingOutput = Sequence[Any] | EmbeddingBatchLike
+
+
+class EmbeddingProvider(Protocol):
+    """Small synchronous contract shared by local and hosted encoders."""
+
+    @property
+    def model_name(self) -> str: ...
+
+    @property
+    def max_embedding_batch_size(self) -> int | None: ...
+
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+        *,
+        deadline: float | None = None,
+    ) -> EmbeddingOutput: ...
+
+    def embed_queries(
+        self,
+        texts: Sequence[str],
+        *,
+        instruct: str | None = None,
+        deadline: float | None = None,
+    ) -> EmbeddingOutput: ...
+
+    def artifact_metadata(self) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class EmbeddingProviderSpec:
+    """Versioned provider settings; credentials are never serialized."""
+
+    provider: str = "local"
+    model_name: str = DEFAULT_EMBEDDING_MODEL
+    dimension: int | None = None
+    query_instruct: str = DEFAULT_QUERY_INSTRUCT
+    api_host: str | None = None
+    api_key: str | None = field(default=None, repr=False, compare=False)
+    timeout_seconds: float = 20.0
+    max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        provider = self.provider.strip().lower()
+        model_name = self.model_name.strip()
+        query_instruct = self.query_instruct.strip()
+        if provider not in {"local", "aliyun"}:
+            raise ValueError("embedding provider must be 'local' or 'aliyun'")
+        if not model_name:
+            raise ValueError("embedding model must not be blank")
+        if self.dimension is not None and self.dimension <= 0:
+            raise ValueError("embedding dimension must be positive")
+        if self.timeout_seconds <= 0:
+            raise ValueError("embedding timeout must be positive")
+        if (
+            not isinstance(self.max_attempts, int)
+            or isinstance(self.max_attempts, bool)
+            or not 1 <= self.max_attempts <= MAX_EMBEDDING_PROVIDER_ATTEMPTS
+        ):
+            raise ValueError("embedding attempts must be between one and five")
+        dimension = self.dimension
+        if provider == "aliyun":
+            dimension = dimension or DEFAULT_ALIYUN_EMBEDDING_DIMENSION
+            if dimension not in SUPPORTED_ALIYUN_EMBEDDING_DIMENSIONS:
+                raise ValueError("Aliyun embedding dimension is not supported")
+            if not query_instruct:
+                raise ValueError("Aliyun query embedding instruction must not be blank")
+            if not (self.api_host or "").strip() or not (self.api_key or "").strip():
+                raise ValueError("Aliyun embedding requires an API host and key")
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "model_name", model_name)
+        object.__setattr__(self, "dimension", dimension)
+        object.__setattr__(self, "query_instruct", query_instruct)
+
+    @property
+    def fingerprint_material(self) -> str:
+        instruct_sha = hashlib.sha256(
+            self.query_instruct.encode("utf-8")
+        ).hexdigest()
+        return "\0".join(
+            (
+                self.provider,
+                self.model_name,
+                str(self.dimension or "native"),
+                instruct_sha,
+            )
+        )
+
+
+EmbeddingProviderFactory = Callable[[bool], EmbeddingProvider]
 
 
 @dataclass(frozen=True)
@@ -134,7 +245,11 @@ def evidence_embedding_text(obj: Any, chunk: Any) -> str:
     )
 
 
-def collection_fingerprint(collection: Any, model_name: str) -> str:
+def collection_fingerprint(
+    collection: Any,
+    model_name: str,
+    provider_spec: EmbeddingProviderSpec | None = None,
+) -> str:
     """Bind a cache to retrieval format, model, collection version and text."""
 
     digest = hashlib.sha256()
@@ -142,6 +257,12 @@ def collection_fingerprint(collection: Any, model_name: str) -> str:
         f"dense-index-v{INDEX_FORMAT_VERSION}\0{TEXT_RECIPE_VERSION}\0".encode()
     )
     digest.update(model_name.encode("utf-8"))
+    # Preserve existing MiniLM cache addresses. Hosted-provider policy is part
+    # of the index identity because model, dimension and query instruction may
+    # not be mixed across builds.
+    if provider_spec is not None and provider_spec.provider != "local":
+        digest.update(b"\0embedding-provider-spec\0")
+        digest.update(provider_spec.fingerprint_material.encode("utf-8"))
     digest.update(b"\0")
     digest.update(_text(collection.id).encode("utf-8"))
     digest.update(b"\0")
@@ -168,6 +289,8 @@ def collection_fingerprint(collection: Any, model_name: str) -> str:
 
 class FastEmbedProvider:
     """Small adapter that keeps the optional dependency out of API startup."""
+
+    max_embedding_batch_size: int | None = None
 
     def __init__(
         self,
@@ -207,6 +330,26 @@ class FastEmbedProvider:
     def embed(self, texts: Sequence[str], batch_size: int = 64) -> Iterator[Any]:
         yield from self._model.embed(list(texts), batch_size=batch_size)
 
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+        *,
+        deadline: float | None = None,
+    ) -> Sequence[Any]:
+        return list(self.embed(texts, batch_size=min(64, max(1, len(texts)))))
+
+    def embed_queries(
+        self,
+        texts: Sequence[str],
+        *,
+        instruct: str | None = None,
+        deadline: float | None = None,
+    ) -> Sequence[Any]:
+        # The pinned MiniLM baseline has no query/document instruction mode.
+        # It deliberately ignores ``instruct`` while preserving the same
+        # provider contract as Qwen.
+        return list(self.embed(texts, batch_size=min(64, max(1, len(texts)))))
+
     def embed_query(self, text: str) -> Any:
         try:
             return next(iter(self._model.query_embed(text)))
@@ -239,11 +382,45 @@ class FastEmbedProvider:
                     digest.update(block)
             artifact_sha = digest.hexdigest()
         return {
+            "provider": "local",
             "modelRevision": revision,
             "modelArtifactSha256": artifact_sha,
             "fastembedVersion": self.fastembed_version,
             "onnxruntimeVersion": self.onnxruntime_version,
         }
+
+
+def make_embedding_provider(
+    spec: EmbeddingProviderSpec,
+    model_cache_dir: Path,
+    *,
+    allow_download: bool = False,
+) -> EmbeddingProvider:
+    """Construct one provider without importing hosted code on local startup."""
+
+    if spec.provider == "local":
+        return FastEmbedProvider(
+            spec.model_name,
+            model_cache_dir,
+            allow_download=allow_download,
+        )
+    try:
+        from .providers.aliyun_text_retrieval import AliyunTextRetrievalProvider
+    except ImportError as error:  # pragma: no cover - deployment packaging guard
+        raise DenseRetrievalError(
+            "Aliyun text retrieval provider is not installed"
+        ) from error
+    return AliyunTextRetrievalProvider(
+        api_key=spec.api_key or "",
+        api_host=spec.api_host or "",
+        embedding_model=spec.model_name,
+        embedding_dimension=(
+            spec.dimension or DEFAULT_ALIYUN_EMBEDDING_DIMENSION
+        ),
+        query_instruct=spec.query_instruct,
+        timeout_seconds=spec.timeout_seconds,
+        max_attempts=spec.max_attempts,
+    )
 
 
 def _normalise(vector: Any) -> Any:
@@ -259,12 +436,76 @@ def _batched(values: Sequence[str], batch_size: int) -> Iterator[Sequence[str]]:
         yield values[start : start + batch_size]
 
 
+def _provider_vectors(output: Any) -> list[Any]:
+    """Normalise local iterators and hosted ``EmbeddingBatch`` responses."""
+
+    vectors = getattr(output, "vectors", output)
+    try:
+        return list(vectors)
+    except TypeError as error:
+        raise DenseRetrievalError(
+            "embedding provider returned an invalid vector batch"
+        ) from error
+
+
+def _embed_documents(
+    provider: Any,
+    texts: Sequence[str],
+    *,
+    batch_size: int,
+    deadline: float | None = None,
+) -> list[Any]:
+    method = getattr(provider, "embed_documents", None)
+    if callable(method):
+        kwargs = {"deadline": deadline} if deadline is not None else {}
+        return _provider_vectors(method(list(texts), **kwargs))
+    return list(provider.embed(list(texts), batch_size=batch_size))
+
+
+def _embed_queries(
+    provider: Any,
+    texts: Sequence[str],
+    *,
+    query_instruct: str,
+    deadline: float | None = None,
+) -> list[Any]:
+    method = getattr(provider, "embed_queries", None)
+    if callable(method):
+        query_list = list(texts)
+        if not query_list:
+            return []
+        configured_limit = getattr(provider, "max_embedding_batch_size", None)
+        batch_limit = (
+            configured_limit
+            if isinstance(configured_limit, int)
+            and not isinstance(configured_limit, bool)
+            and configured_limit > 0
+            else len(query_list)
+        )
+        vectors: list[Any] = []
+        for batch in _batched(query_list, batch_limit):
+            kwargs: dict[str, Any] = {"instruct": query_instruct}
+            if deadline is not None:
+                kwargs["deadline"] = deadline
+            batch_vectors = _provider_vectors(
+                method(list(batch), **kwargs)
+            )
+            if len(batch_vectors) != len(batch):
+                raise DenseRetrievalError(
+                    "embedding provider returned an unexpected vector count"
+                )
+            vectors.extend(batch_vectors)
+        return vectors
+    return list(provider.embed(list(texts), batch_size=min(64, max(1, len(texts)))))
+
+
 def _write_matrix(
     path: Path,
     texts: Sequence[str],
-    provider: FastEmbedProvider,
+    provider: Any,
     *,
     batch_size: int,
+    parallelism: int,
     progress_label: str,
 ) -> int:
     """Write or resume a normalised float32 matrix without retaining it in RAM."""
@@ -305,7 +546,7 @@ def _write_matrix(
             len(texts),
         )
     else:
-        first_vector = list(provider.embed(texts[:1], 1))
+        first_vector = _embed_documents(provider, texts[:1], batch_size=1)
         if len(first_vector) != 1:
             raise DenseRetrievalError("embedding provider returned no vectors")
         dimension = int(_normalise(first_vector[0]).shape[0])
@@ -317,9 +558,11 @@ def _write_matrix(
         )
         written = 0
     started = time.perf_counter()
-    next_report = ((written // 5_000) + 1) * 5_000
-    for batch in _batched(texts[written:], batch_size):
-        for vector in provider.embed(batch, batch_size):
+    next_report = ((written // 1_000) + 1) * 1_000
+
+    def write_batch(vectors: Sequence[Any]) -> None:
+        nonlocal written, next_report
+        for vector in vectors:
             if written >= len(texts):
                 raise DenseRetrievalError("embedding provider returned extra vectors")
             normalised = _normalise(vector)
@@ -338,7 +581,54 @@ def _write_matrix(
                 time.perf_counter() - started,
             )
             while next_report <= written:
-                next_report += 5_000
+                next_report += 1_000
+
+    batches = iter(_batched(texts[written:], batch_size))
+    if parallelism <= 1:
+        for batch in batches:
+            write_batch(_embed_documents(provider, batch, batch_size=batch_size))
+    else:
+        # Hosted inference is latency-bound. Keep at most two waves in flight,
+        # but commit rows in source order so an interrupted matrix remains
+        # resumable from the first non-unit row.
+        max_in_flight = parallelism * 2
+        next_sequence = 0
+        next_to_write = 0
+        pending: dict[Future[list[Any]], int] = {}
+        completed_batches: dict[int, list[Any]] = {}
+
+        def submit_one(executor: ThreadPoolExecutor) -> bool:
+            nonlocal next_sequence
+            try:
+                batch = next(batches)
+            except StopIteration:
+                return False
+            future = executor.submit(
+                _embed_documents,
+                provider,
+                batch,
+                batch_size=batch_size,
+            )
+            pending[future] = next_sequence
+            next_sequence += 1
+            return True
+
+        with ThreadPoolExecutor(
+            max_workers=parallelism,
+            thread_name_prefix="embedding-build",
+        ) as executor:
+            while len(pending) < max_in_flight and submit_one(executor):
+                pass
+            while pending:
+                finished, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                for future in finished:
+                    sequence = pending.pop(future)
+                    completed_batches[sequence] = future.result()
+                while next_to_write in completed_batches:
+                    write_batch(completed_batches.pop(next_to_write))
+                    next_to_write += 1
+                while len(pending) < max_in_flight and submit_one(executor):
+                    pass
     if written != len(texts):
         raise DenseRetrievalError(
             f"embedding provider returned {written} vectors for {len(texts)} texts"
@@ -354,13 +644,27 @@ def build_dense_index(
     index_root: Path,
     model_cache_dir: Path,
     model_name: str = DEFAULT_EMBEDDING_MODEL,
+    provider_spec: EmbeddingProviderSpec | None = None,
+    provider: Any | None = None,
     batch_size: int = 64,
+    parallelism: int = 1,
     force: bool = False,
     resume_from: Path | None = None,
 ) -> Path:
     """Build one immutable, fingerprint-addressed collection index."""
 
-    fingerprint = collection_fingerprint(collection, model_name)
+    spec = provider_spec or EmbeddingProviderSpec(model_name=model_name)
+    if spec.model_name != model_name:
+        raise DenseRetrievalError("provider spec model does not match model_name")
+    if batch_size <= 0:
+        raise DenseRetrievalError("embedding batch size must be positive")
+    if parallelism <= 0 or parallelism > 32:
+        raise DenseRetrievalError("embedding parallelism must be between 1 and 32")
+    if spec.provider == "aliyun":
+        batch_size = min(batch_size, 20)
+    else:
+        parallelism = 1
+    fingerprint = collection_fingerprint(collection, model_name, spec)
     target = (
         index_root
         / _slug(_text(collection.id))
@@ -386,7 +690,11 @@ def build_dense_index(
         temporary = target.parent / f".{fingerprint}.tmp-{uuid4().hex}"
         temporary.mkdir(parents=False, exist_ok=False)
 
-    provider = FastEmbedProvider(model_name, model_cache_dir, allow_download=True)
+    provider = provider or make_embedding_provider(
+        spec,
+        model_cache_dir,
+        allow_download=True,
+    )
     completed = False
     try:
         objects = [obj for obj in collection.objects if obj.evidence]
@@ -409,6 +717,11 @@ def build_dense_index(
             "collectionVersion": collection.version,
             "objectsSha256": getattr(collection, "objects_sha256", None),
             "model": model_name,
+            "provider": spec.provider,
+            "configuredDimension": spec.dimension,
+            "queryInstructSha256": hashlib.sha256(
+                spec.query_instruct.encode("utf-8")
+            ).hexdigest(),
             "textRecipeSha256": TEXT_RECIPE_SHA256,
             "objectCount": len(object_ids),
             "evidenceCount": len(evidence_ids),
@@ -434,6 +747,7 @@ def build_dense_index(
             object_texts,
             provider,
             batch_size=batch_size,
+            parallelism=parallelism,
             progress_label="objects",
         )
         evidence_dimension = _write_matrix(
@@ -441,6 +755,7 @@ def build_dense_index(
             evidence_texts,
             provider,
             batch_size=batch_size,
+            parallelism=parallelism,
             progress_label="evidence",
         )
         if object_dimension != evidence_dimension:
@@ -459,6 +774,11 @@ def build_dense_index(
         (temporary / "evidence_ids.json").write_text(
             json.dumps(evidence_ids, ensure_ascii=False), encoding="utf-8"
         )
+        artifact_metadata = (
+            provider.artifact_metadata()
+            if callable(getattr(provider, "artifact_metadata", None))
+            else {}
+        )
         manifest = {
             "formatVersion": INDEX_FORMAT_VERSION,
             "textRecipeVersion": TEXT_RECIPE_VERSION,
@@ -468,11 +788,31 @@ def build_dense_index(
             "objectsSha256": getattr(collection, "objects_sha256", None),
             "fingerprint": fingerprint,
             "model": model_name,
-            "modelSource": DEFAULT_MODEL_SOURCE,
-            "modelRuntimeSource": DEFAULT_MODEL_RUNTIME_SOURCE,
-            "modelLicense": DEFAULT_MODEL_LICENSE,
-            **provider.artifact_metadata(),
+            "provider": spec.provider,
+            "modelSource": (
+                DEFAULT_MODEL_SOURCE
+                if spec.provider == "local"
+                else "https://help.aliyun.com/zh/model-studio/embedding"
+            ),
+            "modelRuntimeSource": (
+                DEFAULT_MODEL_RUNTIME_SOURCE
+                if spec.provider == "local"
+                else "aliyun-model-studio-cn-beijing"
+            ),
+            "modelLicense": (
+                DEFAULT_MODEL_LICENSE
+                if spec.provider == "local"
+                else "Alibaba Cloud Model Studio service terms"
+            ),
+            **artifact_metadata,
             "dimension": object_dimension,
+            "configuredDimension": spec.dimension,
+            "documentTextType": "document",
+            "queryTextType": "query",
+            "queryInstruct": spec.query_instruct,
+            "queryInstructSha256": hashlib.sha256(
+                spec.query_instruct.encode("utf-8")
+            ).hexdigest(),
             "objectCount": len(object_ids),
             "evidenceCount": len(evidence_ids),
             "normalised": True,
@@ -503,7 +843,7 @@ def build_dense_index(
 class DenseIndex:
     """Read-only, memory-mapped dense index plus evidence-level reranker."""
 
-    def __init__(self, path: Path, provider: FastEmbedProvider) -> None:
+    def __init__(self, path: Path, provider: Any) -> None:
         import numpy as np
 
         self.path = path
@@ -546,13 +886,35 @@ class DenseIndex:
         ):
             raise DenseRetrievalError("dense evidence index is inconsistent")
 
-    def embed_query(self, query: str) -> Any:
-        vector = _normalise(self.provider.embed_query(query))
+    def embed_query(
+        self,
+        query: str,
+        *,
+        deadline: float | None = None,
+    ) -> Any:
+        vectors = _embed_queries(
+            self.provider,
+            [query],
+            query_instruct=str(
+                self.manifest.get("queryInstruct") or DEFAULT_QUERY_INSTRUCT
+            ),
+            deadline=deadline,
+        )
+        if len(vectors) != 1:
+            raise DenseRetrievalError(
+                "embedding provider returned an unexpected number of query vectors"
+            )
+        vector = _normalise(vectors[0])
         if vector.shape != (int(self.manifest["dimension"]),):
             raise DenseRetrievalError("query embedding dimension does not match index")
         return vector
 
-    def embed_queries(self, queries: Sequence[str]) -> list[Any]:
+    def embed_queries(
+        self,
+        queries: Sequence[str],
+        *,
+        deadline: float | None = None,
+    ) -> list[Any]:
         """Encode several queries in one provider batch.
 
         Agentic query expansion commonly contributes two or three closely
@@ -565,11 +927,13 @@ class DenseIndex:
         query_list = list(queries)
         if not query_list:
             return []
-        vectors = list(
-            self.provider.embed(
-                query_list,
-                batch_size=min(64, len(query_list)),
-            )
+        vectors = _embed_queries(
+            self.provider,
+            query_list,
+            query_instruct=str(
+                self.manifest.get("queryInstruct") or DEFAULT_QUERY_INSTRUCT
+            ),
+            deadline=deadline,
         )
         if len(vectors) != len(query_list):
             raise DenseRetrievalError(
@@ -715,11 +1079,19 @@ class DenseIndexManager:
         index_root: Path,
         model_cache_dir: Path,
         model_name: str = DEFAULT_EMBEDDING_MODEL,
+        provider_spec: EmbeddingProviderSpec | None = None,
+        provider_factory: EmbeddingProviderFactory | None = None,
     ) -> None:
         self.enabled = enabled
         self.index_root = index_root
         self.model_cache_dir = model_cache_dir
-        self.model_name = model_name
+        self.provider_spec = provider_spec or EmbeddingProviderSpec(
+            model_name=model_name
+        )
+        if self.provider_spec.model_name != model_name:
+            raise ValueError("provider spec model does not match model_name")
+        self.model_name = self.provider_spec.model_name
+        self.provider_factory = provider_factory
         self._loaded: dict[tuple[str, str, str], DenseIndex] = {}
         self._status: dict[tuple[str, str, str], DenseStatus] = {}
         self._warned: set[tuple[str, str, str, str]] = set()
@@ -729,11 +1101,19 @@ class DenseIndexManager:
         return (
             _text(collection.id),
             _text(collection.version),
-            collection_fingerprint(collection, self.model_name),
+            collection_fingerprint(
+                collection,
+                self.model_name,
+                self.provider_spec,
+            ),
         )
 
     def expected_path(self, collection: Any) -> Path:
-        fingerprint = collection_fingerprint(collection, self.model_name)
+        fingerprint = collection_fingerprint(
+            collection,
+            self.model_name,
+            self.provider_spec,
+        )
         return (
             self.index_root
             / _slug(_text(collection.id))
@@ -817,10 +1197,14 @@ class DenseIndexManager:
             )
             return None
         try:
-            provider = FastEmbedProvider(
-                self.model_name,
-                self.model_cache_dir,
-                allow_download=False,
+            provider = (
+                self.provider_factory(False)
+                if self.provider_factory is not None
+                else make_embedding_provider(
+                    self.provider_spec,
+                    self.model_cache_dir,
+                    allow_download=False,
+                )
             )
             index = DenseIndex(path, provider)
             expected_fingerprint = path.name
@@ -834,15 +1218,28 @@ class DenseIndexManager:
                 "textRecipeVersion": TEXT_RECIPE_VERSION,
                 "textRecipeSha256": TEXT_RECIPE_SHA256,
             }
+            if self.provider_spec.provider != "local":
+                expected_manifest.update(
+                    {
+                        "provider": self.provider_spec.provider,
+                        "configuredDimension": self.provider_spec.dimension,
+                        "queryInstructSha256": hashlib.sha256(
+                            self.provider_spec.query_instruct.encode("utf-8")
+                        ).hexdigest(),
+                    }
+                )
             for field, expected in expected_manifest.items():
                 if index.manifest.get(field) != expected:
                     raise DenseRetrievalError(
                         f"dense manifest {field} does not match the loaded collection"
                     )
-            cached_artifact = index.manifest.get("modelArtifactSha256")
-            runtime_artifact = provider.artifact_metadata().get("modelArtifactSha256")
-            if cached_artifact and runtime_artifact != cached_artifact:
-                raise DenseRetrievalError("local embedding model artifact changed")
+            if self.provider_spec.provider == "local":
+                cached_artifact = index.manifest.get("modelArtifactSha256")
+                runtime_artifact = provider.artifact_metadata().get(
+                    "modelArtifactSha256"
+                )
+                if cached_artifact and runtime_artifact != cached_artifact:
+                    raise DenseRetrievalError("local embedding model artifact changed")
         except Exception as error:
             self._degraded(
                 collection,

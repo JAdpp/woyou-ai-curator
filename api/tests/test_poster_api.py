@@ -164,6 +164,16 @@ class _FrameProvider:
 
     async def generate_json(self, _system_prompt: str, _payload: dict) -> dict:
         self.calls += 1
+        if "publicCopyFields" in _payload:
+            if _payload["schemaVersion"] == "curatorial-copy-decisions-v2":
+                return {"schemaVersion": _payload["schemaVersion"], "decisions": [
+                    {"path": row["path"], "action": "keep"}
+                    for row in _payload["publicCopyFields"]]}
+            return {
+                "schemaVersion": _payload["schemaVersion"],
+                "reviewedFieldCount": len(_payload["publicCopyFields"]),
+                "outcome": "pass", "changes": [],
+            }
         if self.calls == 1:
             items = [
                 item for chapter in _payload["chapters"] for item in chapter["items"]

@@ -104,7 +104,7 @@ def test_validator_accepts_item_counts_that_match_exhibition_or_chapter(
     }
 
 
-def test_validator_blocks_four_normalized_same_titles(
+def test_same_catalogue_titles_are_a_warning_not_proof_of_duplicate_objects(
     client: TestClient,
     agenda_payload: dict[str, object],
 ) -> None:
@@ -116,13 +116,13 @@ def test_validator_blocks_four_normalized_same_titles(
 
     result = validate_exhibition(exhibition)
 
-    assert result.passed is False
+    assert result.passed is True
     assert "OVERCONCENTRATED_NORMALIZED_TITLE" in {
-        issue.code for issue in result.errors
+        issue.code for issue in result.warnings
     }
     assert next(
         check for check in result.checks if check.key == "selection-variety"
-    ).passed is False
+    ).passed is True
 
 
 def test_validator_blocks_four_objects_explicitly_from_one_series(

@@ -22,6 +22,8 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DEFAULT_MAX_IMAGE_BYTES = 15 * 1024 * 1024
 GENERATION_MAX_ATTEMPTS = 2
 GENERATION_RETRY_DELAY_SECONDS = 0.75
+DOWNLOAD_MAX_ATTEMPTS = 2
+DOWNLOAD_RETRY_DELAY_SECONDS = 0.25
 # The visual model is never asked to render exhibition copy.  The compositor
 # owns the only legitimate typography area, which is an opaque replacement of
 # the generated pixels rather than a translucent overlay.  This makes the
@@ -859,6 +861,33 @@ class AliyunImageProvider:
         return self._validate_asset_url(image_url)
 
     async def _download_png(self, client: httpx.AsyncClient, image_url: str) -> bytes:
+        # The paid generation has already succeeded. Retry only this signed
+        # asset URL, and share one wall-clock budget across headers, body and
+        # backoff rather than granting each attempt another full timeout.
+        async def download_with_retry() -> bytes:
+            for attempt in range(DOWNLOAD_MAX_ATTEMPTS):
+                try:
+                    return await self._download_png_once(client, image_url)
+                except AliyunImageProviderError as exc:
+                    if (
+                        exc.code != "image_download_error"
+                        or not exc.retryable
+                        or attempt + 1 >= DOWNLOAD_MAX_ATTEMPTS
+                    ):
+                        raise
+                    await asyncio.sleep(DOWNLOAD_RETRY_DELAY_SECONDS)
+            raise AssertionError("The bounded image download loop must return or raise.")
+
+        try:
+            return await asyncio.wait_for(download_with_retry(), timeout=self.timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            raise AliyunImageProviderError(
+                "image_download_error",
+                "The generated image download exceeded its time limit.",
+                retryable=True,
+            ) from exc
+
+    async def _download_png_once(self, client: httpx.AsyncClient, image_url: str) -> bytes:
         try:
             async with client.stream("GET", image_url) as response:
                 response.raise_for_status()
@@ -898,14 +927,15 @@ class AliyunImageProvider:
             raise AliyunImageProviderError(
                 "image_download_error",
                 "The generated image could not be downloaded.",
-                retryable=status == 429 or status >= 500,
+                retryable=status == 429 or 500 <= status < 600,
                 http_status=status,
             ) from exc
         except httpx.HTTPError as exc:
             raise AliyunImageProviderError(
                 "image_download_error",
                 "The generated image could not be downloaded.",
-                retryable=True,
+                retryable=isinstance(exc, httpx.TransportError)
+                and not isinstance(exc, (httpx.UnsupportedProtocol, httpx.LocalProtocolError)),
             ) from exc
 
         image_bytes = bytes(buffer)

@@ -194,10 +194,14 @@ def compose_immediate(
         language=language,
     )
     subject = topic.strip() or (available_domains[0][1] if available_domains else "")
+    from .interview_clarification import needs_scope_clarification
+    scope_is_open = needs_scope_clarification(visitor_question or free_text or "")
 
     if language == "en":
         quoted = f'“{anchor}”' if anchor else "your question"
-        if skipped:
+        if scope_is_open:
+            reply = f"I'll keep {quoted} as a preference, not assume a settled subject or factual claim."
+        elif skipped:
             reply = f"I’ll keep {quoted} as the thread and leave the skipped choice open."
         elif asked in {
             InterviewQuestionId.CURIOSITY.value,
@@ -220,7 +224,9 @@ def compose_immediate(
         )
     else:
         quoted = f"“{anchor}”" if anchor else "你的问题"
-        if skipped:
+        if scope_is_open:
+            reply = f"我先把{quoted}记作偏好，不把它当作已经明确的主题或事实结论。"
+        elif skipped:
             reply = f"我会保留{quoted}这条主线，把刚才跳过的选择留白。"
         elif asked in {
             InterviewQuestionId.CURIOSITY.value,

@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from .retrieval_contract_fixtures import strict_audit_fixture
+
 from app import curation
 from app.curation import assign_roles, chapter_sizes, ensure_core_evidence_candidate, plan_roles
 from app.interview_voice import InterviewVoice
@@ -21,6 +23,11 @@ class _Obj:
 
     def __init__(self, depth: str) -> None:
         self.evidence_depth = depth
+
+    @property
+    def supports_core_evidence(self) -> bool:
+        # These role fixtures intentionally have no reviewed visual proof.
+        return self.evidence_depth == EvidenceDepth.FULL.value
 
 
 # ---------------------------------------------------------------- interview
@@ -976,6 +983,7 @@ def test_profile_generation_can_recover_sparse_recall_with_agentic_expansion(
         def __init__(self) -> None:
             self.audit_calls = 0
 
+        @strict_audit_fixture
         async def generate_json(self, _prompt: str, payload: dict) -> dict:
             if "candidates" not in payload:
                 # The later frame/label stages deliberately fall back to the

@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "1.0",
+  "benchmarkId": "retrieval_eval_v1",
+  "version": "20260831-v1",
+  "status": "frozen",
+  "frozenAt": "2026-08-31T18:00:00+08:00",
+  "language": "zh-CN with controlled English catalogue terms",
+  "questionCount": 250,
+  "categoryDistribution": {
+    "exact_title_author_institution": 35,
+    "synonym_bilingual_typo": 30,
+    "date_material_region": 35,
+    "open_theme": 35,
+    "cross_cultural": 35,
+    "symbolic_causal_multihop": 30,
+    "visual_motif": 25,
+    "ambiguous_out_of_scope": 25
+  },
+  "relevanceThreshold": 2,
+  "provenance": {
+    "collectionId": "global_open",
+    "collectionVersion": "20260826-17246",
+    "objectCount": 17246,
+    "objectsSha256": "8a7cee291acc9e5beedd40cf12e30299049613cbb61b6954e1a4fb9a5758d55e",
+    "collectionManifest": "data/collections/global_open/manifest.json",
+    "objectsFile": "data/collections/global_open/objects.json",
+    "builder": "scripts/build_retrieval_eval_dataset.py",
+    "generationMethod": "deterministic field enumeration plus unjudged metadata/evidence candidate pooling; no LLM used"
+  },
+  "judgmentPolicy": {
+    "deterministic_field_gold": "Exhaustive matches to explicit frozen fields and operators. This is programmatic gold, not human semantic judgement.",
+    "pooled_silver_pending_human_review": "Candidate only. relevance is fixed to 0 and evaluator excludes the row from every quality metric until a human creates a separate reviewed judgement.",
+    "deterministic_evidence_boundary_no_relevant_objects": "The requested evidence type is outside object records; qrels intentionally empty and answerability is unsupported.",
+    "humanGoldPresent": false
+  },
+  "pooling": {
+    "channels": [
+      "title",
+      "type",
+      "material",
+      "tags",
+      "themes",
+      "description",
+      "evidence"
+    ],
+    "maximumCandidatesPerQuestion": 12,
+    "crossCulturalReservation": "up to two candidates per required culture leg before global fill",
+    "warning": "Pooled-silver candidates are discovery aids, not relevance labels."
+  },
+  "freezeRules": [
+    "Questions and deterministic rules must not be edited after observing run results.",
+    "Any human review must be stored as a versioned additive judgement set; pooled-silver rows must not be silently relabelled.",
+    "Every qrel object/evidence ID must exist in the frozen global_open hash.",
+    "Legacy debugging examples and exact prior QA questions are forbidden.",
+    "Changing collection hash, templates, pool terms or category counts requires a new benchmark version."
+  ],
+  "excludedLegacyPatterns": [
+    "猫|\\bcat(?:s)?\\b",
+    "狗狗|狗在|犬类|\\bdog(?:s)?\\b|\\bcanine\\b",
+    "相似的蓝|蓝色|\\bcobalt blue\\b",
+    "皇帝|王权|统治者|\\bemperor\\b|\\bruler(?:s)?\\b",
+    "大象|象牙|\\belephant(?:s)?\\b|\\bivory\\b",
+    "亲子|母子|\\bmother and child\\b|\\bparent[- ]child\\b",
+    "漆器|\\blacquer\\b",
+    "贝壳.*镶|\\bshell inlay\\b",
+    "梳妆",
+    "朝圣",
+    "人类遗骸",
+    "量子",
+    "饮酒|酒具",
+    "棋盘|骰子|纸牌",
+    "风怎么被看见",
+    "湖.*地图",
+    "接布|翻面.*缝线",
+    "工具.*磨",
+    "机器.*声音",
+    "能乐|Gẹ̀lẹ́dé|Yup'ik",
+    "没有签名",
+    "扫地机器人",
+    "DNA|双螺旋",
+    "青铜器.*生锈",
+    "宗教器物.*神圣",
+    "羽蛇神",
+    "拍卖价格",
+    "治疗焦虑",
+    "假文物",
+    "所有文明.*崇拜太阳"
+  ],
+  "files": {
+    "questions": {
+      "path": "data/qa/retrieval_eval_v1/questions.jsonl",
+      "sha256": "add17b4252005e4e4db1d61f9249a8db03370f5e44c3875d603e5d580946f61a",
+      "rows": 250
+    },
+    "qrels": {
+      "path": "data/qa/retrieval_eval_v1/qrels.jsonl",
+      "sha256": "7b6e130c84ecfe81020f73a01d416c8319b063148630fa53860571f8cc0eafc8",
+      "rows": 1976
+    }
+  },
+  "judgmentDistribution": {
+    "deterministic_field_gold": 100,
+    "pooled_silver_pending_human_review": 137,
+    "deterministic_evidence_boundary_no_relevant_objects": 13
+  },
+  "qrelDistribution": {
+    "deterministic_field_gold": 332,
+    "pooled_silver_pending_human_review": 1644
+  }
+}

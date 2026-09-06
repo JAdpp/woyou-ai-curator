@@ -31,4 +31,16 @@
 1. `location ^~ /api/images/` 的 **`^~` 不能删**，位置也**必须在** `location ~ ^/(api|...)` **之前**。nginx 里带 `^~` 的前缀匹配优先于正则匹配；去掉 `^~` 就会掉回 `demoapi` 桶，破图立刻复发。
 2. 应用侧已经自己发 `Cache-Control: public, max-age=604800, immutable`，nginx **不要**再 `add_header` 覆盖。
 
+## 第一阶段文本检索上线顺序（尚未应用到服务器）
+
+这次候选链升级不需要修改 nginx，但需要更新 FastAPI 环境变量并同步两类派生索引。当前线上仍应保持 `RAG_MODE=bm25`，不得因本地代码已接入 Qwen 就认定已完成切换。
+
+1. 先确认服务器与构建机的 `global_open` 版本和 `objects.json` SHA-256 一致。
+2. 在有密钥的环境执行 `npm.cmd run rag:index:qwen` 与 `npm.cmd run rag:index:filters`。只同步完成的指纹目录；不同步 `.tmp-*` 中间目录，不在 API 请求或启动期间重建。
+3. 服务端 `.env` 中配置 `RAG_EMBEDDING_PROVIDER=aliyun`、`RAG_EMBEDDING_MODEL=qwen3.7-text-embedding`、`RAG_EMBEDDING_DIMENSION=768`、`RAG_RERANK_MODEL=qwen3-rerank`、结构化 filter/证据 BM25 索引目录和 trace 目录。`ALIYUN_TEXT_API_HOST` 使用 `https://llm-nwypztqdwtzyt9zd.cn-beijing.maas.aliyuncs.com`；真实 `DASHSCOPE_API_KEY` 只留在服务器密钥文件，不回写仓库。
+4. 首次只使用 `RAG_MODE=shadow`：对外仍交付 BM25，同时记录新候选排名、延迟和 provider 错误。检索 trace 只含问题哈希与候选诊断，不含问题原文。
+5. 用 250 问冻结数据集产生 BM25 与 Phase-1 run，再执行 `qa:retrieval:compare`。只有达到 README 列出的 cutover 门槛、冻结环境 P95 可接受，且人工审阅 pooled-silver 候选后，才可另行决定是否改为 `RAG_MODE=hybrid`。
+
+应急回滚只需把 `RAG_MODE` 改回 `bm25` 并重启 API 服务；不需要删除 dense 或 SQLite 索引，也不需要重载 nginx。
+
 验证脚本见提交历史里的并发复现方法：取 `/api/collection/highlights` 里 `items[].id` 与 `domains[].samples[].id`，全部并发打一遍 `/api/images/{id}?w=512`，应当 100% 返回 200。注意别把 `institutionSummaries[].id`（`aic`/`cma`/`met`）和 `domains[].id` 当成藏品 id，它们本来就该 404。

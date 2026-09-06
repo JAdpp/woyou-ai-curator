@@ -112,6 +112,19 @@ class EvidenceDepth(str, Enum):
     THIN = "thin"
 
 
+class VisualCoreEvidence(ApiModel):
+    """Per-exhibition proof of an actually inspected visible-feature source."""
+    version: Literal["visual-preselection-v1"]
+    scope: Literal["visible_features_only"]
+    object_id: str
+    image_evidence_id: str
+    image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    question_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_url: str
+    model: str = Field(min_length=1)
+    observation_ids: list[str] = Field(min_length=1, max_length=4)
+
+
 class MuseumObject(ApiModel):
     id: str = Field(min_length=1)
     source_id: str | None = None
@@ -158,6 +171,9 @@ class MuseumObject(ApiModel):
     evidence_domain_ids: list[str] = Field(default_factory=list)
     relation_facets: list[str] = Field(default_factory=list)
     evidence_depth: EvidenceDepth = EvidenceDepth.THIN
+    # Only attached to the per-request copy after both actual image review and
+    # strict semantic admission; never promotes the institutional text depth.
+    visual_core_evidence: VisualCoreEvidence | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -187,7 +203,14 @@ class MuseumObject(ApiModel):
 
     @property
     def supports_core_evidence(self) -> bool:
-        return self.evidence_depth == EvidenceDepth.FULL.value
+        proof = self.visual_core_evidence
+        return self.evidence_depth == EvidenceDepth.FULL.value or bool(
+            proof and proof.object_id == self.id
+            and proof.image_evidence_id == f"image:{self.id}"
+            and proof.source_url in {self.image_url, self.image_url_large}
+            and all(value.startswith(f"visual:{self.id}:{proof.image_sha256[:16]}:")
+                    for value in proof.observation_ids)
+        )
 
 
 class ObjectSummary(ApiModel):
@@ -676,6 +699,9 @@ class Exhibition(ApiModel):
     sub_questions: list[str] = Field(min_length=2, max_length=4)
     items: list[ExhibitionItem]
     chapters: list[Chapter] = Field(default_factory=list)
+    # Derived only after source-bound retrieval and final itinerary selection;
+    # this is an auditable coverage report, not a model assertion of truth.
+    exhibition_set_coverage: dict[str, Any] = Field(default_factory=dict)
     epilogue: Epilogue = Field(default_factory=Epilogue)
     # Optional only so pre-v1 stored exhibitions remain readable. Every new
     # profile-driven generation creates this before the first model call.

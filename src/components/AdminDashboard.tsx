@@ -385,6 +385,15 @@ export function AdminDashboard() {
 
         {error && <div className={styles.error} role="alert"><strong>后台连接失败</strong><span>{error}</span><button onClick={load}>重试</button></div>}
 
+        <section className={styles.qrelEntry} aria-labelledby="qrel-entry-title">
+          <div>
+            <span>RETRIEVAL EVALUATION · HUMAN REVIEW</span>
+            <h2 id="qrel-entry-title">相关性审核工作台</h2>
+            <p>逐题查看冻结候选、馆藏图像与来源证据，用操作按钮完成人工相关性标注和问题定稿。</p>
+          </div>
+          <Link href="/dev/admin/qrels">进入审核工作台 <span aria-hidden="true">→</span></Link>
+        </section>
+
         <section className={styles.readiness} aria-label="数据就绪度">
           <article><span>候选对象</span><strong>{analytics?.collectionObjects ?? "—"}</strong><small>当前冻结馆藏</small></article>
           <article><span>已审对象</span><strong>{analytics?.reviewedObjects ?? "—"}</strong><small>已完成人工内容复核</small></article>

@@ -57,6 +57,7 @@ class DeepSeekProvider:
     def __init__(self, settings: Settings) -> None:
         self.api_key = settings.deepseek_api_key
         self.model = settings.deepseek_model
+        self.query_review_thinking = settings.deepseek_query_review_thinking
         self.labels_model = settings.deepseek_labels_model
         self.base_url = settings.deepseek_base_url
         self.timeout_seconds = settings.deepseek_timeout_seconds
@@ -97,7 +98,7 @@ class DeepSeekProvider:
                 },
             ],
             thinking={"type": "disabled"},
-            max_tokens=4096,
+            max_tokens=6144 if user_payload.get("retrievalContract", {}).get("conditionContractVersion") else 4096,
             temperature=0.0,
         )
 
@@ -113,6 +114,10 @@ class DeepSeekProvider:
         candidates still pass the source-bound retrieval audit.
         """
 
+        review_thinking = "recallDraft" in user_payload and self.query_review_thinking
+        options: dict[str, Any] = {}
+        if review_thinking:
+            options["reasoning_effort"] = "low"
         return await self._generate_json(
             model=self.model,
             messages=[
@@ -122,9 +127,12 @@ class DeepSeekProvider:
                     "content": json.dumps(user_payload, ensure_ascii=False),
                 },
             ],
-            thinking={"type": "disabled"},
-            max_tokens=1200,
+            thinking={"type": "enabled" if review_thinking else "disabled"},
+            # Independent intent compilation (and legacy reviews) need a larger
+            # response; initial recall drafting keeps its smaller allowance.
+            max_tokens=4096 if review_thinking else (2400 if "recallDraft" in user_payload or "draftPlan" in user_payload else 1200),
             temperature=0.0,
+            **options,
         )
 
     async def generate_json_with_images(
@@ -176,6 +184,29 @@ class DeepSeekProvider:
             max_tokens=1600,
         )
 
+    async def generate_qrel_vision_json(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+        images: Sequence[VisionImage],
+    ) -> dict[str, Any]:
+        """Batch bounded qrel image checks without changing visitor-label limits."""
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(user_payload, ensure_ascii=False)}]
+        for image in images:
+            encoded = base64.b64encode(image.payload).decode("ascii")
+            content.extend([
+                {"type": "text", "text": f"图像仅属于 objectId={image.object_id}。"},
+                {"type": "image_url", "image_url": {"url": f"data:{image.mime_type};base64,{encoded}", "detail": "original"}},
+            ])
+        return await self._generate_json(
+            model=self.labels_model,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": content}],
+            thinking={"type": "disabled"},
+            max_tokens=4096,
+            temperature=0.0,
+        )
+
     async def _generate_json(
         self,
         *,
@@ -184,6 +215,7 @@ class DeepSeekProvider:
         thinking: dict[str, str] | None = None,
         max_tokens: int | None = None,
         temperature: float = 0.2,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         if not self.api_key:
             raise ProviderError(
@@ -202,6 +234,12 @@ class DeepSeekProvider:
         }
         if thinking is not None:
             request_body["thinking"] = thinking
+        if reasoning_effort is not None:
+            if reasoning_effort not in {"low", "high", "max"} or thinking != {"type": "enabled"}:
+                raise ValueError("reasoning effort requires enabled thinking and a supported effort")
+            request_body["reasoning_effort"] = reasoning_effort
+        if thinking == {"type": "enabled"}:
+            request_body.pop("temperature", None)
         if max_tokens is not None:
             request_body["max_tokens"] = max_tokens
 

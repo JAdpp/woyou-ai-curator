@@ -11,6 +11,8 @@ from time import perf_counter
 import pytest
 from fastapi.testclient import TestClient
 
+from .retrieval_contract_fixtures import strict_audit_fixture
+
 from app.collections import CollectionDataError, SearchResult
 from app.config import Settings
 from app.generator import ExhibitionGenerator
@@ -76,6 +78,7 @@ class _FirstAuditNeedsExpansionProvider:
     configured = True
     supports_retrieval_audit = True
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         return {
             "queryInterpretation": "保留的首轮解释",
@@ -101,6 +104,7 @@ class _PartialCaseStudyProvider:
     def __init__(self, answerability: str = "partially_supported") -> None:
         self.answerability = answerability
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         candidates = payload.get("candidates")
         if not isinstance(candidates, list):
@@ -131,6 +135,7 @@ class _UsablePartialAuditProvider:
     def __init__(self) -> None:
         self.calls = 0
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.calls += 1
         return {
@@ -271,8 +276,8 @@ def test_optional_expansion_deadline_preserves_the_first_audit_verdict() -> None
     assert [result.obj.id for result in outcome.results] == ["a", "b"]
     assert outcome.answerability == "partially_supported"
     assert outcome.interpretation == "保留的首轮解释"
-    assert "首轮只有两件直接证据" in outcome.coverage_gap
-    assert outcome.failure_code is None
+    assert "时限" in outcome.coverage_gap
+    assert outcome.failure_code == "RETRIEVAL_SEARCH_TIMEOUT"
     assert outcome.warning_code == "RETRIEVAL_SEARCH_TIMEOUT"
     assert outcome.warning_detail
 
@@ -329,9 +334,7 @@ def test_partial_answer_with_five_audited_objects_generates_narrowed_exhibition(
 
     assert len(exhibition.items) == 5
     assert exhibition.validation.passed is True
-    assert "馆藏只支持这些对象案例，不支持普遍因果结论。" in (
-        exhibition.coverage_limits
-    )
+    assert "馆藏只支持这些对象案例，不支持普遍因果结论。" in exhibition.coverage_limits
 
 
 def test_profile_flow_also_generates_a_narrowed_partial_exhibition(client) -> None:
@@ -353,9 +356,8 @@ def test_profile_flow_also_generates_a_narrowed_partial_exhibition(client) -> No
 
     assert len(exhibition.items) == 5
     assert exhibition.validation.passed is True
-    assert "馆藏只支持这些对象案例，不支持普遍因果结论。" in (
-        exhibition.coverage_limits
-    )
+    assert any("不声称涵盖" in value for value in exhibition.coverage_limits)
+    assert any("历史结论" in value for value in exhibition.coverage_limits)
 
 
 def test_unsupported_answer_still_fails_even_with_five_topical_objects(client) -> None:
@@ -444,7 +446,8 @@ def test_post_audit_unsupported_job_is_actionable_not_reported_as_outage() -> No
     job = asyncio.run(scenario())
     assert job.status == "failed"
     assert job.error_code == "question_unsupported_after_audit"
-    assert "选择系统建议的相近方向" in (job.error or "")
+    assert "missing comparison leg" in (job.error or "")
+    assert "调整范围" in (job.error or "")
     assert "稍后重试" not in (job.error or "")
     assert "问题仍然保留" in (job.error or "")
     assert "certificate" not in (job.error or "")

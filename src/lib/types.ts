@@ -309,6 +309,155 @@ export interface MuseumObjectSummary {
   medium?: string;
 }
 
+/** Internal retrieval-evaluation review contracts. These records never enter
+ * the visitor exhibition model. */
+export type QrelRelevance = 0 | 1 | 2 | 3;
+export type QrelExpectedAnswerability = "supported" | "partially_supported" | "unsupported";
+export type QrelAiConfidenceBand = "high" | "medium" | "low";
+export type QrelHumanDisposition = "accepted" | "modified" | "rejected" | "human_only";
+export type QrelEvidenceVerdict =
+  | "supports"
+  | "insufficient"
+  | "contradicts"
+  | "uncertain"
+  | "not_applicable";
+export type QrelReviewStatus = "unreviewed" | "in_progress" | "complete" | "conflict";
+
+export interface QrelReviewProgress {
+  humanReviewedCandidates?: number;
+  delegatedReviewedCandidates?: number;
+  reviewedCandidates: number;
+  totalCandidates: number;
+  completedQuestions: number;
+  totalQuestions: number;
+}
+
+export interface QrelReviewQuestionSummary {
+  queryId: string;
+  question: string;
+  category: string;
+  judgmentMode: "deterministic_gold" | "pooled_silver" | "boundary" | string;
+  expectedAnswerability?: QrelExpectedAnswerability | null;
+  requiredCulturalLegs: string[];
+  candidateCount: number;
+  reviewedCandidateCount: number;
+  /** AI suggestions are provisional and never contribute to reviewedCandidateCount. */
+  suggestedCandidateCount: number;
+  aiHighRiskCount: number;
+  status: QrelReviewStatus;
+}
+
+export interface QrelAiSuggestionProvenance {
+  suggestionId: string;
+  suggestionRunId: string;
+  confidenceBand: QrelAiConfidenceBand;
+  /** Includes both workflow markers and substantive risks; not every flag is high risk. */
+  riskFlags: string[];
+  modalities: string[];
+  provider: string;
+  model: string;
+  promptVersion: string;
+  promptHash: string;
+  inputHash: string;
+  validationStatus: string;
+  generatedAt: string;
+}
+
+export interface QrelAiCandidateSuggestion extends QrelAiSuggestionProvenance {
+  relevance: QrelRelevance;
+  evidenceVerdict: QrelEvidenceVerdict;
+  supportingEvidenceIds: string[];
+  note: string;
+}
+
+export interface QrelAiQuestionSuggestion extends QrelAiSuggestionProvenance {
+  expectedAnswerability: QrelExpectedAnswerability;
+  note: string;
+}
+
+export interface QrelHumanJudgment {
+  reviewOrigin?: "human" | "delegated_ai";
+  relevance: QrelRelevance;
+  evidenceVerdict: QrelEvidenceVerdict;
+  supportingEvidenceIds: string[];
+  note: string;
+  revision: number;
+  updatedAt: string;
+  acceptedSuggestionId?: string | null;
+  disposition?: QrelHumanDisposition | null;
+}
+
+export interface QrelReviewCandidate {
+  objectId: string;
+  object: MuseumObject;
+  culturalLegs: string[];
+  evidence: EvidenceChunk[];
+  aiSuggestion?: QrelAiCandidateSuggestion | null;
+  judgment?: QrelHumanJudgment | null;
+}
+
+export interface QrelReviewQuestionDetail {
+  benchmarkId: string;
+  question: QrelReviewQuestionSummary;
+  candidates: QrelReviewCandidate[];
+  progress: QrelReviewProgress;
+  aiQuestionSuggestion?: QrelAiQuestionSuggestion | null;
+  /** Present after this reviewer has finalized the question. */
+  finalization?: {
+    isCurrent?: boolean;
+    reviewOrigin?: "human" | "delegated_ai";
+    acceptedSuggestionId?: string | null;
+    disposition?: QrelHumanDisposition | null;
+    expectedAnswerability: QrelExpectedAnswerability;
+    note: string;
+    revision: number;
+    updatedAt?: string | null;
+  } | null;
+}
+
+export interface QrelReviewQuestionsResponse {
+  benchmarkId: string;
+  frozenAt?: string | null;
+  questions: QrelReviewQuestionSummary[];
+  categories: string[];
+  progress: QrelReviewProgress;
+}
+
+export interface QrelJudgmentInput {
+  relevance: QrelRelevance;
+  evidenceVerdict: QrelEvidenceVerdict;
+  supportingEvidenceIds: string[];
+  note: string;
+  expectedRevision: number | null;
+  acceptedSuggestionId?: string | null;
+  disposition: QrelHumanDisposition;
+  /** Stable for retries of the same edit; generated in the browser. */
+  requestId: string;
+}
+
+export interface QrelJudgmentResponse {
+  queryId: string;
+  objectId: string;
+  judgment: QrelHumanJudgment;
+  progress: QrelReviewProgress;
+}
+
+export interface QrelFinalizationInput {
+  acceptedSuggestionId?: string | null;
+  disposition?: QrelHumanDisposition;
+  expectedAnswerability: QrelExpectedAnswerability;
+  note: string;
+  expectedRevision: number | null;
+  requestId: string;
+}
+
+export interface QrelFinalizationResponse {
+  queryId: string;
+  status: QrelReviewStatus;
+  revision: number;
+  progress: QrelReviewProgress;
+}
+
 export interface LabelSentence {
   id: string;
   text: string;

@@ -6,7 +6,7 @@ from hashlib import sha256
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,6 +37,8 @@ from .collections import (
     CollectionRepository,
 )
 from .config import Settings
+from .cultural_normalization import CULTURAL_ROUTING_VERSION
+from .retrieval_runtime import build_collection_repository
 from .epilogue_chat import EpilogueChatReferenceError, EpilogueChatService
 from .generator import ExhibitionGenerator
 from .images import ImageCache, ImageFetchError
@@ -80,6 +82,13 @@ from .providers.aliyun_image import (
     PosterContext,
 )
 from .providers.aliyun_tts import AliyunTtsProvider, AliyunTtsProviderError
+from .retrieval_trace import RetrievalTraceWriter
+from .qrel_review import (
+    CandidateReviewRequest,
+    FinalizationReviewRequest,
+    QrelReviewWorkbench,
+)
+from .qrel_suggestions import AiSuggestionStore
 
 
 def _event(
@@ -207,25 +216,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
-    collections = CollectionRepository(
-        settings.collections_dir,
-        default_collection_id=settings.default_collection_id,
-        rag_mode=settings.rag_mode,
-        dense_index_dir=settings.rag_index_dir,
-        embedding_model_cache_dir=settings.rag_model_cache_dir,
-        embedding_model=settings.rag_embedding_model,
-        dense_top_k=settings.rag_dense_top_k,
-        dense_min_score=settings.rag_dense_min_score,
-        evidence_min_score=settings.rag_evidence_min_score,
-        rrf_k=settings.rag_rrf_k,
-        hybrid_max_results=settings.rag_max_results,
+    collections = build_collection_repository(
+        settings,
+        trace_writer=RetrievalTraceWriter(settings.rag_trace_dir),
     )
     store = ExhibitionStore(
         mode=settings.store_mode,
         path=settings.store_path if settings.store_mode == "json" else None,
     )
     image_cache = ImageCache(
-        settings.store_path.parent / "cache" / "objects",
+        settings.image_cache_dir or settings.store_path.parent / "cache" / "objects",
         limit_bytes=settings.image_cache_limit_mb * 1024 * 1024,
     )
     generator = ExhibitionGenerator(
@@ -335,6 +335,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.poster_background_tasks = poster_background_tasks
     app.state.audio_prewarm_tasks = audio_prewarm_tasks
     app.state.image_cache = image_cache
+    # Do not parse the 17k-object frozen corpus during ordinary visitor API
+    # startup. The review-only loader verifies its hashes before first use.
+    app.state.qrel_review_workbench = None
 
     @app.exception_handler(CollectionDataError)
     async def collection_error_handler(_, exc: CollectionDataError) -> JSONResponse:
@@ -390,12 +393,104 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="A valid editor access token is required for draft access.",
             )
 
+    def require_local_qrel_review() -> None:
+        # The companion Next.js page is also development-only. With no login
+        # ceremony, fail closed if this internal write surface reaches a
+        # production process; deployed nginx blocks /api/admin as well.
+        if settings.app_env == "production":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    def qrel_review_workbench() -> QrelReviewWorkbench:
+        workbench = app.state.qrel_review_workbench
+        if workbench is None:
+            try:
+                workbench = QrelReviewWorkbench(
+                    settings.qrel_review_dataset_dir,
+                    settings.qrel_review_db_path,
+                    AiSuggestionStore(
+                        settings.qrel_review_dataset_dir,
+                        settings.qrel_suggestion_db_path,
+                    ),
+                )
+            except RuntimeError as error:
+                logger.error("QREL review frozen-data verification failed: %s", error)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Frozen retrieval-eval review data failed verification.",
+                ) from error
+            app.state.qrel_review_workbench = workbench
+        return workbench
+
     def ensure_mutable(exhibition: Exhibition) -> None:
         if exhibition.status in LOCKED_STATUSES:
             raise HTTPException(
                 status_code=409,
                 detail="This version is locked. Withdraw it or create a new draft version before editing or revalidating.",
             )
+
+    _qrel_review_headers = {"Cache-Control": "no-store"}
+
+    @app.get(
+        "/api/admin/retrieval-eval/reviews/questions",
+        dependencies=[Depends(require_local_qrel_review)],
+        include_in_schema=False,
+    )
+    def list_qrel_review_questions(
+        response: Response,
+        status_filter: str | None = Query(default=None, alias="status", max_length=32),
+        category: str | None = Query(default=None, max_length=128),
+        search: str | None = Query(default=None, max_length=512),
+    ) -> dict[str, object]:
+        response.headers.update(_qrel_review_headers)
+        return qrel_review_workbench().questions_summary(status_filter, category, search)
+
+    @app.get(
+        "/api/admin/retrieval-eval/reviews/questions/{query_id}",
+        dependencies=[Depends(require_local_qrel_review)],
+        include_in_schema=False,
+    )
+    def get_qrel_review_question(
+        query_id: str,
+        response: Response,
+    ) -> dict[str, object]:
+        response.headers.update(_qrel_review_headers)
+        return qrel_review_workbench().question_detail(query_id)
+
+    @app.put(
+        "/api/admin/retrieval-eval/reviews/questions/{query_id}/candidates/{object_id:path}",
+        dependencies=[Depends(require_local_qrel_review)],
+        include_in_schema=False,
+    )
+    def put_qrel_candidate_review(
+        query_id: str,
+        object_id: str,
+        request: CandidateReviewRequest,
+        response: Response,
+    ) -> dict[str, object]:
+        response.headers.update(_qrel_review_headers)
+        return qrel_review_workbench().put_candidate(query_id, object_id, request)
+
+    @app.put(
+        "/api/admin/retrieval-eval/reviews/questions/{query_id}/finalization",
+        dependencies=[Depends(require_local_qrel_review)],
+        include_in_schema=False,
+    )
+    def put_qrel_finalization(
+        query_id: str,
+        request: FinalizationReviewRequest,
+        response: Response,
+    ) -> dict[str, object]:
+        response.headers.update(_qrel_review_headers)
+        return qrel_review_workbench().put_finalization(query_id, request)
+
+    @app.get(
+        "/api/admin/retrieval-eval/reviews/export",
+        dependencies=[Depends(require_local_qrel_review)],
+        include_in_schema=False,
+    )
+    def export_qrel_review_snapshot(response: Response) -> dict[str, object]:
+        response.headers.update(_qrel_review_headers)
+        return qrel_review_workbench().export_snapshot()
 
     @app.get("/api/images/{object_id:path}")
     def get_object_image(object_id: str, w: int = 1024, large: bool = False) -> Response:
@@ -585,7 +680,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "fingerprint": retrieval_status.fingerprint,
                 "collectionId": default_collection.id,
                 "collectionVersion": default_collection.version,
+                "culturalRoutingVersion": CULTURAL_ROUTING_VERSION,
             }
+            if settings.rag_mode == "shadow":
+                # Shadow computes the hybrid candidate ranking but serves the
+                # BM25 baseline. Report both sides so operations never mistake
+                # an available dense index for a production cutover.
+                structured_status = collections.structured_retrieval_status(
+                    default_collection
+                )
+                candidate_available = bool(
+                    retrieval_status.available
+                    and structured_status.get("available")
+                )
+                retrieval.update(
+                    {
+                        "method": BM25_RETRIEVAL_METHOD,
+                        "version": BM25_RETRIEVAL_VERSION,
+                        "mode": "shadow",
+                        "candidateMethod": HYBRID_RETRIEVAL_METHOD,
+                        "candidateVersion": HYBRID_RETRIEVAL_VERSION,
+                        "candidateAvailable": candidate_available,
+                        "candidateDenseAvailable": retrieval_status.available,
+                        "candidateObjectSearchAvailable": structured_status.get(
+                            "objectSearchAvailable", False
+                        ),
+                        "candidateEvidenceSearchAvailable": structured_status.get(
+                            "evidenceSearchAvailable", False
+                        ),
+                        "candidateStructuredFormat": structured_status.get(
+                            "formatVersion"
+                        ),
+                    }
+                )
         except CollectionDataError as error:
             retrieval = {
                 "method": BM25_RETRIEVAL_METHOD,

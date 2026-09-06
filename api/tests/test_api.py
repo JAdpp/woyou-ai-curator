@@ -38,6 +38,7 @@ def test_health_exposes_actual_retrieval_mode_without_local_paths(
         "fingerprint": None,
         "collectionId": "cma-chinese-art",
         "collectionVersion": "test-v1",
+        "culturalRoutingVersion": "controlled-origin-v2",
     }
     assert "indexPath" not in retrieval
     assert "runtime/cache" not in response.text
@@ -67,6 +68,39 @@ def test_health_reports_missing_hybrid_cache_without_leaking_path(
     assert retrieval["reason"] == (
         "versioned dense cache is missing; run scripts/build_dense_index.py"
     )
+    assert str(tmp_path) not in response.text
+
+
+def test_health_distinguishes_shadow_baseline_from_hybrid_candidate(
+    tmp_path: Path,
+) -> None:
+    collections_dir = tmp_path / "collections"
+    write_collection(collections_dir)
+    settings = Settings(
+        app_env="test",
+        collections_dir=collections_dir,
+        store_mode="memory",
+        rag_mode="shadow",
+        rag_index_dir=tmp_path / "private-rag-cache",
+        rag_model_cache_dir=tmp_path / "private-model-cache",
+        deepseek_api_key=None,
+    )
+    with TestClient(create_app(settings)) as test_client:
+        response = test_client.get("/health")
+
+    retrieval = response.json()["retrieval"]
+    assert retrieval["mode"] == "shadow"
+    assert retrieval["method"] == "fielded_bm25_hard_anchor"
+    assert retrieval["version"] == "bm25-v1"
+    assert retrieval["candidateMethod"] == (
+        "sqlite_object_bm25_evidence_bm25_qwen_embedding_rrf_qwen_rerank"
+    )
+    assert retrieval["candidateVersion"] == "hybrid-rag-v4"
+    assert retrieval["candidateAvailable"] is False
+    assert retrieval["candidateDenseAvailable"] is False
+    assert retrieval["candidateObjectSearchAvailable"] is False
+    assert retrieval["candidateEvidenceSearchAvailable"] is False
+    assert retrieval["candidateStructuredFormat"] is None
     assert str(tmp_path) not in response.text
 
 

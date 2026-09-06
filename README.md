@@ -58,18 +58,20 @@ AI 策展人叫 **彦远**，取自张彦远（约 815–877）——《历代�
 
 证据 ID 白名单能证明“这条文字指向了一份真实且允许使用的输入材料”，但**不能自动证明句子在语义上被材料蕴含**。模型精炼后的 Brief 会保留“语义蕴含仍待专业复核”的警告；公开发布仍需要领域审阅，涉及敏感遗产时还需要相应社群或文化持有者审阅。本 Demo 不把结构化追溯包装成专业策展认证。
 
-## 馆藏推荐：可审计的本地混合 RAG
+## 馆藏推荐：可审计的混合 RAG（第一阶段）
 
-推荐链路是 `冻结馆藏 → 检索 → 重排 → 证据片段 → 大模型写作`。运行时不临时抓取博物馆 API，也不让模型凭常识先挑藏品：
+候选链路是 `冻结馆藏 → 受控 QueryPlan → 本地硬过滤 → 对象／证据稀疏与向量召回 → RRF → Qwen 重排 → DeepSeek 证据审查 → CuratorialBrief`。运行时不临时抓取博物馆 API，也不让模型凭常识先挑藏品：
 
-1. 17,246 件冻结对象先走字段化 BM25：题名、文化包与证据域、材料/类型/标签、馆方说明分别赋权。中英文别名现在只用于稀疏召回加权和猫／犬齿、King 姓氏等歧义保护，**不再充当访客问题白名单**。
-2. 每个非漫游问题都由本地多语 embedding 同时检索对象级文档和 61,620 条馆方 `evidence[]`；后一条通路避免对象长文在 512-token 窗口后部被截断。两条 dense 排名先融合，再与 BM25 用 RRF 融合。没有人工别名的新主题也能进入 dense，但使用更高的开放问法阈值。
-3. 向量近邻只负责候选召回。进入展览前，DeepSeek 对最多 20 件候选做一次证据级相关性审查，分别判断对象是否直接承载主题、馆方证据是否支持问题所问的关系，以及问题是否需要馆藏之外的伦理、法律、社群、效果或完整因果材料。模型只能返回本轮看过的对象 ID 和同对象、非 provenance 的证据 ID；缺失、猜测、跨对象或入藏来源引用都不能计入五件证据链。
-4. 如果直接相关对象不足，审查模型最多给出 3 条保持原意的双语馆藏检索式，系统对 BM25＋embedding 结果做一次 RRF 融合并复审；仍不足就拒绝生成，不拿最近邻补位。跨文化 MMR 只在审查通过的候选池中运行，避免用多样性换掉主题相关性。
+1. planner 在首次昂贵检索前产生类型化 `QueryPlan`，只允许年代、文化包、机构、材料、有图、权利与证据深度等白名单硬条件。硬约束在版本化的只读 SQLite 派生库中用绑定参数执行，模型不能直接提交 SQL。自然语言物件名称另存为 `catalogueTypeHints`，交由语义检索和审核确认，避免把“篮子”直接与某馆的 `Textile`、`Tools and Equipment` 等大类字段作字面等同；显式 API `FilterSpec.object_types` 仍支持严格类型过滤。材料及显式类型按完整词组匹配复合著录，例如 `paper` 可匹配 `Ink on paper`，但 `stone` 不匹配 `limestone`；明确过滤后不超过 60 件的小结果集另保留过滤召回通道，仍须经过相关性与证据审查。
+2. hybrid 候选链先用 SQLite FTS5 对题名、路由、元数据与正文做有界对象 BM25 召回，再用原字段化 BM25 重施题名、排除词和全部锚点门控；另一条独立的证据 BM25 直接定位 61,620 条馆方 `evidence[]`。完整全库字段化 BM25 仍是 shadow 实际交付的基线。中英文别名只用于召回加权和歧义保护，**不再充当访客问题白名单**。
+3. `qwen3.7-text-embedding` 以 768 维向量分别索引对象文档和馆方证据；向量在运维命令中预先生成，请求期间只计算查询向量。稀疏与向量排名经 RRF 融合后，`qwen3-rerank` 再根据访客问题和机构证据重排有界候选；相似度和重排分都不直接等于“证据支持”。
+4. 进入展览前，DeepSeek 对有界候选做证据级相关性审查。全局重排后重新保留明确问题轴及文化区域的审核名额。模型只能返回本轮看过的对象 ID 和同对象、非 provenance 的证据 ID；缺失、猜测、跨对象或入藏来源引用都不能计入五件证据链。审核区分开放观展、视觉观察与事实解释：馆方文字描述的可见形态可用于明确标注的策展解读，但不能独自证明历史因果；文本审核不会把图像 URL 当作已经看图。必要时最多执行一次保持原意的扩展与复审；部分支持且满足展品数量与文化覆盖约束时可生成带限制说明的展览，否则明确说明不足，不拿最近邻补位。
 
-`hybrid-rag-v2` 固定使用 [`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)（384 维、约 50 种语言、Apache-2.0）；FastEmbed 使用 Qdrant 发布的等价 ONNX 运行制品。`agentic-rag-v2` 记录 LLM 查询规划、原子词法轴、独立英文 semanticQuery、向量＋精确短语预筛、来源 ID／原文短引文审查与有界扩展是否实际参与。当前 1.7 万件规模没有引入 pgvector：对象与证据矩阵是版本化 `.npy`，运行时以只读 mmap 做精确余弦扫描。这仍是真实 embedding 检索，只是没有为了“叫向量数据库”而增加不必要的服务。索引 manifest 固定馆藏 ID/版本/`objects.json` SHA-256、文本配方、模型来源/许可/制品 revision 与 SHA-256、维度和对象/证据数量；请求期间不会下载模型或重建索引。
+第一阶段保留 MiniLM 384 维索引作为离线基线，不把它当成新的生产默认。Qwen 对象与证据矩阵仍是版本化 `.npy`，运行时以只读 mmap 做精确余弦扫描；SQLite manifest 和 dense manifest 都绑定馆藏 ID、版本与 `objects.json` SHA-256，请求期间不会重建索引。预计算文档、访客查询与重排候选会发送到配置的阿里云北京业务空间；检索 trace 只在本地保存规范化问题的 SHA-256、候选 ID、通道分数、延迟与错误，不重复写入问题原文。
 
-缓存缺失、过期、损坏或查询运行错误会明确降级到 BM25；LLM 审查被停用、超时或返回无效结构时，未经审查的 dense-only 近邻也会被排除，而不是偷偷当作相关藏品。`SearchResult` 记录 BM25、对象／证据余弦、RRF、agentic expansion 与 LLM audit 通道，`CuratorialBrief` 保存本次实际执行的方法和版本。
+`RAG_MODE=shadow` 会运行新候选链并记录对照 trace，但仍向后续链路交付 BM25 结果；run JSONL 会把实际交付的 `results` 与单查询 `candidateResults` 分开，不能把前者误当成混合排名。离线质量对照显式使用 `--rag-mode hybrid` 生成候选 run；上线前需通过门槛并实时核验服务器配置。`RAG_MODE=hybrid` 才会真正交付新排名，`RAG_MODE=bm25` 是应急和无密钥降级开关。示例配置默认使用 `shadow`；**当前不因“代码已接入”就认定已达到 cutover 门槛**。索引缺失、过期或损坏会可观测地回退 BM25；LLM 审查超时或返回无效结构时，未经审查的 dense-only 近邻仍会被排除。
+
+2026-09-06 的混合检索核心为 `hybrid-rag-v4`，规划审核层为 `agentic-rag-v5.1`。应用与评测共享同一仓库工厂、provider 与重排配置，评测另存规划、检索、审核样本及接受集，并隔离超时后台任务的晚到 trace，不把初始召回分数与最终展览质量混算。V5.1 仅在原审核时限内补一次传输连接失败重试，不重试余额不足、HTTP 拒绝、无效输出或超时，也不反复询问模型以改变不利判定。137 题授权 AI 二审及恢复运行新增候选盲审已完成，但不是独立人工金标准；池外未审对象仍按未标注处理。当前进度、真实 API 故障与恢复验收见 [RAG 优化验收记录](data/qa/RAG_优化验收_20260906.md)。
 
 ## 不可配置的硬约束
 
@@ -86,7 +88,7 @@ AI 策展人叫 **彦远**，取自张彦远（约 815–877）——《历代�
 
 机构分布：Cleveland Museum of Art 15,200 件，The Met 1,046 件，Art Institute of Chicago 1,000 件。证据深度：6,126 件 `full`（含机构说明）/ 11,120 件 `thin`（主要是权威著录字段）。
 
-文化包是可重叠的语料分面，不把对象的文化身份压成唯一标签：
+文化包是可重叠的语料分面，不把对象的文化身份压成唯一标签。下表是冻结导入快照的原始计数；运行时 `controlled-origin-v2` 根据明确的 culture/place 字段修正了 837 件印度对象的东南亚误标，并为另外 2 件补充南亚标签，保留不确定及跨地区记录，不覆盖原始 JSON。实时检索分面与下表可能不同：
 
 | 文化包 | 件数 | 文化包 | 件数 |
 | --- | ---: | --- | ---: |
@@ -127,17 +129,18 @@ npm.cmd install
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r .\api\requirements.txt
 Copy-Item .\.env.example .\.env
-# 首次运行或 objects.json / embedding 模型变化后构建本地索引
-npm.cmd run rag:index
+# 在 .env 填入 DASHSCOPE_API_KEY 后，预先构建两个版本化派生索引
+npm.cmd run rag:index:qwen
+npm.cmd run rag:index:filters
 ```
 
-在 `.env` 填服务端配置。不要把密钥放进任何 `NEXT_PUBLIC_*` 变量，也不要提交 `.env`。
+在 `.env` 填服务端配置。不要把密钥放进任何 `NEXT_PUBLIC_*` 变量，也不要提交 `.env`。如果只需要无密钥启动，先把 `RAG_MODE` 改为 `bm25`；这会关闭云端 embedding 与 rerank，但不影响本地字段化 BM25 基线。
 
 ```powershell
 npm.cmd run dev
 ```
 
-访客端 [http://localhost:3000](http://localhost:3000)，API 健康检查 [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)，内部数据工具 [http://localhost:3000/dev/admin](http://localhost:3000/dev/admin)（生产构建下 404）。
+访客端 [http://localhost:3000](http://localhost:3000)，API 健康检查 [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)，内部数据工具 [http://localhost:3000/dev/admin](http://localhost:3000/dev/admin)（生产构建下 404）。137 题开放检索候选的人工审核工作台位于 [http://localhost:3000/dev/admin/qrels](http://localhost:3000/dev/admin/qrels)；它采用单人本地审核模式，打开页面即可使用，无需令牌或审阅者代号。审核页及其写入 API 在生产环境中均返回 404。
 
 ## 配置
 
@@ -148,11 +151,12 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_LABELS_MODEL=deepseek-v4-flash-vision-exp
 DEEPSEEK_TIMEOUT_SECONDS=90
-DEEPSEEK_FRAME_TIMEOUT_SECONDS=90
+DEEPSEEK_FRAME_TIMEOUT_SECONDS=80
 DEEPSEEK_LABELS_TIMEOUT_SECONDS=45
 GENERATION_POSTER_WAIT_SECONDS=2
 GENERATION_JOB_TIMEOUT_SECONDS=180
 DASHSCOPE_API_KEY=
+ALIYUN_TEXT_API_HOST=https://llm-nwypztqdwtzyt9zd.cn-beijing.maas.aliyuncs.com
 ALIYUN_IMAGE_API_HOST=
 ALIYUN_IMAGE_MODEL=qwen-image-3.0-pro
 ALIYUN_IMAGE_SIZE=1536*864
@@ -162,11 +166,15 @@ ALIYUN_TTS_VOICE=qwen-audio-3.0-tts-plus-longyulianrong
 ALIYUN_TTS_INSTRUCTION=请使用专业、克制、清晰的博物馆导览播音主持声线，语速稍慢，停连自然，避免夸张表演。
 ADMIN_REVIEW_TOKEN=change-before-public-deployment
 EDITOR_ACCESS_TOKEN=change-before-public-deployment
+QREL_REVIEW_DATASET_DIR=data/qa/retrieval_eval_v1
+QREL_REVIEW_DB_PATH=api/runtime/qrel-reviews/retrieval_eval_v1/reviews.sqlite3
 PSEUDONYMOUS_EVENT_RETENTION_DAYS=30
 DEFAULT_COLLECTION_ID=global_open
 IMAGE_CACHE_LIMIT_MB=256
-RAG_MODE=hybrid
-RAG_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+RAG_MODE=shadow
+RAG_EMBEDDING_PROVIDER=aliyun
+RAG_EMBEDDING_MODEL=qwen3.7-text-embedding
+RAG_EMBEDDING_DIMENSION=768
 RAG_INDEX_DIR=api/runtime/cache/rag
 RAG_MODEL_CACHE_DIR=api/runtime/cache/fastembed
 RAG_DENSE_TOP_K=200
@@ -174,16 +182,28 @@ RAG_DENSE_MIN_SCORE=0.28
 RAG_EVIDENCE_MIN_SCORE=0.30
 RAG_RRF_K=60
 RAG_MAX_RESULTS=250
-RAG_RETRIEVAL_TIMEOUT_SECONDS=30
+RAG_RERANK_ENABLED=true
+RAG_RERANK_MODEL=qwen3-rerank
+RAG_RERANK_CANDIDATE_COUNT=60
+RAG_RERANK_TOP_N=24
+RAG_RERANK_TIMEOUT_SECONDS=6
+RAG_RERANK_MAX_ATTEMPTS=1
+RAG_STRUCTURED_FILTERS_ENABLED=true
+RAG_FILTER_INDEX_DIR=api/runtime/cache/filters
+RAG_EVIDENCE_BM25_TOP_K=120
+RAG_TRACE_DIR=api/runtime/traces/retrieval
+RAG_RETRIEVAL_TIMEOUT_SECONDS=40
 RAG_LLM_AUDIT_ENABLED=true
 RAG_LLM_AUDIT_TOP_K=18
-RAG_LLM_AUDIT_TIMEOUT_SECONDS=18
+RAG_LLM_AUDIT_TIMEOUT_SECONDS=22
 RAG_AGENTIC_MAX_QUERIES=5
 ```
 
-开放问题采用真正的混合 RAG：BM25 与 384 维多语种 embedding 同时召回藏品和馆方证据片段；LLM planner 同时给出短原子检索轴和一条保留全部替代项／关系的英文 semanticQuery。原子轴负责精确短语，semanticQuery 负责找回分散写在题名、用途、材料与馆方说明中的关系；来源丰富的语义候选在审核窗口中有独立名额。随后 LLM 只针对实际返回的 object/evidence ID 做相关性审查，每个强制谓词还必须返回馆方原文短引文，程序机械验证引文确实来自对应证据行。证据仍不足时，审查模型可提出不改变访客原意的有界扩展检索式，并对扩展候选重新审查。规则只保留在拍卖估值、医疗建议、真伪鉴定等硬边界，以及跨文化比较腿数等可验证结构约束中，不再把预设主题词当作召回白名单。当前 17k 级本地索引使用内存映射矩阵精确余弦扫描；它是实质的向量检索，但还不是 pgvector/HNSW 服务。
+开放问题的完整细节见上文“馆藏推荐”。两份 `.env.example` 都使用北京业务空间专属域名，不使用通用端点；密钥始终留空。`RAG_MODE=shadow` 是评测期配置，不是对 `hybrid` 质量已经达标的声明。
 
-初始召回、证据审查以及必要时的批量扩展／复审共用 40 秒墙钟预算；策展框架和并行展签调用分别受 90 秒、45 秒墙钟预算约束。`httpx` 的分段 I/O 超时之外还有真正的整次请求上限。相关性审查是自由问题的生成前置条件：若它超时或不可用，系统会明确失败关闭，并提示重试，而不会把未经审核的 BM25／向量近邻当成馆藏证据。只有审查已经通过之后，策展框架或展签模型失败才会回退到确定性文案。海报最多额外等待 2 秒，之后转入后台继续生成，不再阻塞可浏览展览。180 秒只作为任务状态机的最后安全兜底；若进程中断，已经写入的 `generating` 骨架会恢复成明确的草稿，而不会永久显示生成中。模型失败与回退原因会写入日志，避免静默降级。
+初始召回、证据审查以及必要时的批量扩展／复审默认共用 40 秒墙钟预算；策展框架和并行展签调用默认分别受 80 秒、45 秒墙钟预算约束。加上海报等候 2 秒及预留 10 秒，177 秒小于默认任务时限 180 秒；已有 `.env` 的自定义值仍优先。同步检索和融合重排使用进程共享、最多 4 个后台调用且无等待队列的执行器：超时返回后仍在运行的调用继续占用名额，直到实际退出；容量满返回 `RETRIEVAL_CAPACITY_EXHAUSTED`，不把它误报成主题无藏品。该预算不等于包括冷加载、所有策展阶段及资源生成在内的整场展览总耗时。
+
+相关性审查是自由问题的生成前置条件：若它超时或不可用，系统会明确失败关闭，并提示重试，而不会把未经审核的 BM25／向量近邻当成馆藏证据。只有审查已经通过之后，策展框架或展签模型失败才会回退到确定性文案。海报最多额外等待 2 秒，之后转入后台继续生成，不再阻塞可浏览展览。180 秒只作为任务状态机的最后安全兜底；若进程中断，已经写入的 `generating` 骨架会恢复成明确的草稿，而不会永久显示生成中。模型失败与回退原因会写入日志，避免静默降级。
 
 阿里云图像生成需同时配置 `DASHSCOPE_API_KEY` 与该 Key 所属业务空间的 `ALIYUN_IMAGE_API_HOST`（北京与新加坡端点不可混用）。海报采用 `qwen-image-3.0-pro` 生成 1536×864 横版主题主视觉：服务端先在本地把访客主题路由为白名单内的纯英文视觉母题，模型不会收到原始题名、问题、中文或自由输入，只负责生成与主题相关的无字编辑视觉；它不得复制或伪造具体馆藏，也不得生成文字、Logo 或水印。随后服务端使用 Pillow 将最终中文标题、短副标题及「卧游 · AI 策展人彦远」确定性排入同一张 PNG，避免模型错字与伪文字。页面持续标注主题画面由 AI 生成、文字由系统排版且不代表馆藏实物。瞬时网络失败会受控重试一次；仍失败或浏览器加载失败时，2D 与 3D 入口改用本展馆藏公开图像与同一标题模板，不留空白海报位。
 
@@ -207,8 +227,14 @@ npm.cmd run data:supplement:global
 # 按部门、文化区与材料分层补充 1,000 件 AIC 公有领域对象
 npm.cmd run data:supplement:aic
 
-# 馆藏版本或 embedding 模型变化后重建版本化本地向量索引
-npm.cmd run rag:index
+# 馆藏版本、文本配方或 Qwen embedding 变化后重建向量索引
+npm.cmd run rag:index:qwen
+
+# 馆藏版本或结构化字段映射变化后重建 SQLite/FTS5 派生索引
+npm.cmd run rag:index:filters
+
+# 保留的 MiniLM 离线基线
+npm.cmd run rag:index:minilm
 
 # 旧东亚馆藏的导入与离线重建
 npm.cmd run data:import
@@ -251,6 +277,32 @@ npm.cmd run qa:open-rag
 ```
 
 该套件会核对审核是否只接受本轮展示过的对象／证据 ID、跨文化候选池与最终五件展厅是否都保留要求的文化腿，以及 OOD／伦理／完整因果问法是否诚实降级。它依赖真实模型服务，因此同时记录耗时与外部响应漂移，不能拿一次绿灯代替冻结模型上的 P95 或人工内容评审。
+
+第一阶段另有一套 250 问的冻结检索评测集。先验证数据集指纹和 ID，再对已冻结的 run JSONL 计算 Recall@50、nDCG@10、MRR@10、Success@5、文化腿覆盖、证据支持、错误 `supported` 与分阶段延迟：
+
+```powershell
+npm.cmd run qa:retrieval:validate
+npm.cmd run test:retrieval-eval
+npm.cmd run test:retrieval-dataset
+npm.cmd run test:retrieval-run
+npm.cmd run qa:retrieval:run -- --run-name bm25-v1 --rag-mode bm25 --resume
+npm.cmd run qa:retrieval:run -- --run-name phase1-qwen-v1 --rag-mode hybrid --resume
+npm.cmd run qa:retrieval:compare -- --run bm25=artifacts/qa/retrieval-runs/retrieval_eval_v1-bm25-v1.jsonl --run phase1=artifacts/qa/retrieval-runs/retrieval_eval_v1-phase1-qwen-v1.jsonl
+```
+
+`qa:retrieval:run` 以生产检索器生成可续跑、逐问落盘的 run；默认不调 DeepSeek，只有显式加 `--audit` 才记录答复性和接受证据。shadow run 的 `results` 始终是服务基线，候选另存为 `candidateResults`；当前评分器只评分 `results`，所以候选质量比较必须使用上例的离线 hybrid run。`qa:retrieval:compare` 只评分运行文件，不在评分时调模型或修改 qrels；报告写入本地忽略的 `artifacts/qa/`。当前确定性字段匹配是程序化 gold，开放主题候选只是待人工审阅的 pooled silver，不得冒充人工金标。切换 `hybrid` 前至少要确认：Recall@50 相对 BM25 提升≥15%、nDCG@10 提升≥10%、精确题名／作者问法下降≤2%、引用错配为 0、错误 `supported` <2%、要求的文化腿覆盖≥90%，并完成冻结环境的 P95 延迟检查。v1 只有 100 个字段型 scored gold；137 个开放问题尚待人工复核，文化题中没有 scored 的多文化腿问题，默认 retrieval-only run 也不产生 claim-level 引用判断。因此本轮程序化 compare 只能验字段回归和运行稳定性，后三项必须补充人工多文化／claim-level qrels 并运行 `--audit` 后才有资格判定。**这些是 cutover 门槛，不是当前已通过的结果。**
+
+人工审核不会原地修改 `data/qa/retrieval_eval_v1/questions.jsonl` 或 `qrels.jsonl`。每次按钮判断都以审阅者为作用域写入忽略提交的 SQLite revision 日志；写入前再次核对 v1 问题、qrels 与 17,246 件馆藏文件的 SHA-256，候选对和证据 ID 也必须属于冻结语料。页面隐藏 pooled-silver 原始候选分数并采用稳定打乱顺序，减少系统排序对人工判断的诱导。完成一题的 12 个候选后，审阅者还需用按钮确定该题的 `supported / partially_supported / unsupported`；全部 137 题完成后，审核快照才能进入另一个版本化金标冻结流程。
+
+### 2026-08-31 第一阶段本地验收结论
+
+以下保留首轮历史结果；2026-09-06 的修复、完整对照、授权 AI 复核与未过门槛以 [优化验收记录](data/qa/RAG_优化验收_20260906.md) 为准，不将两批结果混算。
+
+- Qwen 768 维派生索引已覆盖 17,246 件对象与 61,620 条证据；SQLite v4 派生库同时提供白名单硬过滤、中文二／三元切分的对象 FTS 与证据 FTS。真实反例“雲山”可召回 `cma:1933.220`《雲山圖》。
+- 同一组 100 个程序化字段 gold 上，BM25 → Qwen+RRF+rerank 的 Recall@50 为 `0.2691 → 0.7321`，nDCG@10 为 `0.1696 → 0.5233`，Success@5 为 `0.2000 → 0.6300`。35 个精确题名／作者／机构问题的 Recall@50 为 `0.2000 → 0.9714`，没有发生精确检索回退。
+- 总耗时 P50/P95 为 `12.08/14.80 s → 6.33/13.04 s`；Qwen 查询 embedding 的 P95 为 `7.48 s`，rerank 的 P95 为 `6.07 s`。100 题没有未捕获 API error，但有 4 题发生可观测 rerank fallback。
+- 13 个 deterministic evidence-boundary 问题在真实 DeepSeek 审查下全部判为 `unsupported`，错误 `supported` 为 `0/13`；但总耗时 P95 达 `39.72 s`，4 题带超时／降级警告。
+- 当时 scored 单文化腿覆盖为 `75.56%`，低于 `90%` 门槛；更重要的是 v1 没有 scored 多文化腿、人工开放主题或 claim-level 引用金标。该轮结论为：**第一阶段代码与评测基础设施完成，但 cutover 未获批准；不应直接全量切成 hybrid。** 此处不是当前服务器实际 mode 的探测结果。
 
 ## 已知问题与未验证项
 

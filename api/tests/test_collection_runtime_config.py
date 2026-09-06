@@ -82,12 +82,118 @@ def test_image_cache_limit_must_be_positive(monkeypatch: pytest.MonkeyPatch) -> 
         Settings.from_env()
 
 
-def test_hybrid_v1_rejects_unversioned_embedding_model_change(
+def test_local_baseline_rejects_unversioned_embedding_model_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "local")
     monkeypatch.setenv("RAG_EMBEDDING_MODEL", "some/other-model")
 
-    with pytest.raises(ValueError, match="pinned for hybrid-rag-v2"):
+    with pytest.raises(ValueError, match="local embedding baseline is pinned"):
+        Settings.from_env()
+
+
+def test_aliyun_embedding_and_shadow_mode_are_versioned_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_MODE", "shadow")
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "aliyun")
+    monkeypatch.setenv("RAG_EMBEDDING_MODEL", "qwen3.7-text-embedding")
+    monkeypatch.setenv("RAG_EMBEDDING_DIMENSION", "768")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-only-key")
+    monkeypatch.setenv(
+        "ALIYUN_TEXT_API_HOST",
+        "https://fixture.cn-beijing.maas.aliyuncs.com",
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.rag_mode == "shadow"
+    assert settings.rag_embedding_provider == "aliyun"
+    assert settings.rag_embedding_model == "qwen3.7-text-embedding"
+    assert settings.rag_embedding_dimension == 768
+
+
+def test_bm25_mode_does_not_construct_aliyun_retrieval_clients(
+    collections_dir: Path,
+) -> None:
+    settings = Settings(
+        app_env="test",
+        collections_dir=collections_dir,
+        store_mode="memory",
+        store_path=collections_dir.parent / "unused-store.json",
+        rag_mode="bm25",
+        rag_embedding_provider="aliyun",
+        rag_embedding_model="qwen3.7-text-embedding",
+        rag_embedding_dimension=768,
+        rag_embedding_api_key=None,
+        rag_embedding_api_host=None,
+        rag_rerank_enabled=True,
+    )
+
+    app = create_app(settings)
+
+    assert app.state.collections.reranker is None
+    assert app.state.collections._dense_manager.enabled is False
+    assert app.state.collections._dense_manager.provider_spec.provider == "local"
+
+
+def test_bm25_environment_allows_dormant_aliyun_flags_without_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_MODE", "bm25")
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "aliyun")
+    monkeypatch.setenv("RAG_RERANK_ENABLED", "true")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "")
+    monkeypatch.setenv("ALIYUN_TEXT_API_HOST", "")
+    monkeypatch.setenv("ALIYUN_IMAGE_API_HOST", "")
+
+    settings = Settings.from_env()
+
+    assert settings.rag_embedding_api_key is None
+    assert settings.rag_embedding_api_host is None
+    assert settings.rag_rerank_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("RAG_EMBEDDING_DIMENSION", "999", "DIMENSION is not supported"),
+        ("RAG_EMBEDDING_MAX_ATTEMPTS", "6", "between one and five"),
+        ("RAG_EMBEDDING_QUERY_INSTRUCT", "", "INSTRUCT must not be blank"),
+    ],
+)
+def test_enabled_aliyun_embedding_validates_provider_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv("RAG_MODE", "hybrid")
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "aliyun")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-only-key")
+    monkeypatch.setenv(
+        "ALIYUN_TEXT_API_HOST",
+        "https://fixture.cn-beijing.maas.aliyuncs.com",
+    )
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=message):
+        Settings.from_env()
+
+
+def test_enabled_reranker_validates_retry_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_MODE", "hybrid")
+    monkeypatch.setenv("RAG_RERANK_ENABLED", "true")
+    monkeypatch.setenv("RAG_RERANK_MAX_ATTEMPTS", "6")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-only-key")
+    monkeypatch.setenv(
+        "ALIYUN_TEXT_API_HOST",
+        "https://fixture.cn-beijing.maas.aliyuncs.com",
+    )
+
+    with pytest.raises(ValueError, match="RAG_RERANK_MAX_ATTEMPTS"):
         Settings.from_env()
 
 

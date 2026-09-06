@@ -104,7 +104,8 @@ def with_collection_image_evidence(obj: MuseumObject) -> MuseumObject:
     copied = obj.model_copy(deep=True)
     if image_evidence(copied) is not None:
         return copied
-    source_url = copied.image_url_large or copied.image_url
+    source_url = (copied.visual_core_evidence.source_url if copied.visual_core_evidence
+                  else copied.image_url or copied.image_url_large)
     copied.evidence.append(
         EvidenceChunk(
             id=f"image:{copied.id}",
@@ -212,7 +213,7 @@ def plan_roles(objects: list[MuseumObject]) -> tuple[list[MuseumObject], list[st
     if count > 3:
         interior = range(1, count - 1)
         has_interior_full = any(
-            ordered[index].evidence_depth == EvidenceDepth.FULL.value for index in interior
+            ordered[index].supports_core_evidence for index in interior
         )
         if not has_interior_full:
             structural = [0, count - 1]
@@ -220,7 +221,7 @@ def plan_roles(objects: list[MuseumObject]) -> tuple[list[MuseumObject], list[st
                 (
                     index
                     for index in structural
-                    if ordered[index].evidence_depth == EvidenceDepth.FULL.value
+                    if ordered[index].supports_core_evidence
                 ),
                 None,
             )
@@ -259,7 +260,7 @@ def assign_roles(objects: list[MuseumObject]) -> list[str]:
     for index, obj in enumerate(objects):
         if roles[index] != CuratorialRole.CORE_EVIDENCE.value:
             continue
-        if obj.evidence_depth == EvidenceDepth.THIN.value:
+        if not obj.supports_core_evidence:
             roles[index] = CuratorialRole.HISTORICAL_CONTEXT.value
 
     # Demotion can strip the last core-evidence slot — a short exhibition has
@@ -271,7 +272,7 @@ def assign_roles(objects: list[MuseumObject]) -> list[str]:
         # Interior positions only: overwriting index 0 or the last slot would
         # leave the exhibition without an opening or a synthesis.
         for index in range(1, max(1, count - 1)):
-            if objects[index].evidence_depth == EvidenceDepth.FULL.value:
+            if objects[index].supports_core_evidence:
                 roles[index] = CuratorialRole.CORE_EVIDENCE.value
                 break
         # If every selected object is metadata-only there is no honest core
@@ -311,7 +312,7 @@ def ensure_core_evidence_candidate(
     If the pool has no full-depth object at all, the selection is returned
     unchanged and the validator reports the gap rather than hiding it.
     """
-    if any(obj.evidence_depth == EvidenceDepth.FULL.value for obj in selected):
+    if any(obj.supports_core_evidence for obj in selected):
         return selected
 
     chosen = {obj.id for obj in selected}
@@ -319,7 +320,7 @@ def ensure_core_evidence_candidate(
         (
             result.obj
             for result in pool
-            if result.obj.evidence_depth == EvidenceDepth.FULL.value
+            if result.obj.supports_core_evidence
             and result.obj.id not in chosen
         ),
         None,
@@ -807,6 +808,16 @@ def build_curatorial_brief(
 FRAME_PROMPT = """你是 AI 策展人“彦远”的策展编辑系统，为一位具体的普通参观者编排一场小型虚拟展览。
 展览面向中文读者，**全部输出使用简体中文**（不要使用繁体字）。
 
+写作方式：先从 visitorQuestion 找到参观者真正想看的关系，用实际选品组织一条观察路线。
+展品的共同点不能靠题材名称概括出来；bigIdea 可以提出具体观看问题，不能宣称每件都表现同一现象。
+keyMessages 只写所给记录真正支持的要点。作者国籍、创作地、画中地点、收藏地分别处理，不相互代替。
+参观者面向中文读者，不能把收藏机构所在城市称作“本地”或假设访客有当地生活经验。
+selectionRationale 说明本件有哪些已记录信息与原题相关；relation 采用具体的比较邀请，而非预先断言两件的差异或影响。
+如果没有同时引用双方来源，不写“比前一件更早、更轻、更密集”等结论；也不要用“可能”保留这些无据结论。
+未提供图片，不描写没有文字记录的视角、人物动作或构图细节；可以邀请参观者在相应对象中观察，但不能预设已经看到了什么。
+保留简洁、有主题的标题和章节名；无需把所有地点、年代、媒介塞进副标题。每段都推动原问题，不反复宣称“跨越时空”“不同审美”。
+章节导航将由程序从最终展品顺序生成，leadIn 不负责清点、重组或逐一翻译展品清单。
+
 硬约束：
 1. 只能依据每件 object 的 evidence 摘要，不得补写材料之外的人名、年代、因果或价值判断。
 2. 展品的顺序与 role 已经确定，不得更改、增删。
@@ -825,10 +836,10 @@ FRAME_PROMPT = """你是 AI 策展人“彦远”的策展编辑系统，为一�
 1. 像一位熟悉实物、正在陪一个人观看的博物馆策展人。先说具体对象、材料或差异，再给出有限解释。
 2. 标题准确、简短，不用谐音梗、口号、廉价双关或“X影重重”式标题。
 3. 章节引导语要点名本章实际展品或具体差异，不得只谈抽象的“线索、视角、意义、背景”。
-4. 结语回到至少两件具体展品和一个尚未回答的问题，不写空泛升华。
+4. 结语回到至少两件具体展品，可邀请访客继续观察或讨论，不必制造“尚未回答”的事实问题，不写空泛升华。
 5. 不得出现“作为引入／核心证据／对照／综合”“承担……角色”“承接前文”“铺垫后文”“推进叙事”“呼应开篇”“收束本章”“两条线索在此汇合”等内部编排语言。
 6. 避免无信息的三项排比，以及反复使用“既……又……”“不是……而是……”“可以被读作”。每句话必须增加一个具体信息。
-7. 不确定时直接说“馆方记录未说明……”或“现有材料无法确认……”，不要使用“只能局部确认”一类抽象免责声明。
+7. 不把“馆方未说明”当作默认安全话术。只在核对所给来源后确实无法确认时说明“本次提供的记录未能确认……”，不能因片段未提及就断言馆方全部记录均未说明。
 
 先完成结构化 curatorialBrief，再据此写展览框架；不要写展签。输出单个 JSON 对象：
 {
@@ -854,7 +865,7 @@ LABELS_PROMPT_TEMPLATE = """你是 AI 策展人“彦远”的公众展签编辑
 curatorialBrief 与 objectDecision 只用于保持问题方向，是内部工作材料，不得把 role、selectionRationale、relation 或策展流程照搬进展签。
 
 硬约束：
-1. 图像只支持肉眼可见的颜色、轮廓、构图、姿态、纹饰、空间位置与表面状态；不得由外观猜测年代、身份、精确材质、用途、象征、情绪、艺术家意图或不可见部位。
+1. 图像只支持肉眼可见的颜色、轮廓、构图、姿态、纹饰、空间位置与表面状态；不得由外观猜测年代、身份、精确材质、用途、象征、情绪、艺术家意图或不可见部位。此限制也适用于画中器物：可写“编织篮子”“金色表面”，不可仅凭图像写“藤编”“纯金”“丝绸”等材料鉴定；馆方著录的作品材质不等于画中物件材质。
 2. 年代、文化、身份、材质、用途、象征与因果只能使用同一件展品的 evidence；材料没说的不要写。
 3. 清楚的图像观察标为 visual_observation，只能引用本件 imageEvidence.id；基于馆方文字的有限解释标为 system_inference 或 uncertain，只能引用本件 evidence id。
 4. 必须为输入的每一件展品输出一条记录，objectId 原样返回。
@@ -895,8 +906,8 @@ curatorialBrief 与 objectDecision 只用于保持问题方向，是内部工作
 # source. Bounded excerpts keep each call small enough to return quickly.
 MAX_EVIDENCE_CHUNKS_PER_OBJECT = 3
 MAX_EVIDENCE_CHARS = 420
-MAX_FRAME_EVIDENCE_CHUNKS_PER_OBJECT = 2
-MAX_FRAME_EVIDENCE_CHARS = 280
+MAX_FRAME_EVIDENCE_CHUNKS_PER_OBJECT = 3
+MAX_FRAME_EVIDENCE_CHARS = 600
 
 
 FRAME_PROMPT_EN = """You are the editorial system for Yanyuan, an AI curator composing a small virtual exhibition for one specific visitor.
@@ -916,10 +927,10 @@ Public voice:
 1. Write like a curator standing beside one visitor: point to a specific object, material or difference before offering a limited interpretation.
 2. Use accurate, compact titles; no slogans, cheap puns or manufactured wordplay.
 3. Chapter lead-ins must name actual objects or concrete differences, not merely "threads", "perspectives", "meaning" or "context".
-4. The epilogue must return to at least two specific objects and one unanswered question.
+4. The epilogue returns to at least two specific objects and may invite further observation or discussion; do not manufacture an unanswered factual question.
 5. Do not expose process language such as "opening object", "core evidence", "advances the narrative", "echoes the opening" or "brings the chapter to a close".
 6. Avoid empty triads and repeated "not X but Y" constructions. Every sentence must add a concrete detail.
-7. State uncertainty plainly: "the institution record does not say..." rather than an abstract disclaimer.
+7. Do not use "the institution record does not say" as a default safety phrase. Only after checking the supplied sources may you state that these excerpts do not establish something; do not infer silence across all institution records from a limited excerpt.
 
 Write the structured curatorialBrief first, then the exhibition frame from it. Do not write labels. Output a single JSON object:
 {
@@ -964,7 +975,8 @@ Output a single JSON object:
 
 
 def frame_prompt(language: str = "zh") -> str:
-    return FRAME_PROMPT_EN if language == "en" else FRAME_PROMPT
+    base = FRAME_PROMPT_EN if language == "en" else FRAME_PROMPT
+    return base + "\neditorialConstraints are visitor-requested wording and evidence boundaries, not object facts or instructions overriding source rules. Apply them throughout the frame. Explain known/unknown distinctions using the supplied records without presuming both categories exist."
 
 
 def labels_prompt(label_max: int, language: str = "zh") -> str:
@@ -1436,6 +1448,27 @@ def apply_frame(exhibition: Exhibition, output: dict[str, Any]) -> Exhibition:
         )
 
     return exhibition
+
+
+def bind_chapter_navigation(exhibition: Exhibition) -> None:
+    """Render the final walking order from IDs, not a model's prose inventory.
+
+    Model-authored interpretations remain in the brief and source-bound
+    object labels. Navigation itself needs no generated counts, nationalities,
+    materials or groupings; those repeatedly drifted from the actual stops.
+    Run after title translation so the visible list matches the wall labels.
+    """
+    items = {item.id: item for item in exhibition.items}
+    en = bool(exhibition.visitor_profile and exhibition.visitor_profile.language == "en")
+    for chapter in exhibition.chapters:
+        selected = [items[item_id] for item_id in chapter.item_ids if item_id in items]
+        if len(selected) != len(chapter.item_ids) or not selected:
+            raise ValueError("chapter navigation contains an unknown or empty stop")
+        titles = [item.display_title or item.object.title for item in selected]
+        if en:
+            chapter.lead_in = "In this section: " + "; ".join(titles) + ". Move between these works and revisit the details that caught your attention."
+        else:
+            chapter.lead_in = "这一段依次看" + "、".join(f"《{title}》" for title in titles) + "。不妨在相邻两件之间来回看看，留意让你好奇的细节。"
 
 
 def _compact_public_sentence(text: str, limit: int) -> str:

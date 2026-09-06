@@ -55,6 +55,50 @@
   cursor: pointer;
 }
 
+.qrelEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 32px;
+  align-items: center;
+  padding: 24px 26px;
+  margin-top: 26px;
+  color: #eaf2f0;
+  background: #17343d;
+  border-left: 5px solid #2b8390;
+}
+
+.qrelEntry span {
+  color: #87b8be;
+  font-family: var(--utility);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+
+.qrelEntry h2 {
+  margin: 5px 0 3px;
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.qrelEntry p {
+  max-width: 690px;
+  color: #bfd0ce;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.qrelEntry > a {
+  min-width: 150px;
+  padding: 12px 15px;
+  color: #17343d;
+  text-align: center;
+  background: #e7efed;
+  border: 1px solid #e7efed;
+  font-size: 10px;
+}
+
+.qrelEntry > a span { margin-left: 7px; color: #176b70; font-size: 11px; }
+
 .readiness {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -896,4 +940,7 @@
   .analyticsBoundary {
     grid-template-columns: 1fr;
   }
+
+  .qrelEntry { grid-template-columns: 1fr; gap: 17px; padding: 20px; }
+  .qrelEntry > a { width: 100%; }
 }

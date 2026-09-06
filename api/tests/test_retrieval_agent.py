@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from .retrieval_contract_fixtures import strict_audit_fixture
+
 from app import curation
 from app.collections import SearchResult
 from app.config import Settings
@@ -783,6 +785,7 @@ class _PlanningAuditProvider:
             "reason": "馆藏方法问题" if self.in_scope else "消费设备售后",
         }
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.audit_calls += 1
         accepted = [
@@ -829,6 +832,7 @@ class _PredicatePlanningAuditProvider:
             "reason": "需要逐件证据",
         }
 
+    @strict_audit_fixture
     async def generate_retrieval_audit_json(
         self,
         _prompt: str,
@@ -889,6 +893,7 @@ class _PredicatePlanningAuditProvider:
             ]
         }
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, _payload: dict) -> dict:
         self.generic_calls += 1
         raise AssertionError("predicate verification must use the audit provider")
@@ -1085,6 +1090,7 @@ class _AuditProvider:
     def __init__(self) -> None:
         self.calls = 0
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.calls += 1
         candidates = payload["candidates"]
@@ -1114,6 +1120,7 @@ class _UnsupportedExpansionProvider:
     def __init__(self) -> None:
         self.calls = 0
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.calls += 1
         candidate = payload["candidates"][0]
@@ -1140,6 +1147,7 @@ class _InScopeUnsupportedExpansionProvider:
     def __init__(self) -> None:
         self.calls = 0
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.calls += 1
         if self.calls == 1:
@@ -1262,6 +1270,7 @@ class _OverclaimingAuditProvider:
     configured = True
     supports_retrieval_audit = True
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         accepted = [
             {
@@ -1365,6 +1374,7 @@ class _FailingAuditProvider:
     configured = True
     supports_retrieval_audit = True
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, _payload: dict) -> dict:
         raise ProviderError("fixture audit outage")
 
@@ -1373,6 +1383,7 @@ class _InvalidAuditProvider:
     configured = True
     supports_retrieval_audit = True
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, _payload: dict) -> dict:
         return {"accepted": "not-a-list"}
 
@@ -1515,6 +1526,7 @@ class _AcceptAllProvider:
         self.search_queries = search_queries or []
         self.calls = 0
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.calls += 1
         return {
@@ -1538,6 +1550,7 @@ class _CaptureAuditCandidatesProvider(_AcceptAllProvider):
         super().__init__()
         self.candidate_ids: list[str] = []
 
+    @strict_audit_fixture
     async def generate_json(self, prompt: str, payload: dict) -> dict:
         self.candidate_ids = [
             candidate["objectId"] for candidate in payload["candidates"]
@@ -1582,6 +1595,7 @@ class _PreserveFirstAcceptedProvider:
         self.first_accepted_ids: list[str] = []
         self.second_candidate_ids: list[str] = []
 
+    @strict_audit_fixture
     async def generate_json(self, _prompt: str, payload: dict) -> dict:
         self.calls += 1
         candidates = payload["candidates"]
@@ -1619,7 +1633,7 @@ class _PreserveFirstAcceptedProvider:
         }
 
 
-def test_second_audit_keeps_evidence_accepted_by_first_pass_in_window() -> None:
+def test_second_audit_preserves_first_acceptances_without_auditing_them_again() -> None:
     initial = [
         _result(f"initial-{index}", f"Initial object {index}")
         for index in range(18)
@@ -1645,7 +1659,7 @@ def test_second_audit_keeps_evidence_accepted_by_first_pass_in_window() -> None:
     )
 
     assert provider.calls == 2
-    assert provider.second_candidate_ids[:3] == provider.first_accepted_ids
+    assert not set(provider.second_candidate_ids) & set(provider.first_accepted_ids)
     assert [result.obj.id for result in outcome.results] == provider.first_accepted_ids
 
 
@@ -1972,6 +1986,7 @@ class _SlowExpansionCollections(_CollectionsStub):
 
 
 class _SlowSinglePassAuditProvider(_AcceptAllProvider):
+    @strict_audit_fixture
     async def generate_json(self, prompt: str, payload: dict) -> dict:
         await asyncio.sleep(1.1)
         return await super().generate_json(prompt, payload)
@@ -2036,8 +2051,8 @@ def test_insufficient_expansion_budget_does_not_start_background_search() -> Non
     assert [result.obj.id for result in outcome.results] == ["a", "b"]
     assert outcome.answerability == "partially_supported"
     assert outcome.interpretation == "跨文化比较"
-    assert "需要 5 件" in outcome.coverage_gap
-    assert outcome.failure_code is None
+    assert "时限" in outcome.coverage_gap
+    assert outcome.failure_code == "RETRIEVAL_SEARCH_TIMEOUT"
     assert outcome.warning_code == "RETRIEVAL_SEARCH_TIMEOUT"
     assert outcome.warning_detail
     assert outcome.expanded_queries == ()

@@ -1,7 +1,7 @@
 """Live acceptance baseline for semantic hybrid RAG plus LLM evidence audit.
 
 This suite is intentionally separate from deterministic CI: it requires the
-frozen dense index, local embedding runtime and a configured DeepSeek key. The
+frozen dense index, configured embedding provider and a DeepSeek key. The
 questions live outside collection policies. Once executed they are a fixed
 regression set, not an unseen or statistically independent benchmark.
 """
@@ -30,6 +30,7 @@ from app.collections import (  # noqa: E402
     _query_plan,
 )
 from app.config import Settings  # noqa: E402
+from app.retrieval_runtime import build_collection_repository  # noqa: E402
 from app.generator import ExhibitionGenerator  # noqa: E402
 from app.models import AgendaInput, AnswerabilityStatus  # noqa: E402
 from app import curation  # noqa: E402
@@ -60,18 +61,10 @@ def main() -> int:
     if not settings.deepseek_api_key:
         print("FAIL            DEEPSEEK_API_KEY is required for the live audit")
         return 2
-    repository = CollectionRepository(
-        settings.collections_dir,
-        default_collection_id=args.collection,
+    repository = build_collection_repository(
+        settings,
+        collection_id=args.collection,
         rag_mode="hybrid",
-        dense_index_dir=settings.rag_index_dir,
-        embedding_model_cache_dir=settings.rag_model_cache_dir,
-        embedding_model=settings.rag_embedding_model,
-        dense_top_k=settings.rag_dense_top_k,
-        dense_min_score=settings.rag_dense_min_score,
-        evidence_min_score=settings.rag_evidence_min_score,
-        rrf_k=settings.rag_rrf_k,
-        hybrid_max_results=settings.rag_max_results,
     )
     collection = repository.get(args.collection)
     status = repository.retrieval_status(collection)
@@ -129,17 +122,20 @@ def main() -> int:
             collectionId=collection.id,
         )
         deadline = perf_counter() + settings.rag_retrieval_timeout_seconds
-        raw = await generator._search_async(
+        initial = await generator.prepare_initial_retrieval(
             agenda,
             collection,
             deadline=deadline,
         )
+        raw = initial.results
         outcome = await generator._agentic_retrieve(
             agenda,
             collection,
             raw,
             required_count=5,
             deadline=deadline,
+            initial_query_plan=initial.query_plan,
+            planning_attempted=True,
         )
         if outcome.failure_code:
             infrastructure_failures[outcome.failure_code] += 1

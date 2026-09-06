@@ -10,16 +10,26 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, replace
-from typing import Any, Iterable
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
+from typing import Any, Iterable, Mapping
 
 from .collections import SearchResult, question_requests_provenance
+from .retrieval_filters import (
+    EVIDENCE_DEPTH_FILTER_VALUES,
+    FILTER_KEYS,
+    MAX_FILTER_YEAR,
+    MIN_FILTER_YEAR,
+    FilterSpec,
+)
 
 
 AGENTIC_RETRIEVAL_METHOD = (
-    "hybrid_bm25_dense_llm_plan_semantic_source_quote_audit_agentic_expansion"
+    "controlled_query_plan_hybrid_rag_source_quote_audit_agentic_expansion"
 )
-AGENTIC_RETRIEVAL_VERSION = "agentic-rag-v2"
+AGENTIC_RETRIEVAL_VERSION = "agentic-rag-v6"
+CONDITION_CONTRACT_VERSION = "condition-evidence-v1"
+AUDIT_EVIDENCE_TEXT_LIMIT = 300
 
 EXPANSION_REASON_NONE = "none"
 EXPANSION_REASON_INSUFFICIENT_OBJECTS = "insufficient_direct_objects"
@@ -59,6 +69,11 @@ class RetrievalAudit:
     interpretation: str = ""
     coverage_gap: str = ""
     expansion_reason: str = EXPANSION_REASON_NONE
+    # Diagnostics describe source-bound checks, not independent proof that the
+    # model's semantic entailment judgement is correct.
+    condition_checks: tuple[dict[str, Any], ...] = ()
+    condition_rejections: tuple[dict[str, Any], ...] = ()
+    condition_contract_version: str = ""
 
 
 @dataclass(frozen=True)
@@ -79,6 +94,12 @@ class RetrievalQueryPlan:
     mandatory_predicates: tuple[str, ...] = ()
     pool_coverage_legs: tuple[str, ...] = ()
     selection_constraints: tuple[str, ...] = ()
+    filters: FilterSpec = field(default_factory=FilterSpec)
+    evidence_mode: str = "record_explanation"
+    catalogue_type_hints: tuple[str, ...] = ()
+    visual_predicate_ids: tuple[str, ...] = ()
+    exhibition_set_requirements: tuple[dict[str, Any], ...] = ()
+    editorial_constraints: tuple[str, ...] = ()
 
 
 def query_plan_prompt(language: str = "zh") -> str:
@@ -154,12 +175,82 @@ four or more conceptual conditions into one long AND query; use several short
 case-finding axes instead.
 
 Also decompose the visitor's intent without supplying any factual answer:
+- A concrete observation, explanation or comparison that the visitor asks for
+  is a REQUIRED exhibition objective, even when phrased politely as "I would
+  like to see", "I wonder", "我想", "看看" or "比较". Politeness is NOT a waiver.
+  If omitting the requested substance would leave their question unanswered,
+  do not classify it as an optional selection preference. Only an explicit
+  permission to omit something (such as "可省略" or "有则更好"), or a genuine
+  pacing/aesthetic preference, makes that part optional. Requested visual
+  observations are no less required than requested historical explanations.
+  Required does NOT mean every-object: beyond the minimal requested object
+  class and explicit exclusions, put such an objective in exhibitionSetRequirements
+  unless the visitor explicitly imposes it on EVERY displayed object. Wanting
+  to compare a feature does not itself impose a universal admission condition.
+- evidenceMode distinguishes "record_explanation" (historical, causal,
+  functional, attribution or symbolic claims) from "open_exploration" (an
+  optional personal way of looking) and "visual_observation" (visible form).
+  Never convert a question about why, origin, social function or historical
+  meaning into open_exploration just because its records may be scarce.
+  For open exploration, translate the preference into observable features to
+  look for; do not require the institution to have endorsed the visitor's
+  emotional wording. A documented lone figure, spare composition or repeated
+  shape can motivate a proposed way of looking, not prove a universal feeling.
+  Keep any explicit cause/process qualifier as a record_explanation condition.
 - mandatoryPerObjectPredicates are evidence conditions that every accepted
   object must satisfy. Preserve the exact level of claim: a making process is
   not an observable result, a depicted activity is not an object's own use,
   and record silence is not proof of absence.
 - poolCoverageLegs are alternatives or comparison categories that should be
   represented across the accepted set, not conditions every object must meet.
+  Metadata comparison axes (cultures, regions, materials or periods) remain
+  separate from observable relationships. Preserve named axes as separate
+  poolCoverageLegs, with any-of admission and only explicitly justified hard
+  filters. Never copy the same visual objective once for each category, or
+  demand one object belong to all categories. Do not claim arbitrary pool legs
+  have an aggregate guarantee; the runtime's existing final named-culture gate
+  checks that supported category axis separately from set observation witnesses.
+- exhibitionSetRequirements are up to THREE required contributions that the
+  exhibition as a SET must contain, separately from per-object admission and
+  optional selection preferences. Preserve explicit contrast branches, requested
+  case types and a visitor's stated observation focus as set goals when not
+  required of every object. Write each text as a complete requirement that ONE
+  object can witness from its own evidence, preserving the full relationship,
+  participants, carrier, negation and uncertainty. Do not split the roles of
+  one relationship into fragments to be assembled across different objects.
+  A contrast between documented and explicitly uncertain cases needs distinct
+  set requirements; one object's record silence does not prove historical
+  absence. An explicit requirement about EVERY displayed object must remain
+  mandatoryPerObjectPredicates, never be weakened into a set requirement.
+  A genuinely optional, explicitly omissible preference remains optional; polite
+  requests to observe or compare are NOT omissible. Do not invent new cultures,
+  materials or case types, and do not allocate duplicate set goals by category.
+  Give sequential ids s1..s3. sourceQuote must be a nonempty, exact contiguous
+  span of the ORIGINAL visitorQuestion that preserves the relevant intention
+  and any quantity; never paraphrase it or quote your own interpretation.
+  minWitnesses is an integer 1..3. If the visitor gives no numerical minimum,
+  use 1 with quantifierOrigin="product_default": this is our minimal coverage
+  policy, NOT a number the visitor stated. Use "visitor_explicit" only when
+  sourceQuote actually states the minimum; never infer a number from emphasis
+  or plurals. Do not silently cap a larger explicit requirement to three and
+  claim to have preserved it. evidenceScope is "institution_record" or, only
+  for wholly visible features in visual_observation/open_exploration mode,
+  "visible_features_or_record". record_explanation grants no visual authority.
+  Historical functions, materials, dates, origins and causes always require
+  institution evidence, even when a set goal also mentions something visible.
+  For visible_features_or_record, the requirement TEXT itself must be wholly
+  observable: do not conjoin it with cultural origin, material identity, date
+  or another metadata assertion. Keep independent metadata axes separate; if
+  a requested relationship intrinsically includes a nonvisual historical or
+  causal qualifier, preserve that whole relationship with institution_record.
+  Return [] when no distinct set contribution is required.
+- visualPredicateIds lists only p1, p2, ... whose corresponding predicate asks
+  ONLY about directly visible shape, colour, arrangement, pose or surface
+  pattern. Return [] in record_explanation mode. Never list a predicate that
+  also requires material identity, date, maker, cultural origin, function,
+  symbolism, historical influence, or the cause/process of a visible trace.
+  This flag grants a later inspected image permission to support an observation;
+  it does not claim an image has been inspected or supply the observation.
 - Mandatory predicates are conjunctive, so keep them minimal. Never require
   one object to instantiate every alternative noun, culture, medium, function
   or comparison leg listed by the visitor. In questions shaped like "how do
@@ -198,15 +289,80 @@ to that process. Use concrete axes such as "finger marks", "tool marks",
 generic "surface texture" or "irregular surface" for that intent unless the
 visitor asked only about texture; those phrases do not identify what caused it.
 
+Return hardFilters only for constraints the visitor states explicitly. Never
+infer a date, culture, institution, material, object type, image requirement,
+rights status or evidence depth from the subject or from model knowledge. An
+empty or omitted constraint is represented by null or []. Values within one
+list are alternatives (OR), with at most eight short values; different
+populated fields are simultaneous (AND).
+Object kinds in natural-language questions are NOT interoperable catalogue
+type codes. Institutions may classify the same kind of thing by its material,
+department, technique or physical form. Put requested object kinds under
+catalogueTypeHints and the atomic queries; leave hardFilters.objectTypes empty.
+Do not turn a depicted subject into a literal physical object-kind requirement.
+When the visitor asks about representations of an animal, person, plant or
+scene across art, retain that depicted subject in queries and the mandatory
+predicate; do not require every artwork itself to be that animal, person or
+plant. catalogueTypeHints constrain the physical carrier only when the visitor
+actually requests a carrier class, such as paintings, vessels or sculptures.
+Their actual form must still be checked against the record during audit. Do
+not exclude an object merely because its institution's type field uses a
+broader category. Other explicit date, material, culture and institution
+constraints remain hard filters; this is not permission to relax them.
+dateStart/dateEnd are inclusive astronomical years (negative values are BCE).
+imageRequired may be true only when an image is explicitly required; false or
+null adds no constraint. evidenceDepth accepts only "full" or "thin". Use no
+other keys. Never emit SQL, a WHERE clause, operators, wildcards, regular
+expressions, column names, sort expressions or executable code in hardFilters.
+Translate explicit material/type constraints into concise English catalogue
+field vocabulary (for example paper, silk or bronze), not a whole curatorial
+sentence. For cultures, use the explicitly named country's catalogue name;
+use a regional identifier only when the visitor named that region. Never
+replace a named country with a broader region. Translation changes wording,
+not the scope or strength of a constraint.
+The local catalogue has eight canonical broad culture packs. When the visitor
+explicitly names the whole corresponding region or its culturePackIds field,
+put its canonical identifier under cultures:
+East Asia / 东亚 = east_asia;
+South Asia / 南亚 = south_asia;
+Southeast Asia / 东南亚 = southeast_asia;
+West Asia and North Africa / 西亚与北非 = west_asia_north_africa;
+Europe / 欧洲 = europe; Africa / 非洲 = africa;
+the Americas / 美洲 = americas; Oceania / 大洋洲 = oceania.
+For the combined West Asia and North Africa pack, return one identifier, not
+two invented culture labels such as "Western Asian" and "North African".
+Do not map North Africa alone to west_asia_north_africa: that would also admit
+West Asia. A single country remains its country name, not a culture-pack ID.
+
 Return one JSON object with exactly this shape:
 {{
   "inCollectionScope": true,
   "queryInterpretation": "brief {output_language} interpretation",
   "catalogueQueries": ["atomic query"],
   "semanticQuery": "compact English dense-retrieval sentence",
+  "evidenceMode": "record_explanation|open_exploration|visual_observation",
+  "catalogueTypeHints": ["visitor-requested object kind; checked semantically"],
   "mandatoryPerObjectPredicates": ["evidence condition for every accepted object"],
+  "visualPredicateIds": ["p1 only when that predicate is purely visible"],
   "poolCoverageLegs": ["category represented across the accepted pool"],
+  "exhibitionSetRequirements": [
+    {{"id": "s1", "text": "complete required contribution by one object",
+      "sourceQuote": "exact original question span including any quantity",
+      "minWitnesses": 1, "quantifierOrigin": "product_default",
+      "evidenceScope": "institution_record"}}
+  ],
   "selectionRationaleConstraints": ["constraint on why objects are selected"],
+  "hardFilters": {{
+    "dateStart": null,
+    "dateEnd": null,
+    "cultures": [],
+    "institutions": [],
+    "materials": [],
+    "objectTypes": [],
+    "imageRequired": null,
+    "rightsAllowed": [],
+    "evidenceDepth": []
+  }},
   "reason": "brief {output_language} routing reason"
 }}
 """.strip()
@@ -242,7 +398,7 @@ institution evidence explicitly discusses the asked relation. For an abstract
 cross-cultural comparison, an object may instantiate one concrete comparison
 leg even if its record does not state the final comparative conclusion.
 
-Reject nearest-neighbour mood matches, generic shared words, donor/acquisition
+Reject unsupported nearest-neighbour mood matches, generic shared words, donor/acquisition
 names, reign dates that merely date another object, and catalogue text that only
 mentions the subject in passing. A provenance row is topical evidence only when
 the visitor explicitly asks about source history, acquisition, removal,
@@ -256,6 +412,33 @@ direct objects and evidence for that relationship. Use "partially_supported" or
 verdict, complete causal explanation, present-day community view, psychological
 effect, legal conclusion, or other evidence not present in the records. Object
 count alone never makes those questions answerable.
+
+Calibrate that judgement to retrievalContract.evidenceMode. For
+"open_exploration", the requested outcome is a grounded way of looking, not a
+historical theorem or guaranteed emotional effect. Accept documented concrete
+features that can anchor the visitor's preference even when the institution
+does not use the same emotional phrase. State in queryInterpretation that this
+is a curatorial invitation, not the maker's intention or a verified response
+shared by all viewers. In the acceptance reason identify the observable
+feature and label its connection to the preference as an interpretation.
+For "visual_observation", require a supplied description of the actual visible
+feature, not a material/process name alone. This is a text-only audit: an image
+URL, embedding similarity or imagined appearance is not inspected visual
+evidence. If no supplied record describes the feature, report that specific
+visual evidence gap. In every mode, symbolic meaning, cause, original use and
+historical influence still require explicit record evidence of that relation.
+
+catalogueTypeHints describe the kinds of objects the visitor requested, not
+literal institution type codes. Verify the actual kind from the title and
+supplied record, including the distinction between an object and a depiction
+of it. Shared substrings, adjectival resemblance and analogy do not establish
+object identity or documented function. Read the whole noun phrase and the
+recorded use, not just the word shared with the query. A broad
+material/department classification is not evidence against a
+more specific physical kind. catalogueCulturePacks are normalized broad
+geographical facets, not the museum's location or evidence of a causal link;
+use them with the original culture/place fields. A named subregion remains
+inside its parent region, and overlapping origin facets are not exclusions.
 
 For a museum-method question, an institution record is a direct case-study leg
 when it explains that an attribution changed or remains unsettled, or that
@@ -294,7 +477,9 @@ that observable surface, mark, texture, irregularity, unfinished state or
 formal feature. Before accepting, verify that one cited evidence sentence can
 be underlined as direct support for the specific preference-defining property;
 otherwise reject the candidate even if its maker, material or broad technique
-is related.
+is related. For an open_exploration preference, underline the concrete visual
+anchor, not the subjective interpretation: the institution need not certify
+that the feature feels distant, playful or quiet to the visitor.
 
 For a cross-cultural question, "supported" also requires accepted objects from
 at least three cultural regions. If the visitor explicitly names cultures or
@@ -319,8 +504,11 @@ It is not evidence and cannot approve an object. For every entry under
 mandatoryPerObjectPredicates, each accepted object must return one
 predicateEvidence check with the same predicateId, status "supported", and at
 least one evidence ID plus a short exact supportingQuote copied from that
-shown institution row. The quote is checked mechanically. Conditions may not
-be distributed across different objects. Use "unknown" when the shown record is silent and
+shown institution row. The quote is checked mechanically. A same-object
+condition cannot borrow another object's evidence. This does NOT require
+every object to cover every comparative perspective: poolCoverageLegs are
+satisfied by the union of the set, and each object may contribute one leg.
+Use "unknown" when the shown record is silent and
 "contradicted" only when it explicitly conflicts. Pool coverage legs apply
 across the accepted set. Selection rationale constraints govern the reason for
 selection and must not be silently converted into object-level exclusions.
@@ -331,6 +519,85 @@ object type, title, place, or record that says nothing about the hypothesis
 does not bear on it. Direction matters: a door located in a protected room is
 not evidence that the door protects the entrance; a person titled guard is not
 evidence that an architectural feature has a guarding function.
+
+When retrievalContract.conditionContractVersion is present, use the strict
+conditionEvidence contract instead of predicateEvidence. Return that exact
+conditionContractVersion at the top level. Inspect EVERY perObjectConditions
+entry independently for each candidate; a high relevance score, plentiful
+objects, or an overall reason never substitutes for a condition check.
+Evaluate the quoted statement before allowing the title or search ranking to
+suggest an answer. For EACH predicate, align its subject/participants, action
+or relation, target/carrier and qualifying details with what the shown source
+actually states. Preserve AND requirements and the direction of a relation;
+for OR requirements one complete alternative is enough. Naming a place or
+subject is not evidence for an activity happening there, participant roles,
+an interaction, a quantity or a spatial arrangement. Background about people
+is not necessarily a description of what they are doing in this image. Check
+the other shown sentences for a different activity or explicit contradiction;
+silence means unknown, not a contradiction or permission to fill the gap.
+Do not infer a missing relation from the artwork title, generic contextual
+association, visual liveliness or your selection reason. A title may identify
+a subject; it does not establish every property requested about that subject.
+For a supported check, copy evidenceId and supportingQuote from an evidence
+row actually shown under this same candidate. Quotes must include the relevant
+context, not an isolated shared keyword. A real quote proves what was written;
+you must separately assess whether its meaning entails the condition. Use
+"unknown" for missing evidence and "contradicted" for explicit conflict.
+Return relation for predicate checks too: exact means the quoted claim supports
+the WHOLE predicate, including its relations and qualifiers; narrower means a
+documented specific case still satisfies the whole requirement. Use broader
+when it establishes only the general subject or a subset of the required
+details, different for a different relation, and unknown if support is absent.
+Those last three cannot have status supported. Never call a partial keyword
+match exact merely because the quote is authentic. If none of the candidates
+meet the complete conditions, accept zero; requiredCount is not an approval
+quota and a later pass must not weaken these conditions to fill it.
+For object_kind and material, return matchedAlternative as exactly one of that
+condition's alternatives and relation as exact/narrower/broader/different/unknown.
+Only exact identity or a documented narrower member of the requested category
+may support it. A broader category cannot replace a narrower visitor request.
+For material, use the object's own recorded substance, not a depicted material,
+colour, glaze resemblance, associated manufacturing tradition or an analogy.
+For object_kind, a depiction or a shape named after something is not that
+physical thing unless the condition explicitly asks for depictions. If the
+institution classifies it broadly, its description can establish a narrower
+physical identity; the broad classification alone cannot.
+In any-of conditions ONE evidenced alternative suffices; NEVER turn each
+alternative into a separate obligation on the same object. poolCoverageLegs
+remain obligations across the selected SET, not additional object checks.
+Keep only candidates whose every condition is supported in accepted. Return
+the other examined candidates under rejected with their conditionEvidence so
+the next search can target an actual missing condition. Do not invent a
+supporting quote in order to reach requiredCount. Every quote is checked
+against the visible text window, not against unseen source text.
+
+Some candidates additionally include visualEvidence from a prior inspection of
+their actual image pixels. These observations are derived visual evidence, NOT
+institution text. They may support a condition only when its evidenceScope is
+"visible_features_or_record", and the observation's allowedConditionIds includes
+that exact condition id. Copy the observation id and its exact text as the
+evidenceId and supportingQuote. Never use appearance to determine material,
+date, maker, origin, function, causality or historical meaning. Do not promote
+a visual observation to a catalogue fact. Even a visually accepted object must
+retain at least one institution evidence ID in its top-level evidenceIds for
+basic object identity and source traceability.
+
+retrievalContract.exhibitionSetConditions are a SEPARATE set-coverage contract,
+not additional perObjectConditions. First apply the unchanged per-object
+admission gate. For every admitted object, return setConditionEvidence with one
+check per set condition, using the same conditionId/status/evidenceId/
+supportingQuote/relation schema. A set check that is unknown, contradicted or
+unsupported does NOT reject an otherwise eligible object; it simply supplies
+no witness for that set goal. Other eligible objects may supply that witness.
+For supported set checks, one SAME object's shown evidence must support the
+WHOLE relation, including participants, direction, carrier and qualifiers.
+Never join a participant in one object's record to an action in another's,
+or count topical titles, imagined interactions or silence as a complete case.
+Return relation="exact" or "narrower" only when that whole requirement is
+supported. A required count is not permission to invent or relax evidence.
+Count distinct source-bound accepted objects for minWitnesses, not repeated
+quotes from one object. Set-only visual evidence follows the same evidenceScope
+and allowedConditionIds rules; it never gains historical authority.
 
 Set expansionReason to exactly one of: "none", "insufficient_direct_objects",
 "missing_cultural_leg", "predicate_evidence_gap", or "out_of_scope". Propose
@@ -358,6 +625,7 @@ records.
 
 Return one JSON object with exactly this shape:
 {{
+  "conditionContractVersion": "copy the version when supplied; otherwise empty",
   "queryInterpretation": "brief {output_language} interpretation",
   "answerability": "supported|partially_supported|unsupported",
   "accepted": [
@@ -373,9 +641,27 @@ Return one JSON object with exactly this shape:
           "supportingQuote": "exact short quote from that evidence row"
         }}
       ],
+      "conditionEvidence": [
+        {{
+          "conditionId": "exact perObjectConditions id",
+          "status": "supported|contradicted|unknown",
+          "evidenceId": "same candidate evidence id; empty for unknown",
+          "supportingQuote": "exact visible source quote; empty for unknown",
+          "matchedAlternative": "one exact alternative for object_kind/material",
+          "relation": "exact|narrower|broader|different|unknown"
+        }}
+      ],
+      "setConditionEvidence": [
+        {{"conditionId": "exact exhibitionSetConditions id",
+          "status": "supported|contradicted|unknown",
+          "evidenceId": "same candidate evidence or allowed observation id",
+          "supportingQuote": "exact shown source quote; empty for unknown",
+          "relation": "exact|narrower|broader|different|unknown"}}
+      ],
       "reason": "brief {output_language} reason"
     }}
   ],
+  "rejected": [{{"objectId": "candidate id", "conditionEvidence": []}}],
   "expansionReason": "none|insufficient_direct_objects|missing_cultural_leg|predicate_evidence_gap|out_of_scope",
   "searchQueries": ["query"],
   "coverageGap": "brief {output_language} limitation or empty string"
@@ -489,6 +775,364 @@ def _visible_evidence(result: SearchResult, question: str) -> list[Any]:
     return selected
 
 
+def parse_exhibition_set_requirements(
+    raw: Any,
+    *,
+    question: str,
+    evidence_mode: str,
+) -> tuple[dict[str, Any], ...] | None:
+    """Validate the new, opt-in set contract without silently losing a goal.
+
+    Exact quotes establish visitor-text binding, not semantic proof that the
+    model classified an intention or its quantifier correctly. That judgement
+    belongs to planning/review, not a topic- or number-keyword rule here.
+    """
+
+    if not isinstance(raw, list) or len(raw) > 3:
+        return None
+    keys = {"id", "text", "sourceQuote", "minWitnesses", "quantifierOrigin", "evidenceScope"}
+    requirements: list[dict[str, Any]] = []
+    for index, row in enumerate(raw, start=1):
+        if not isinstance(row, dict) or set(row) != keys or row.get("id") != f"s{index}":
+            return None
+        text, quote, minimum = row["text"], row["sourceQuote"], row["minWitnesses"]
+        origin, scope = row["quantifierOrigin"], row["evidenceScope"]
+        if (
+            not isinstance(text, str) or not 2 <= len(text) <= 240 or text.strip() != text
+            or not isinstance(quote, str) or not 1 <= len(quote) <= 500
+            or not quote.strip() or quote not in question
+            or isinstance(minimum, bool) or not isinstance(minimum, int) or not 1 <= minimum <= 3
+            or origin not in ("product_default", "visitor_explicit")
+            or (origin == "product_default" and minimum != 1)
+            or scope not in ("institution_record", "visible_features_or_record")
+            or (scope == "visible_features_or_record"
+                and evidence_mode not in {"visual_observation", "open_exploration"})
+        ):
+            return None
+        requirements.append(dict(row))
+    return tuple(requirements)
+
+
+def _set_condition_specs(
+    requirements: tuple[dict[str, Any], ...],
+    *,
+    question: str,
+    evidence_mode: str,
+) -> list[dict[str, Any]]:
+    validated = parse_exhibition_set_requirements(
+        list(requirements), question=question, evidence_mode=evidence_mode,
+    )
+    if validated is None:
+        raise ValueError("invalid_exhibition_set_requirements")
+    return [{**row, "kind": "predicate", "scope": "exhibition_set"} for row in validated]
+
+
+def _condition_specs(
+    mandatory_predicates: tuple[str, ...],
+    catalogue_type_hints: tuple[str, ...],
+    explicit_materials: tuple[str, ...],
+    *,
+    evidence_mode: str = "record_explanation",
+    visual_predicate_ids: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """Compile a per-object AND of conditions whose facet values are ORed.
+
+    Pool coverage is intentionally absent: three named origins are not three
+    simultaneous origin predicates on every individual museum object.
+    """
+
+    conditions: list[dict[str, Any]] = [
+        {"id": f"p{index}", "kind": "predicate", "text": text,
+         "evidenceScope": "institution_record"}
+        for index, text in enumerate(mandatory_predicates, start=1)
+    ]
+    for key, alternatives, text in (
+        ("object_kind", catalogue_type_hints,
+         "The object's actual identity instantiates at least one requested kind; "
+         "a shared word or resemblance is insufficient."),
+        ("material", explicit_materials,
+         "The object's recorded substance meets at least one requested material; "
+         "do not substitute a broader material or a visual resemblance."),
+    ):
+        if alternatives:
+            conditions.append({
+                "id": key, "kind": key, "text": text, "operator": "any_of",
+                "alternatives": list(dict.fromkeys(alternatives)),
+                "evidenceScope": "institution_record",
+            })
+    if evidence_mode in {"visual_observation", "open_exploration"}:
+        for condition in conditions:
+            if condition["id"] in visual_predicate_ids or condition["kind"] == "object_kind":
+                # Facet conditions cannot acquire visual authority merely by
+                # appearing in a caller's predicate-id list.
+                if condition["kind"] != "material":
+                    condition["evidenceScope"] = "visible_features_or_record"
+    return conditions
+
+
+def _visible_record_sources(result: SearchResult, question: str) -> dict[str, str]:
+    """Return exactly the text supplied to the model, never unseen suffixes."""
+
+    return {
+        chunk.id: _compact(chunk.text, AUDIT_EVIDENCE_TEXT_LIMIT)
+        for chunk in _visible_evidence(result, question)
+    }
+
+
+def _quote_is_visible(quote: Any, source: str, *, metadata: bool = False) -> bool:
+    normalized_quote = _compact(quote, AUDIT_EVIDENCE_TEXT_LIMIT + 1).casefold()
+    normalized_source = _compact(source, AUDIT_EVIDENCE_TEXT_LIMIT).casefold()
+    # Short whole-field values are legitimate evidence (e.g. an institution's
+    # material field). Otherwise require context, not an isolated keyword.
+    return bool(
+        normalized_quote
+        and (
+            len(normalized_quote) >= 8
+            or (len(normalized_quote) >= 3 and normalized_quote == normalized_source)
+            or (metadata and len(normalized_quote) >= 3 and normalized_quote in {
+                part.strip() for part in re.split(r"[;；|]", normalized_source)
+            })
+        )
+        and normalized_quote in normalized_source
+    )
+
+
+def _visible_visual_sources(
+    result: SearchResult,
+    visual_sources: Mapping[str, Any] | None,
+    conditions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose only observations from an already validated image inspection.
+
+    This is a second ownership/scope check, not a replacement for the visual
+    provider's pixel-delivery and response-binding checks.
+    """
+
+    if not isinstance(visual_sources, Mapping):
+        return []
+    results = visual_sources.get("results")
+    if not isinstance(results, list):
+        return []
+    eligible = {
+        row["id"] for row in conditions
+        if row["evidenceScope"] == "visible_features_or_record"
+    }
+    if not eligible:
+        return []
+    own_reports = [row for row in results if isinstance(row, Mapping)
+                   and row.get("objectId") == result.obj.id]
+    if len(own_reports) != 1:
+        return []
+    report = own_reports[0]
+    allowed_urls = {result.obj.image_url, result.obj.image_url_large} - {None, ""}
+    if (
+        report.get("status") != "reviewed"
+        or report.get("imageSupplied") is not True
+        or report.get("imageReviewed") is not True
+        or report.get("sourceKind") != "collection_image"
+        or report.get("scope") != "visible_features_only"
+        or report.get("sourceUrl") not in allowed_urls
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", str(report.get("imageSha256") or ""))
+        or not str(report.get("imageEvidenceId") or "").strip()
+        or not str(report.get("model") or "").strip()
+    ):
+        return []
+    observations = report.get("observations")
+    if not isinstance(observations, list):
+        return []
+    visible: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    record_ids = {chunk.id for chunk in result.obj.evidence}
+    for observation in observations[:6]:
+        if not isinstance(observation, Mapping):
+            continue
+        key = str(observation.get("id") or "").strip()
+        text = _compact(observation.get("text"), AUDIT_EVIDENCE_TEXT_LIMIT)
+        if not key or key in seen or key in record_ids or len(text) < 8:
+            continue
+        seen.add(key)
+        raw_predicate_ids = observation.get("predicateIds")
+        claimed = set(raw_predicate_ids) if isinstance(raw_predicate_ids, list) and all(
+            isinstance(value, str) for value in raw_predicate_ids
+        ) else set()
+        allowed_ids = eligible & (claimed | {"object_kind"})
+        if not allowed_ids:
+            continue
+        visible.append({
+            "id": key, "text": text, "kind": "collection_image_observation",
+            "imageEvidenceId": report["imageEvidenceId"],
+            "sourceUrl": report["sourceUrl"], "imageSha256": report["imageSha256"],
+            "model": report["model"], "allowedConditionIds": sorted(allowed_ids),
+        })
+    return visible
+
+
+def _check_conditions(
+    decision: Mapping[str, Any],
+    result: SearchResult,
+    conditions: list[dict[str, Any]],
+    *,
+    question: str,
+    visual_sources: Mapping[str, Any] | None = None,
+) -> tuple[bool, tuple[str, ...], list[dict[str, Any]]]:
+    """Validate completeness and quote ownership; not semantic omniscience.
+
+    The model still owns the semantic judgement. The local boundary prevents
+    omitted checks, borrowed or invented quotes, and contradictory duplicate
+    verdicts from being laundered into a successful overall relevance score.
+    """
+
+    raw_checks = decision.get("conditionEvidence")
+    by_id: dict[str, list[Mapping[str, Any]]] = {}
+    malformed = not isinstance(raw_checks, list)
+    expected = {condition["id"] for condition in conditions}
+    for raw_check in raw_checks if isinstance(raw_checks, list) else []:
+        if not isinstance(raw_check, Mapping):
+            malformed = True
+            continue
+        key = str(raw_check.get("conditionId") or "").strip()
+        if key not in expected:
+            malformed = True
+        by_id.setdefault(key, []).append(raw_check)
+
+    sources = _visible_record_sources(result, question)
+    metadata_sources = {chunk.id for chunk in _visible_evidence(result, question)
+                        if chunk.source_kind == "institution_metadata"}
+    visual = {row["id"]: row for row in _visible_visual_sources(result, visual_sources, conditions)}
+    checks: list[dict[str, Any]] = []
+    evidence_ids: list[str] = []
+    accepted = not malformed
+    for condition in conditions:
+        key = condition["id"]
+        rows = by_id.get(key, [])
+        check: dict[str, Any] = {
+            "objectId": result.obj.id, "conditionId": key,
+            "status": "unknown", "sourceBound": False,
+            # This is a limit of local validation, not a negative semantic
+            # verdict. Correctly source-bound model judgments can still err.
+            "semanticEntailmentProven": False,
+            "validationBoundary": "source_binding_not_semantic_proof",
+        }
+        if condition.get("scope") == "exhibition_set":
+            check["scope"] = "exhibition_set"
+        if len(rows) != 1:
+            check["failure"] = "missing_check" if not rows else "duplicate_check"
+            accepted = False
+            checks.append(check)
+            continue
+        row = rows[0]
+        status = str(row.get("status") or "").strip()
+        evidence_id = str(row.get("evidenceId") or "").strip()
+        quote = _compact(row.get("supportingQuote"), AUDIT_EVIDENCE_TEXT_LIMIT + 1)
+        source = sources.get(evidence_id, "")
+        image_observation = visual.get(evidence_id)
+        if image_observation and key in image_observation["allowedConditionIds"]:
+            source = image_observation["text"]
+        bound = _quote_is_visible(quote, source, metadata=evidence_id in metadata_sources)
+        check.update({"status": status if status in {
+            "supported", "contradicted", "unknown"
+        } else "unknown", "evidenceId": evidence_id, "supportingQuote": quote,
+                      "sourceBound": bound})
+        if image_observation:
+            check["sourceKind"] = "collection_image_observation"
+            check["imageEvidenceId"] = image_observation["imageEvidenceId"]
+        failure = ""
+        if status not in {"supported", "contradicted", "unknown"}:
+            failure = "invalid_status"
+        elif status != "supported":
+            failure = status
+        elif not bound:
+            failure = "unbound_quote"
+        if condition["kind"] in {"object_kind", "material"}:
+            alternative = str(row.get("matchedAlternative") or "").strip()
+            relation = str(row.get("relation") or "").strip()
+            check.update({"matchedAlternative": alternative, "relation": relation})
+            if not failure and alternative not in condition["alternatives"]:
+                failure = "invalid_alternative"
+            if not failure and relation not in {"exact", "narrower"}:
+                failure = "non_entailing_relation"
+        elif condition["kind"] == "predicate":
+            # Older condition-v1 responses omit relation for predicates. Keep
+            # their protocol compatibility explicit, but never ignore a model
+            # reporting only partial/different/unknown support alongside a
+            # high confidence or overall supported status.
+            relation = row.get("relation")
+            check["relation"] = relation if isinstance(relation, str) else "not_reported"
+            check["relationAssessment"] = "model_reported" if "relation" in row else "not_provided"
+            if "relation" in row and not failure and relation not in ("exact", "narrower"):
+                failure = "non_entailing_relation"
+            if condition.get("scope") == "exhibition_set" and not failure and relation not in ("exact", "narrower"):
+                # Set witnesses are a new contract, so they have no legacy
+                # relation-omission privilege. Per-object v1 remains unchanged.
+                failure = "non_entailing_relation"
+        if failure:
+            check["failure"] = failure
+            accepted = False
+        else:
+            if evidence_id in sources:
+                evidence_ids.append(evidence_id)
+        checks.append(check)
+    if malformed:
+        checks.append({"objectId": result.obj.id, "conditionId": "",
+                       "status": "unknown", "sourceBound": False,
+                       "failure": "malformed_condition_contract"})
+    return accepted, tuple(dict.fromkeys(evidence_ids)), checks
+
+
+def _check_set_conditions(
+    decision: Mapping[str, Any],
+    result: SearchResult,
+    conditions: list[dict[str, Any]],
+    *,
+    question: str,
+    visual_sources: Mapping[str, Any] | None = None,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...], list[dict[str, Any]]]:
+    """Collect same-object witnesses, never change per-object admission.
+
+    Each whole requirement is checked separately, so unknown support for one
+    set goal neither approves it nor discards a valid witness for another.
+    There is no cross-object quote pool or inherited-witness fallback.
+    """
+
+    if not conditions:
+        return (), (), []
+    raw = decision.get("setConditionEvidence")
+    expected = {condition["id"] for condition in conditions}
+    malformed = not isinstance(raw, list) or any(
+        not isinstance(row, Mapping) or not isinstance(row.get("conditionId"), str)
+        or row.get("conditionId") not in expected
+        for row in raw if isinstance(raw, list)
+    )
+    witnesses: list[dict[str, Any]] = []
+    record_ids: list[str] = []
+    all_checks: list[dict[str, Any]] = []
+    for condition in conditions:
+        subset = [row for row in raw if isinstance(row, Mapping)
+                  and row.get("conditionId") == condition["id"]] if isinstance(raw, list) else []
+        passed, evidence_ids, checks = _check_conditions(
+            {"conditionEvidence": subset}, result, [condition], question=question,
+            visual_sources=visual_sources,
+        )
+        if malformed:
+            passed = False
+            checks.append({"objectId": result.obj.id, "conditionId": condition["id"],
+                           "scope": "exhibition_set", "status": "unknown", "sourceBound": False,
+                           "failure": "malformed_set_condition_contract"})
+        all_checks.extend(checks)
+        if not passed:
+            continue
+        witnesses.append({
+            "requirementId": condition["id"], "requirementText": condition["text"],
+            "sourceQuote": condition["sourceQuote"],
+            "questionSha256": sha256(question.encode("utf-8")).hexdigest(),
+            "objectId": result.obj.id,
+            "evidenceIds": list(dict.fromkeys(check["evidenceId"] for check in checks)),
+            "checks": checks,
+        })
+        record_ids.extend(evidence_ids)
+    return tuple(witnesses), tuple(dict.fromkeys(record_ids)), all_checks
+
+
 def audit_payload(
     question: str,
     results: list[SearchResult],
@@ -499,9 +1143,23 @@ def audit_payload(
     mandatory_predicates: tuple[str, ...] = (),
     pool_coverage_legs: tuple[str, ...] = (),
     selection_constraints: tuple[str, ...] = (),
+    evidence_mode: str = "record_explanation",
+    catalogue_type_hints: tuple[str, ...] = (),
+    explicit_materials: tuple[str, ...] = (),
+    strict_conditions: bool = False,
+    visual_sources: Mapping[str, Any] | None = None,
+    visual_predicate_ids: tuple[str, ...] = (),
+    exhibition_set_requirements: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
     """Build a bounded, source-ID-addressable candidate payload."""
 
+    conditions = _condition_specs(
+        mandatory_predicates, catalogue_type_hints, explicit_materials,
+        evidence_mode=evidence_mode, visual_predicate_ids=visual_predicate_ids,
+    )
+    set_conditions = _set_condition_specs(
+        exhibition_set_requirements, question=question, evidence_mode=evidence_mode,
+    )
     candidates: list[dict[str, Any]] = []
     for rank, result in enumerate(results[:top_k], start=1):
         obj = result.obj
@@ -515,6 +1173,7 @@ def audit_payload(
                 "creator": _compact(obj.creator or obj.maker, 140),
                 "date": _compact(obj.date, 100),
                 "culture": _compact(obj.culture_display or obj.culture, 140),
+                "catalogueCulturePacks": list(obj.culture_pack_ids),
                 "place": _compact(obj.place, 120),
                 "objectType": _compact(obj.type or obj.classification, 120),
                 "material": _compact(obj.material or obj.medium, 140),
@@ -530,16 +1189,29 @@ def audit_payload(
                     {
                         "id": chunk.id,
                         "kind": chunk.source_kind,
-                        "text": _compact(chunk.text, 300),
+                        "text": _compact(chunk.text, AUDIT_EVIDENCE_TEXT_LIMIT),
                         "supports": _compact(chunk.supports, 160),
                     }
                     for chunk in evidence
                 ],
+                "visualEvidence": _visible_visual_sources(result, visual_sources, [*conditions, *set_conditions])
+                if strict_conditions or set_conditions else [],
             }
         )
     return {
         "visitorQuestion": _compact(question, 500),
         "retrievalContract": {
+            "conditionContractVersion": (
+                CONDITION_CONTRACT_VERSION if strict_conditions else ""
+            ),
+            "perObjectConditions": conditions if strict_conditions else [],
+            "exhibitionSetConditions": set_conditions,
+            "evidenceMode": evidence_mode,
+            "catalogueTypeHints": list(catalogue_type_hints),
+            "explicitMaterials": list(explicit_materials),
+            "visualPredicateIds": [condition["id"] for condition in conditions
+                                   if condition["kind"] == "predicate" and
+                                   condition["evidenceScope"] == "visible_features_or_record"],
             "mandatoryPerObjectPredicates": [
                 {"id": f"p{index}", "text": predicate}
                 for index, predicate in enumerate(mandatory_predicates, start=1)
@@ -630,6 +1302,107 @@ def _bounded_strings(
     return tuple(values)
 
 
+def _filter_strings(raw: Any, *, limit: int = 8) -> tuple[str, ...] | None:
+    """Validate one JSON list without accepting scalar coercions."""
+
+    if not isinstance(raw, list):
+        return None
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            return None
+        value = _compact(item, 100)
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        values.append(value)
+        seen.add(key)
+        if len(values) > limit:
+            return None
+    return tuple(values)
+
+
+def _filter_year(raw: Any) -> int | None | bool:
+    """Return a year, None, or False as an invalid sentinel."""
+
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return False
+    if not MIN_FILTER_YEAR <= raw <= MAX_FILTER_YEAR:
+        return False
+    return raw
+
+
+def parse_filter_spec(raw: Any) -> FilterSpec | None:
+    """Parse only the allowlisted planner filter contract.
+
+    ``None`` means an invalid contract; an omitted/null filter block is a valid
+    empty filter for compatibility with older query-planner providers.
+    """
+
+    if raw is None:
+        return FilterSpec()
+    if not isinstance(raw, Mapping):
+        return None
+    if set(raw) - FILTER_KEYS:
+        return None
+
+    date_start = _filter_year(raw.get("dateStart"))
+    date_end = _filter_year(raw.get("dateEnd"))
+    if date_start is False or date_end is False:
+        return None
+    if (
+        date_start is not None
+        and date_end is not None
+        and date_start > date_end
+    ):
+        return None
+
+    image_required = raw.get("imageRequired")
+    if image_required is not None and not isinstance(image_required, bool):
+        return None
+
+    cultures = _filter_strings(raw.get("cultures", []))
+    institutions = _filter_strings(raw.get("institutions", []))
+    materials = _filter_strings(raw.get("materials", []))
+    object_types = _filter_strings(raw.get("objectTypes", []))
+    rights_allowed = _filter_strings(raw.get("rightsAllowed", []))
+    raw_evidence_depth = _filter_strings(raw.get("evidenceDepth", []), limit=2)
+    string_fields = (
+        cultures,
+        institutions,
+        materials,
+        object_types,
+        rights_allowed,
+        raw_evidence_depth,
+    )
+    if any(value is None for value in string_fields):
+        return None
+    evidence_depth = tuple(
+        dict.fromkeys(value.casefold() for value in (raw_evidence_depth or ()))
+    )
+    if any(value not in EVIDENCE_DEPTH_FILTER_VALUES for value in evidence_depth):
+        return None
+
+    # ``False`` is retained for an exact audit trail but deliberately means no
+    # image predicate when the local filter query is compiled.
+    return FilterSpec(
+        date_start=date_start if isinstance(date_start, int) else None,
+        date_end=date_end if isinstance(date_end, int) else None,
+        cultures=cultures or (),
+        institutions=institutions or (),
+        materials=materials or (),
+        object_types=object_types or (),
+        image_required=image_required,
+        rights_allowed=rights_allowed or (),
+        evidence_depth=evidence_depth,
+    )
+
+
 def parse_query_plan(
     output: dict[str, Any],
     *,
@@ -645,6 +1418,21 @@ def parse_query_plan(
             in_collection_scope=False,
             search_queries=(),
         )
+    filters = parse_filter_spec(output.get("hardFilters"))
+    if filters is None:
+        return RetrievalQueryPlan(
+            valid=False,
+            in_collection_scope=False,
+            search_queries=(),
+        )
+    # Institution type codes are heterogeneous (form vs material/department).
+    # Keep natural-language kinds as an auditable semantic condition, not a
+    # literal SQL exclusion. Direct typed FilterSpec callers remain unchanged.
+    type_hints = tuple(dict.fromkeys((
+        *_bounded_strings(output.get("catalogueTypeHints", []), limit=8, item_limit=100),
+        *filters.object_types,
+    )))[:8]
+    filters = replace(filters, object_types=())
     queries = _queries(
         output.get("catalogueQueries"),
         question,
@@ -653,8 +1441,29 @@ def parse_query_plan(
     if not raw_scope:
         queries = ()
     semantic_query = _compact(output.get("semanticQuery"), 240)
+    evidence_mode = _compact(output.get("evidenceMode"), 40)
+    if evidence_mode not in {"record_explanation", "open_exploration", "visual_observation"}:
+        evidence_mode = "record_explanation"
+    set_requirements = parse_exhibition_set_requirements(
+        output.get("exhibitionSetRequirements", []), question=question,
+        evidence_mode=evidence_mode,
+    )
+    if set_requirements is None:
+        return RetrievalQueryPlan(
+            valid=False, in_collection_scope=False, search_queries=(),
+            reason="invalid_exhibition_set_requirements",
+        )
     if not raw_scope:
         semantic_query = ""
+        filters = FilterSpec()
+        type_hints = ()
+    predicates = _bounded_strings(output.get("mandatoryPerObjectPredicates"), limit=4)
+    visual_ids = _bounded_strings(output.get("visualPredicateIds"), limit=4, item_limit=8)
+    if not raw_scope or evidence_mode not in {"visual_observation", "open_exploration"}:
+        visual_ids = ()
+    else:
+        valid_ids = {f"p{index}" for index in range(1, len(predicates) + 1)}
+        visual_ids = tuple(value for value in visual_ids if value in valid_ids)
     return RetrievalQueryPlan(
         valid=True,
         in_collection_scope=raw_scope,
@@ -662,10 +1471,7 @@ def parse_query_plan(
         semantic_query=semantic_query,
         interpretation=_compact(output.get("queryInterpretation"), 500),
         reason=_compact(output.get("reason"), 500),
-        mandatory_predicates=_bounded_strings(
-            output.get("mandatoryPerObjectPredicates"),
-            limit=4,
-        ),
+        mandatory_predicates=predicates,
         pool_coverage_legs=_bounded_strings(
             output.get("poolCoverageLegs"),
             limit=6,
@@ -674,6 +1480,17 @@ def parse_query_plan(
             output.get("selectionRationaleConstraints"),
             limit=4,
         ),
+        filters=filters,
+        evidence_mode=(
+            evidence_mode
+            if evidence_mode in {
+                "record_explanation", "open_exploration", "visual_observation"
+            }
+            else "record_explanation"
+        ),
+        catalogue_type_hints=type_hints,
+        visual_predicate_ids=visual_ids,
+        exhibition_set_requirements=set_requirements if raw_scope else (),
     )
 
 
@@ -684,6 +1501,13 @@ def parse_audit(
     question: str,
     max_expansion_queries: int,
     mandatory_predicates: tuple[str, ...] = (),
+    catalogue_type_hints: tuple[str, ...] = (),
+    explicit_materials: tuple[str, ...] = (),
+    strict_conditions: bool = False,
+    evidence_mode: str = "record_explanation",
+    visual_sources: Mapping[str, Any] | None = None,
+    visual_predicate_ids: tuple[str, ...] = (),
+    exhibition_set_requirements: tuple[dict[str, Any], ...] = (),
 ) -> RetrievalAudit:
     """Validate model decisions and bind them back to frozen source records."""
 
@@ -695,12 +1519,44 @@ def parse_audit(
         "unsupported",
     }:
         return RetrievalAudit(valid=False, accepted=[], search_queries=())
+    if strict_conditions and output.get("conditionContractVersion") != CONDITION_CONTRACT_VERSION:
+        # Opt-in belongs to the caller, never to the model. Production cannot
+        # fall back to legacy approval just because a response omits its checks.
+        return RetrievalAudit(
+            valid=False, accepted=[], search_queries=(),
+            condition_contract_version=CONDITION_CONTRACT_VERSION,
+            condition_rejections=({"failure": "missing_or_invalid_contract_version"},),
+        )
+    conditions = _condition_specs(
+        mandatory_predicates, catalogue_type_hints, explicit_materials,
+        evidence_mode=evidence_mode, visual_predicate_ids=visual_predicate_ids,
+    )
+    try:
+        set_conditions = _set_condition_specs(
+            exhibition_set_requirements, question=question, evidence_mode=evidence_mode,
+        )
+    except ValueError:
+        return RetrievalAudit(
+            valid=False, accepted=[], search_queries=(),
+            condition_rejections=({"failure": "invalid_exhibition_set_requirements"},),
+        )
+    condition_checks: list[dict[str, Any]] = []
+    condition_rejections: list[dict[str, Any]] = []
 
     by_id = {result.obj.id: result for result in candidates}
     base_rank = {
         result.obj.id: rank for rank, result in enumerate(candidates, start=1)
     }
     accepted_by_id: dict[str, SearchResult] = {}
+    duplicate_ids: set[str] = set()
+    seen_decisions: set[str] = set()
+    if strict_conditions:
+        for decision in raw_accepted:
+            if isinstance(decision, Mapping):
+                key = str(decision.get("objectId") or "").strip()
+                if key in seen_decisions:
+                    duplicate_ids.add(key)
+                seen_decisions.add(key)
     for decision in raw_accepted:
         if not isinstance(decision, dict):
             continue
@@ -708,6 +1564,10 @@ def parse_audit(
         result = by_id.get(object_id)
         relevance = _score(decision.get("relevanceScore"))
         if result is None or relevance is None or relevance < 0.62:
+            continue
+        if strict_conditions and object_id in duplicate_ids:
+            condition_rejections.append({"objectId": object_id,
+                                         "failure": "duplicate_object_decisions"})
             continue
 
         # Only IDs actually shown in this audit request may be accepted. A
@@ -729,7 +1589,17 @@ def parse_audit(
                 if evidence_id in allowed_evidence
             )
         )
-        if mandatory_predicates:
+        if strict_conditions:
+            passed, checked_evidence, checks = _check_conditions(
+                decision, result, conditions, question=question,
+                visual_sources=visual_sources,
+            )
+            condition_checks.extend(checks)
+            if not passed:
+                condition_rejections.extend(check for check in checks if check.get("failure"))
+                continue
+            evidence_ids = tuple(dict.fromkeys((*evidence_ids, *checked_evidence)))
+        elif mandatory_predicates:
             required_predicate_ids = {
                 f"p{index}" for index in range(1, len(mandatory_predicates) + 1)
             }
@@ -759,11 +1629,9 @@ def parse_audit(
                         ),
                         None,
                     )
-                    normalized_source = re.sub(
-                        r"\s+",
-                        " ",
-                        chunk.text if chunk is not None else "",
-                    ).strip().casefold()
+                    normalized_source = _compact(
+                        chunk.text if chunk is not None else "", AUDIT_EVIDENCE_TEXT_LIMIT
+                    ).casefold()
                     if (
                         predicate_id not in required_predicate_ids
                         or status != "supported"
@@ -794,10 +1662,29 @@ def parse_audit(
         if not evidence_ids:
             continue
 
+        set_witnesses, set_record_ids, set_checks = _check_set_conditions(
+            decision, result, set_conditions, question=question, visual_sources=visual_sources,
+        )
+        # Set coverage diagnostics are not per-object rejections. The selector
+        # validates coverage of the final set; an unknown goal must not expel a
+        # correctly admitted object or borrow an earlier pass's witness.
+        condition_checks.extend(set_checks)
+        evidence_ids = tuple(dict.fromkeys((*evidence_ids, *set_record_ids)))
+        visual_set_witness = any(
+            check.get("sourceKind") == "collection_image_observation"
+            for witness in set_witnesses for check in witness["checks"]
+        )
         rank_signal = 1.0 / (1.0 + base_rank[object_id])
         audited_score = 100.0 * (0.88 * relevance + 0.12 * rank_signal)
         sources = tuple(
-            dict.fromkeys((*result.retrieval_sources, "llm_relevance_audit"))
+            dict.fromkeys((*(source for source in result.retrieval_sources
+                            if source not in {"condition_source_bound", "visual_condition_source_bound"}),
+                           "llm_relevance_audit",
+                           *(("condition_source_bound",) if strict_conditions else ()),
+                           *(("visual_condition_source_bound",) if visual_set_witness or (strict_conditions and any(
+                               check.get("sourceKind") == "collection_image_observation" and
+                               not check.get("failure") for check in checks
+                           )) else ())))
         )
         fields = tuple(
             (*result.field_scores, ("llm_relevance", round(relevance, 6)))
@@ -808,6 +1695,7 @@ def parse_audit(
             matched_evidence_ids=evidence_ids,
             retrieval_sources=sources,
             field_scores=fields,
+            set_witnesses=set_witnesses,
         )
         current = accepted_by_id.get(object_id)
         if current is None or audited.score > current.score:
@@ -816,6 +1704,30 @@ def parse_audit(
     accepted = sorted(
         accepted_by_id.values(), key=lambda result: (-result.score, result.obj.id)
     )
+    if strict_conditions:
+        raw_rejected = output.get("rejected")
+        for decision in raw_rejected if isinstance(raw_rejected, list) else []:
+            if not isinstance(decision, Mapping):
+                continue
+            object_id = str(decision.get("objectId") or "").strip()
+            result = by_id.get(object_id)
+            if result is None:
+                continue
+            _, _, checks = _check_conditions(decision, result, conditions, question=question,
+                                             visual_sources=visual_sources)
+            condition_checks.extend(checks)
+            condition_rejections.extend(check for check in checks if check.get("failure"))
+            if object_id in accepted_by_id:
+                # The same object cannot be both approved and rejected. Do not
+                # select whichever duplicate happens to favour acceptance.
+                accepted = [item for item in accepted if item.obj.id != object_id]
+                condition_rejections.append({
+                    "objectId": object_id, "failure": "conflicting_object_decisions"
+                })
+        if not accepted:
+            answerability = "unsupported"
+        elif condition_rejections and answerability == "supported":
+            answerability = "partially_supported"
     queries = _queries(
         output.get("searchQueries"),
         question,
@@ -852,6 +1764,9 @@ def parse_audit(
         interpretation=_compact(output.get("queryInterpretation"), 500),
         coverage_gap=_compact(output.get("coverageGap"), 500),
         expansion_reason=expansion_reason,
+        condition_checks=tuple(condition_checks),
+        condition_rejections=tuple(condition_rejections),
+        condition_contract_version=(CONDITION_CONTRACT_VERSION if strict_conditions else ""),
     )
 
 
@@ -902,11 +1817,9 @@ def parse_predicate_verification(
                 ).strip()
                 chunk = allowed_chunks.get(evidence_id)
                 normalized_quote = quote.casefold()
-                normalized_source = re.sub(
-                    r"\s+",
-                    " ",
-                    chunk.text if chunk is not None else "",
-                ).strip().casefold()
+                normalized_source = _compact(
+                    chunk.text if chunk is not None else "", AUDIT_EVIDENCE_TEXT_LIMIT
+                ).casefold()
                 if (
                     predicate_id not in required_ids
                     or status != "entailed"

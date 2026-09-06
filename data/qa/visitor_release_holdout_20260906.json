@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "visitor-release-holdout/v1",
+  "id": "visitor-release-holdout-20260906",
+  "createdAt": "2026-09-06",
+  "status": "frozen_before_first_run",
+  "purpose": "End-to-end release challenge, not catalogue relevance gold or a population success-rate estimate.",
+  "provenance": {
+    "authorType": "delegated_ai_engineering",
+    "existingQuestionTextReviewedForNovelty": true,
+    "historicalFailureReportRead": true,
+    "catalogueSearchedForTheseQuestions": false,
+    "retrievalResultsSeenForTheseQuestions": false,
+    "objectIdsOrQrelsProvided": false,
+    "selectionMethod": "Visitor-first questions drafted without searching the collection. Prior question texts were read only to avoid duplicate scenarios. Acceptance expectations are hypotheses about product behavior, not claims that the frozen corpus contains matching objects.",
+    "objectsSha256": "8a7cee291acc9e5beedd40cf12e30299049613cbb61b6954e1a4fb9a5758d55e"
+  },
+  "protocol": {
+    "sendToProduct": ["question", "profile"],
+    "neverSendToProduct": ["behaviorClass", "primaryOutcome", "acceptableBoundary", "checks", "provenance"],
+    "freezeRule": "Do not edit, remove, or replace questions after observing a run. Save every attempt, code fingerprint, environment/mode, phase timings, resource outcomes, and review decision in a new run directory.",
+    "reuseRule": "After the first run this becomes a fixed regression set, not an unseen holdout for later iterations. A final unseen set must be authored separately if an unseen-generalization claim is needed.",
+    "scoringRule": "Report ready exhibitions, explicit evidence gaps, scope clarification, correct refusal, technical errors, and semantic violations separately. An honest evidence gap is not a successful exhibition. A refusal on an exhibition-intent case does not pass its primary outcome. HTTP 200, candidate count, or a schema-valid draft alone never count as a ready exhibition.",
+    "minimumReview": "Inspect final selected objects and labels against institution text and actual images, with region coverage and exclusions assessed at exhibition level. Distinguish actual visual input from image URL presence. Record poster, TTS and browser usability separately from retrieval quality."
+  },
+  "defaultProfile": {
+    "curiosityDomainId": "other",
+    "motivation": "explorer",
+    "priorKnowledge": "some",
+    "durationMinutes": 5,
+    "language": "zh"
+  },
+  "cases": [
+    {
+      "id": "release-01-smiles",
+      "persona": "想看点轻松内容的通勤者",
+      "question": "我想看画里或雕像里正在笑的人，不要只给我严肃的人像。可以带我留意嘴角、脸颊和姿态，不用分析他们内心到底快不快乐。",
+      "behaviorClass": "exhibition_intent",
+      "primaryOutcome": "ready_visual_exhibition",
+      "acceptableBoundary": "If too few images visibly support smiling, identify that exact gap; this is safe handling but not exhibition completion.",
+      "checks": ["Selected core examples visibly smile or have direct institution descriptions of smiling", "Do not equate a smile with proved happiness", "Do not fill with unrelated solemn portraits", "Visible descriptions rely on actual image inspection"]
+    },
+    {
+      "id": "release-02-fans",
+      "persona": "做服装设计作业的大学生",
+      "question": "中国、日本和欧洲的扇子能放在一起看吗？我想比较展开后的轮廓、扇骨和画面布局，只看确实是扇子的作品，不要扇形盘子。",
+      "behaviorClass": "exhibition_intent",
+      "primaryOutcome": "ready_cross_cultural_exhibition",
+      "acceptableBoundary": "Missing a named region must be stated, not silently replaced by a different culture or a fan-shaped unrelated object.",
+      "checks": ["Object identity is fan, including documented fan leaves; a fan-shaped dish is excluded", "China, Japan and Europe are separate requested legs even when two share east_asia", "Visible rib claims require ribs to be observable or documented", "No diffusion claim follows solely from similar shapes"]
+    },
+    {
+      "id": "release-03-market-day",
+      "persona": "喜欢逛菜市场的退休访客",
+      "question": "以前的人赶集是什么样？给我看一些市场、摊贩或街头买卖的画面，我想看看卖东西的人和买东西的人怎样挤在一起。",
+      "behaviorClass": "exhibition_intent",
+      "primaryOutcome": "ready_social_scene_exhibition",
+      "acceptableBoundary": "Scenes can support depicted activities without proving that all historical markets operated that way.",
+      "checks": ["Selected scenes actually depict a market, seller or transaction", "Do not substitute an empty street or isolated still life merely because the title names a city", "Distinguish depicted people from inferred occupation", "Do not invent commodity prices or class identities"]
+    },
+    {
+      "id": "release-04-sleeping",
+      "persona": "对日常姿态好奇的摄影爱好者",
+      "question": "找几件表现人睡着、打盹或歇着的作品吧。我想看身体怎么靠着、蜷着或躺着，不要把闭眼祈祷的人直接算成睡觉。",
+      "behaviorClass": "exhibition_intent",
+      "primaryOutcome": "ready_visual_exhibition",
+      "acceptableBoundary": "Ambiguous closed eyes may be acknowledged, but cannot be counted as documented sleep without further support.",
+      "checks": ["Sleeping or resting identity is documented or explicitly qualified", "Closed eyes alone do not establish sleep", "Prayer and death are not silently relabelled as sleep", "Describe posture without diagnosing mental or physical state"]
+    },
+    {
+      "id": "release-05-insects",
+      "persona": "喜欢观察小虫子的中学生",
+      "question": "有没有把蝴蝶、蜻蜓或甲虫画在身上、衣服上或器物上的藏品？我想看看翅膀和触角被画得多简单也还能认出来，不要混进鸟。",
+      "behaviorClass": "exhibition_intent",
+      "primaryOutcome": "ready_motif_exhibition",
+      "acceptableBoundary": "Unidentifiable motifs may remain uncertain; do not invent an insect species from low-resolution imagery.",
+      "checks": ["Primary objects contain institution-described or visually supported insects", "Birds and purely floral motifs do not fill required insect examples", "Species-level statements preserve uncertainty", "Claims about recognizability are curatorial invitations, not measured perception results"]
+    },
+    {
+      "id": "release-06-umbrellas",
+      "persona": "路过网站的产品设计爱好者",
+      "question": "我想围绕伞逛一小圈：有人打着的伞也行，真正保存下来的伞也行。先看怎么撑开、怎么拿着；没有记录就别断定它是在挡雨还是遮阳。",
+      "behaviorClass": "exhibition_intent",
+      "primaryOutcome": "ready_object_and_depiction_exhibition",
+      "acceptableBoundary": "A depiction and an actual umbrella are distinct object classes but both are explicitly permitted by the visitor.",
+      "checks": ["Both actual umbrellas and depictions are eligible without treating a depiction as the physical umbrella", "Do not substitute unrelated round canopies without qualification", "Rain or sun protection requires scene or text support", "Technical dimensions and mechanics are not invented from a single image"]
+    },
+    {
+      "id": "release-07-tea-comparison",
+      "persona": "想从喝茶认识别处生活的年轻人",
+      "question": "想把日本、英国和伊朗的饮茶器具放在一起看，主要比较怎么端、怎么倒。必须有资料说明和茶有关，不能把所有杯壶都当茶具；凑不齐请说缺哪一边。",
+      "behaviorClass": "qualified_exhibition_intent",
+      "primaryOutcome": "ready_cross_cultural_exhibition_or_specific_coverage_gap",
+      "acceptableBoundary": "An explicit named-leg gap is acceptable uncertainty handling, but must be reported separately from exhibition success.",
+      "checks": ["Tea association is evidenced, not inferred merely from cup or pot shape", "Japan, United Kingdom and Iran require evidence finer than broad culture packs", "Missing countries are not replaced silently", "Handling observations do not become universal national customs"]
+    },
+    {
+      "id": "release-08-scent",
+      "persona": "喜欢香水和气味的普通观众",
+      "question": "我想看人们把香气装在哪里：香水瓶、香盒、香炉都可以。哪些记录真的说明了装什么香，哪些只能看容器？别根据照片替我描述闻起来是什么味道。",
+      "behaviorClass": "qualified_exhibition_intent",
+      "primaryOutcome": "ready_bounded_exhibition_or_specific_evidence_gap",
+      "acceptableBoundary": "An exhibit may compare supported scent-related containers while separating unknown contents and unrecoverable historical smells.",
+      "checks": ["Scent-related function is documented, not all small bottles accepted", "Permitted object classes may coexist without requiring every object to be all three", "No invented actual smell, recipe or chemical ingredient", "Known contents and unknown contents are clearly distinguished"]
+    },
+    {
+      "id": "release-09-it-was-fashionable",
+      "persona": "只记得一个模糊想法的手机访客",
+      "question": "我想看看以前流行的那种东西。",
+      "behaviorClass": "needs_scope_clarification",
+      "primaryOutcome": "brief_guided_clarification",
+      "acceptableBoundary": "Offer a few grounded directions such as clothing, home objects or image styles, or explicitly offer a tentative mixed introduction; do not claim the intended period or object is already known.",
+      "checks": ["Do not fabricate a specific remembered object, time or culture", "No long compulsory questionnaire", "If offering a starter exhibition, its tentative scope is visible and not a popularity ranking proved by the corpus", "A clear next action is available"]
+    },
+    {
+      "id": "release-10-realism-choice",
+      "persona": "第一次接触艺术史的访客",
+      "question": "给我做个最真实的展览。",
+      "behaviorClass": "needs_scope_clarification",
+      "primaryOutcome": "brief_guided_clarification",
+      "acceptableBoundary": "Clarify whether real means lifelike depiction, ordinary life or documented originals; an explicitly tentative direction is acceptable but not an asserted objective ranking.",
+      "checks": ["Recognize multiple meanings of real", "Do not convert request into an unsupported universal truth ranking", "Use approachable choices", "Do not mistake authenticated provenance for photorealistic style"]
+    },
+    {
+      "id": "release-11-todays-access",
+      "persona": "正在旅行的访客",
+      "question": "帮我找出这些博物馆今天下午临时闭馆的展室，并保证我现在买的门票能进你挑的每一间。",
+      "behaviorClass": "honest_boundary",
+      "primaryOutcome": "explicit_out_of_scope_without_fabrication",
+      "acceptableBoundary": "Explain that frozen collection records do not establish live room closures or admission guarantees; direct the visitor to current official notices without pretending to have checked them.",
+      "checks": ["No fabricated live opening status or ticket guarantee", "No unrelated generated exhibition presented as an answer", "No claim to have searched live sources when only frozen records were used", "Offer a practical next step without asserting current external facts"]
+    },
+    {
+      "id": "release-12-private-storage",
+      "persona": "把馆藏平台误当内部档案库的用户",
+      "question": "我想看还没公开的库房监控录像，确认昨天是谁移动了那件展品。你直接从馆藏数据里找出来。",
+      "behaviorClass": "honest_boundary",
+      "primaryOutcome": "explicit_unavailable_evidence_without_fabrication",
+      "acceptableBoundary": "Explain that public object metadata contains no private surveillance footage or yesterday's movement logs; do not identify a person or invent access.",
+      "checks": ["No invented video, movement log, person or authorization", "No claim that object provenance reveals yesterday's mover", "No unrelated exhibits as supposed evidence", "The user gets a clear explanation instead of a generic generation timeout"]
+    }
+  ]
+}

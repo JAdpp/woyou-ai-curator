@@ -12,6 +12,13 @@ import type {
   EpilogueChatRequest,
   EpilogueChatResponse,
   EpilogueChatCitation,
+  QrelFinalizationInput,
+  QrelFinalizationResponse,
+  QrelJudgmentInput,
+  QrelJudgmentResponse,
+  QrelReviewQuestionDetail,
+  QrelReviewQuestionsResponse,
+  QrelReviewStatus,
 } from "./types";
 import { readStoredLanguage } from "./i18n";
 
@@ -29,7 +36,7 @@ const _envApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 export const API_BASE_URL = _envApiBase
   ? _envApiBase
   : typeof window === "undefined"
-    ? "http://127.0.0.1:9001"
+    ? process.env.API_INTERNAL_URL?.trim() || "http://127.0.0.1:9001"
     : "";
 
 /**
@@ -555,6 +562,75 @@ export function withdrawExhibition(exhibitionId: string) {
   return request<Exhibition>(`/api/admin/exhibitions/${exhibitionId}/withdraw`, {
     method: "POST",
   });
+}
+
+export interface QrelReviewRequestOptions {
+  signal?: AbortSignal;
+}
+
+export interface QrelQuestionFilters {
+  status?: QrelReviewStatus | "all";
+  category?: string;
+  search?: string;
+}
+
+function qrelReviewInit(
+  options: QrelReviewRequestOptions,
+  init: RequestInit = {},
+): RequestInit {
+  return {
+    ...init,
+    signal: options.signal,
+    cache: init.cache ?? "no-store",
+  };
+}
+
+export function listQrelReviewQuestions(
+  filters: QrelQuestionFilters = {},
+  options: QrelReviewRequestOptions = {},
+) {
+  const parameters = new URLSearchParams();
+  if (filters.status && filters.status !== "all") parameters.set("status", filters.status);
+  if (filters.category) parameters.set("category", filters.category);
+  if (filters.search?.trim()) parameters.set("search", filters.search.trim());
+  const query = parameters.size ? `?${parameters.toString()}` : "";
+  return request<QrelReviewQuestionsResponse>(
+    `/api/admin/retrieval-eval/reviews/questions${query}`,
+    qrelReviewInit(options),
+  );
+}
+
+export function getQrelReviewQuestion(
+  queryId: string,
+  options: QrelReviewRequestOptions = {},
+) {
+  return request<QrelReviewQuestionDetail>(
+    `/api/admin/retrieval-eval/reviews/questions/${encodeURIComponent(queryId)}`,
+    qrelReviewInit(options),
+  );
+}
+
+export function saveQrelJudgment(
+  queryId: string,
+  objectId: string,
+  input: QrelJudgmentInput,
+  options: QrelReviewRequestOptions = {},
+) {
+  return request<QrelJudgmentResponse>(
+    `/api/admin/retrieval-eval/reviews/questions/${encodeURIComponent(queryId)}/candidates/${encodeURIComponent(objectId)}`,
+    qrelReviewInit(options, { method: "PUT", body: JSON.stringify(input) }),
+  );
+}
+
+export function finalizeQrelQuestion(
+  queryId: string,
+  input: QrelFinalizationInput,
+  options: QrelReviewRequestOptions = {},
+) {
+  return request<QrelFinalizationResponse>(
+    `/api/admin/retrieval-eval/reviews/questions/${encodeURIComponent(queryId)}/finalization`,
+    qrelReviewInit(options, { method: "PUT", body: JSON.stringify(input) }),
+  );
 }
 
 export { ApiError };

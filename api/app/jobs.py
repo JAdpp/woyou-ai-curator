@@ -237,10 +237,20 @@ class JobStore:
                     "QUESTION_UNSUPPORTED_AFTER_AUDIT",
                 }:
                     message = (
-                        "当前馆藏不足以可靠回答这个问题。你的原问题仍然保留；"
-                        "请选择系统建议的相近方向，或减少必须覆盖的地区后重试。"
+                        "本次检索到的资料还不足以可靠支撑这个问题。你的原问题仍然保留，可以调整比较范围再试。"
+                    )
+                    gap = error.details.get("coverageGap")
+                    if isinstance(gap, str) and gap.strip():
+                        message = "本次暂未成展：" + " ".join(gap.split())[:260] + " 你的原问题仍然保留，可以调整范围后继续。"
+                elif error.code == "CROSS_CULTURAL_SELECTION_INSUFFICIENT":
+                    missing = error.details.get("missingCulturalLegs")
+                    message = (
+                        f"本次尚缺「{str(missing)[:100]}」的合格展品，不能用其他地区替代。你的原问题已保留，可以调整比较范围后继续。"
+                        if missing else
+                        "本次通过审核的藏品还不足以覆盖多个文化地区，尚不能组成所要求的跨文化比较。你的原问题已保留，可以调整范围后继续。"
                     )
                 elif error.code in {
+                    "RETRIEVAL_PLAN_UNAVAILABLE",
                     "RETRIEVAL_AUDIT_UNAVAILABLE",
                     "RETRIEVAL_AUDIT_INVALID",
                     "RETRIEVAL_SEARCH_TIMEOUT",
