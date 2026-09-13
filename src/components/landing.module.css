@@ -755,16 +755,6 @@
   line-height: 1.9;
 }
 
-.methodBoundary {
-  max-width: 48rem;
-  margin: 1.4rem 0 0;
-  padding: 0.8rem 1rem;
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  color: var(--muted);
-  font: 0.76rem/1.8 ui-sans-serif, system-ui, sans-serif;
-}
-
 /* ---------------------------------------------------- collection overview */
 
 .collectionLead {

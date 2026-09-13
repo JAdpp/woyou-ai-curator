@@ -412,10 +412,6 @@ const COPY = {
       "Qwen Image 3 优先生成主题主视觉，中文由排版器精确合成；千问 TTS 提供专业声线导览，服务不可用时明确回退设备语音。同一展览结构同时进入 3D 与 2D 网页版。",
       "Qwen Image 3 generates the key visual, with any Chinese set precisely by a typesetter rather than the model; Qwen TTS supplies the studio voice, falling back visibly to the device voice when unavailable. The same exhibition structure drives both the 3D hall and the 2D web version.",
     ),
-    methodBoundary: line(
-      "这是一套受控的单 Agent 编排，不是任意自主行动的多 Agent 网络。可追溯不等于专业审阅；来源史、文化敏感性与相关社群审阅状态会如实保留。",
-      "This is a controlled single-agent orchestration, not a network of freely acting autonomous agents. Traceable is not the same as professionally reviewed; provenance, cultural sensitivity and community-review status are reported as they actually stand.",
-    ),
 
     collectionLive: line(
       "当前接入 {objects} 件开放馆藏，来自 {museums} 家博物馆。",

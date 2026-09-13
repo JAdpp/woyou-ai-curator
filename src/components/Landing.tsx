@@ -617,10 +617,6 @@ export function Landing({ onStart }: { onStart: () => void }) {
               <dd>{t.method04Body}</dd>
             </div>
           </dl>
-
-          <p className={styles.methodBoundary}>
-            {t.methodBoundary}
-          </p>
         </section>
 
         <section
