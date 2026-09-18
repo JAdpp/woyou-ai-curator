@@ -142,7 +142,7 @@ def client(collections_dir: Path):
         # deterministic suite in test_hybrid_rag.py.
         rag_mode="bm25",
         deepseek_api_key=None,
-        deepseek_model="deepseek-v4-flash",
+        deepseek_model="deepseek-flash",
         deepseek_base_url="https://api.deepseek.com",
         deepseek_timeout_seconds=1,
         admin_review_token="test-admin-token",

@@ -238,6 +238,6 @@ def test_descriptive_export_excludes_agenda_personal_fields_and_raw_sessions(
     assert payload["statistics"]["totalExhibitions"] == 1
     assert payload["statistics"]["totalEvents"] >= 3
     assert payload["runtimeVersionDistributions"]["model"] == {
-        "deepseek-v4-flash": 1
+        "deepseek-flash": 1
     }
     assert payload["collections"][0]["version"] == "test-v1"

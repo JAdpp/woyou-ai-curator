@@ -28,7 +28,7 @@ UPDATES = {
     'RAG_INDEX_DIR':'api/runtime/cache/rag','RAG_FILTER_INDEX_DIR':'api/runtime/cache/filters',
     'RAG_TRACE_DIR':'api/runtime/traces/retrieval',
     'ALIYUN_TEXT_API_HOST':'https://llm-nwypztqdwtzyt9zd.cn-beijing.maas.aliyuncs.com',
-    'DEEPSEEK_LABELS_MODEL':'deepseek-v4-flash-vision-exp','DEEPSEEK_QUERY_REVIEW_THINKING':'false',
+    'DEEPSEEK_LABELS_MODEL':'deepseek-flash','DEEPSEEK_QUERY_REVIEW_THINKING':'false',
     'RAG_PLANNING_TIMEOUT_SECONDS':'16','RAG_RETRIEVAL_TIMEOUT_SECONDS':'70',
     'DEEPSEEK_TIMEOUT_SECONDS':'90','DEEPSEEK_FRAME_TIMEOUT_SECONDS':'55',
     'DEEPSEEK_LABELS_TIMEOUT_SECONDS':'40','GENERATION_JOB_TIMEOUT_SECONDS':'180',

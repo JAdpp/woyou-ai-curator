@@ -177,7 +177,7 @@ def test_generation_edit_validation_and_review_workflow(
     exhibition = generate(client, agenda_payload)
     assert exhibition["status"] == "auto_validated"
     assert exhibition["versions"]["provider"] == "deterministic"
-    assert exhibition["versions"]["model"] == "deepseek-v4-flash"
+    assert exhibition["versions"]["model"] == "deepseek-flash"
     assert exhibition["versions"]["collection"] == "test-v1"
     assert exhibition["exhibitionTheme"] == agenda_payload["question"].rstrip("？?。.!！")
     assert len(exhibition["items"]) == 5

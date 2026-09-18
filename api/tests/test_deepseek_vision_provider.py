@@ -53,7 +53,7 @@ def test_text_json_request_disables_thinking_and_bounds_output(monkeypatch) -> N
     provider = DeepSeekProvider(
         Settings(
             deepseek_api_key="test-key",
-            deepseek_model="deepseek-v4-flash",
+            deepseek_model="deepseek-flash",
         )
     )
 
@@ -61,7 +61,7 @@ def test_text_json_request_disables_thinking_and_bounds_output(monkeypatch) -> N
 
     assert result == {"items": []}
     body = captured["body"]
-    assert body["model"] == "deepseek-v4-flash"
+    assert body["model"] == "deepseek-flash"
     assert body["thinking"] == {"type": "disabled"}
     assert body["max_tokens"] == 4096
 
@@ -72,7 +72,7 @@ def test_retrieval_audit_request_is_deterministic(monkeypatch) -> None:
     provider = DeepSeekProvider(
         Settings(
             deepseek_api_key="test-key",
-            deepseek_model="deepseek-v4-flash",
+            deepseek_model="deepseek-flash",
         )
     )
 
@@ -85,7 +85,7 @@ def test_retrieval_audit_request_is_deterministic(monkeypatch) -> None:
 
     assert result == {"items": []}
     body = captured["body"]
-    assert body["model"] == "deepseek-v4-flash"
+    assert body["model"] == "deepseek-flash"
     assert body["temperature"] == 0.0
     assert body["thinking"] == {"type": "disabled"}
     assert body["max_tokens"] == 4096
@@ -99,8 +99,8 @@ def test_visual_label_request_uses_the_dedicated_model_and_bound_image(
     provider = DeepSeekProvider(
         Settings(
             deepseek_api_key="test-key",
-            deepseek_model="deepseek-v4-flash",
-            deepseek_labels_model="deepseek-v4-flash-vision-exp",
+            deepseek_model="deepseek-flash",
+            deepseek_labels_model="deepseek-flash",
             deepseek_timeout_seconds=3,
         )
     )
@@ -122,7 +122,7 @@ def test_visual_label_request_uses_the_dedicated_model_and_bound_image(
 
     assert result == {"items": []}
     body = captured["body"]
-    assert body["model"] == "deepseek-v4-flash-vision-exp"
+    assert body["model"] == "deepseek-flash"
     assert body["thinking"] == {"type": "disabled"}
     assert body["response_format"] == {"type": "json_object"}
     assert body["max_tokens"] == 1600

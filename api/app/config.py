@@ -138,12 +138,13 @@ class Settings:
     rag_visual_audit_timeout_seconds: float = 14.0
     rag_agentic_max_queries: int = 5
     deepseek_api_key: str | None = None
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-flash"
     deepseek_query_review_thinking: bool = False
-    # The public wall-label pass is visual.  Keeping its model separate means
-    # interview, frame and epilogue text stay on the stable text model while
-    # only the stage that actually needs pixels uses the experimental model.
-    deepseek_labels_model: str = "deepseek-v4-flash-vision-exp"
+    # The public wall-label pass is visual. It keeps its own setting so the
+    # stage that reads pixels can move model without touching the text
+    # stages. deepseek-flash reads images itself (checked 2026-09-19), and the
+    # older deepseek-v4-flash / -vision-exp names are being retired.
+    deepseek_labels_model: str = "deepseek-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
     # Curation asks a reasoning model for a whole exhibition in one call, so
     # the ceiling is well above a typical chat round-trip.
@@ -437,10 +438,10 @@ class Settings:
                 "RAG_AGENTIC_MAX_QUERIES", 5
             ),
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
-            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
             deepseek_query_review_thinking=_bool_env("DEEPSEEK_QUERY_REVIEW_THINKING", False),
             deepseek_labels_model=os.getenv(
-                "DEEPSEEK_LABELS_MODEL", "deepseek-v4-flash-vision-exp"
+                "DEEPSEEK_LABELS_MODEL", "deepseek-flash"
             ),
             deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
             deepseek_timeout_seconds=deepseek_timeout_seconds,
