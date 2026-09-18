@@ -148,3 +148,15 @@ GENERIC_OPEN_QUESTIONS_EN = (
     "On the same theme, where do different places diverge?",
     "Which one looks least like its own period?",
 )
+
+# Culture packs are corpus facets; the Chinese labels live in the manifest.
+CULTURE_PACK_LABELS_EN: dict[str, str] = {
+    "europe": "Europe",
+    "east_asia": "East Asia",
+    "americas": "the Americas",
+    "west_asia_north_africa": "West Asia and North Africa",
+    "southeast_asia": "Southeast Asia",
+    "south_asia": "South Asia",
+    "africa": "Africa",
+    "oceania": "Oceania",
+}

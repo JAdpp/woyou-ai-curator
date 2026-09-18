@@ -18,6 +18,8 @@ import {
   publicInstitutionName,
   publicObjectMetadata,
   publicObjectTitle,
+  spokenObjectTitle,
+  visitorRoleTag,
 } from "@/lib/localizedMetadata";
 import { EpilogueConversation } from "../EpilogueConversation";
 import type { HallLayout, TourStop } from "./layout";
@@ -294,7 +296,7 @@ function ArtworkLabel({
       {!collapsed && (
         <div className={styles.labelContent}>
       <div className={styles.labelHead}>
-        <span className={styles.roleTag}>{item.roleLabel}</span>
+        <span className={styles.roleTag}>{visitorRoleTag(item, contentLang)}</span>
         {item.object.evidenceDepth === "thin" && (
           <span className={styles.depthTag} title={t.depthTagTitle}>
             {t.depthTag}
@@ -305,7 +307,9 @@ function ArtworkLabel({
           is read in Chinese. The original stays visible underneath and in the
           source panel, so nothing is hidden. */}
       <h2 lang={contentLang}>{publicTitle}</h2>
-      <p className={styles.originalTitle}>{item.object.title}</p>
+      {item.object.title !== publicTitle && (
+        <p className={styles.originalTitle}>{item.object.title}</p>
+      )}
       <p className={styles.tombstone}>
         {publicMetadata.length > 0
           ? publicMetadata.join(" · ")
@@ -459,7 +463,7 @@ export function HallOverlay({
           .map((sentence) => sentence.text);
         // The device fallback reads the Chinese label, never the English
         // institution record. Qwen's text is reconstructed by the backend.
-        text = `${publicObjectTitle(candidateItem, contentLang)}。${spoken.join(" ")}`;
+        text = `${spokenObjectTitle(candidateItem, contentLang)}。${spoken.join(" ")}`;
       } else if (candidate.kind === "epilogue") {
         text = exhibition.epilogue.text;
       }

@@ -209,6 +209,75 @@
   cursor: not-allowed;
 }
 
+/* Starting points that are a specific object: the image comes first. */
+.objectGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.6rem;
+}
+
+.objectOption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: stretch;
+  min-width: 0;
+  padding: 0 0 0.7rem;
+  overflow: hidden;
+  text-align: left;
+  border-radius: 0.7rem;
+  border: 1px solid var(--hairline, #e3ddd1);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  font: inherit;
+  color: inherit;
+}
+
+.objectOption:hover:not(:disabled) {
+  border-color: var(--accent, #8c6b3f);
+}
+
+.objectOption:focus-visible {
+  outline: 2px solid var(--accent, #8c6b3f);
+  outline-offset: 2px;
+}
+
+.objectOption:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.objectImage {
+  display: block;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 0.35rem;
+  background: var(--surface-2, #f4f1ea);
+  overflow: hidden;
+}
+
+.objectImage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.objectOption strong {
+  padding: 0 0.75rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.objectOption small {
+  padding: 0 0.75rem;
+  font-size: 0.72rem;
+  color: var(--muted, #8a8172);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .freeTextBlock {
   display: flex;
   flex-direction: column;

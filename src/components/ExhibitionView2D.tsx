@@ -30,6 +30,7 @@ import {
   publicInstitutionName,
   publicObjectMetadata,
   publicObjectTitle,
+  visitorRoleTag,
 } from "@/lib/localizedMetadata";
 import { EpilogueConversation } from "./EpilogueConversation";
 import { buildHallLayout } from "./hall/layout";
@@ -269,14 +270,16 @@ function ItemBlock({
 
       <div className={styles.itemText}>
         <p className={styles.itemMeta}>
-          <span className={styles.roleTag}>{item.roleLabel}</span>
+          <span className={styles.roleTag}>{visitorRoleTag(item, contentLang)}</span>
           <span className={styles.itemNumber}>{String(index + 1).padStart(2, "0")}</span>
           {item.object.evidenceDepth === "thin" && (
             <span className={styles.depthTag}>{t.tombstoneOnly}</span>
           )}
         </p>
         <h3 lang={contentLang}>{publicTitle}</h3>
-        <p className={styles.original}>{item.object.title}</p>
+        {item.object.title !== publicTitle && (
+          <p className={styles.original}>{item.object.title}</p>
+        )}
         <p className={styles.tombstone}>
           {publicMetadata.length > 0
             ? publicMetadata.join(" · ")

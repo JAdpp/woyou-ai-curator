@@ -165,6 +165,52 @@ def _question_anchor(
     return clean[:limit].rstrip("，,。.!！；;：:")
 
 
+# How the curator receives an opening that named nothing. The featured turn
+# that follows does the actual introducing; this is only the first breath.
+_UNDECIDED_REPLIES: dict[str, tuple[str, str]] = {
+    "meta": (
+        "我是这里的 AI 策展人：听你说想看什么，再从馆藏里挑出一组展品，搭成一座展厅。",
+        "I'm the AI curator here: you tell me what you'd like to see, and I pick objects from the collection and build them into a room.",
+    ),
+    "delegate": ("好，那我先给你挑几件。", "All right, let me pick out a few for you."),
+    "collection": ("好，先说说我们馆里有什么。", "Sure, here's what the collection holds."),
+    "unsure": ("没关系，不知道从哪问起很正常。", "That's fine; it's hard to know where to start."),
+    "browse": ("好，那我们先随便看看。", "Fine, let's just look around first."),
+    "greeting": ("你好。不着急，我们慢慢来。", "Hello. No hurry, we'll take it slowly."),
+}
+
+_MOTIVATION_REPLIES: dict[str, tuple[str, str]] = {
+    "explorer": (
+        "那我会多放些对照材料，把来龙去脉讲完整。",
+        "Then I'll bring in more comparisons and follow the argument all the way through.",
+    ),
+    "recharger": (
+        "那展签我写短一点，多留点时间给你看东西。",
+        "Then I'll keep the labels short and leave you more time to look.",
+    ),
+    "facilitator": (
+        "那我说得口语一些，多留几个可以边看边聊的话题。",
+        "Then I'll keep the language plain and leave things to talk about as you go.",
+    ),
+    "professional": (
+        "那我保留术语、年代和材质细节，少做铺垫。",
+        "Then I'll keep the terminology, dates and materials, and skip the preamble.",
+    ),
+}
+
+_PRIOR_KNOWLEDGE_REPLIES: dict[str, tuple[str, str]] = {
+    "none": ("那我从最基本的看法讲起，不默认你懂术语。", "Then I'll start from the basics and won't assume any jargon."),
+    "some": ("那我跳过常识，直接进主线。", "Then I'll skip the basics and go straight to the main thread."),
+    "familiar": ("那我多讲些细节、例外和争议。", "Then I'll give you more detail, exceptions and disputes."),
+}
+
+_SEGMENT_COUNT_ZH = {2: "两", 3: "三", 4: "四"}
+
+
+def _pick(language: str, pair: tuple[str, str]) -> str:
+    return pair[1] if language == "en" else pair[0]
+
+
 def compose_immediate(
     *,
     question_id: InterviewQuestionId | str,
@@ -176,16 +222,29 @@ def compose_immediate(
     available_domains: list[tuple[str, str, str]],
     want_suggestions: bool,
     language: str = "zh",
+    answer_value: str | None = None,
 ) -> InterviewVoice:
-    """Return a contextual curator response without any provider I/O.
+    """Return a curator response to the answer just given, without provider I/O.
 
-    Interview navigation is latency-sensitive and already deterministic. A
-    remote prose call used to add 10--20 seconds to every answer; this local
-    response preserves the conversational hand-off while the next question is
-    returned immediately.
+    Interview navigation is latency-sensitive and already deterministic; a
+    remote prose call used to add 10--20 seconds to every answer. The reply
+    responds to what was actually chosen and says what it will change about
+    the visit. The visitor's question is quoted once, when it is first heard,
+    rather than read back on every turn.
     """
 
+    from .interview import (
+        KEEP_SCOPE_VALUE,
+        NO_OPEN_QUESTION_VALUE,
+        RECOMMENDED_QUESTION_PREFIX,
+        UNSURE_VALUE,
+    )
+    from .interview_clarification import needs_scope_clarification, undecided_opening_kind
+    from .interview_featured import FEATURED_PREFIX, entry_for_question
+    from .models import DURATION_PLAN
+
     asked = question_id.value if isinstance(question_id, InterviewQuestionId) else str(question_id)
+    en = language == "en"
     anchor = _question_anchor(
         visitor_question,
         free_text,
@@ -193,29 +252,144 @@ def compose_immediate(
         topic,
         language=language,
     )
+    quoted = (f"“{anchor}”" if anchor else "your question") if en else (
+        f"“{anchor}”" if anchor else "你的问题"
+    )
+    heard = (
+        f"All right, {quoted} it is. A few quick questions so I know how to tell it."
+        if en
+        else f"好，就从{quoted}出发。再问你几个小问题，好决定这个展厅怎么讲。"
+    )
     subject = topic.strip() or (available_domains[0][1] if available_domains else "")
-    from .interview_clarification import needs_scope_clarification
-    scope_is_open = needs_scope_clarification(visitor_question or free_text or "")
+    undecided = undecided_opening_kind(free_text) if free_text else (
+        "delegate" if answer_value == UNSURE_VALUE else None
+    )
 
-    if language == "en":
-        quoted = f'“{anchor}”' if anchor else "your question"
-        if scope_is_open:
-            reply = f"I'll keep {quoted} as a preference, not assume a settled subject or factual claim."
-        elif skipped:
-            reply = f"I’ll keep {quoted} as the thread and leave the skipped choice open."
-        elif asked in {
-            InterviewQuestionId.CURIOSITY.value,
-            InterviewQuestionId.CUSTOM_QUESTION.value,
-            InterviewQuestionId.OPEN_QUESTION.value,
-        }:
-            reply = f"I’ll keep {quoted} as the question that each object must help answer."
-        elif asked == InterviewQuestionId.DURATION.value:
-            reply = f"I’ll shape {quoted} into a route that fits the time you chose."
-        elif asked == InterviewQuestionId.EXCLUSIONS.value:
-            reply = f"I’ll keep {quoted} in view while avoiding what you asked not to see."
+    reply: str | None
+    if asked in {InterviewQuestionId.CURIOSITY.value, InterviewQuestionId.FEATURED.value} and undecided:
+        entry = entry_for_question(visitor_question, language)
+        if asked == InterviewQuestionId.FEATURED.value and entry is not None:
+            # Still undecided after seeing the cards, so the curator chose.
+            reply = (
+                f"Then I'll choose: let's start with {entry.hook(language)}. {entry.plan(language)}"
+                if en
+                else f"那我替你定：就从{entry.hook(language)}开始。{entry.plan(language)}"
+            )
+        elif topic.strip():
+            # No featured turn in this collection; the curator took a
+            # direction on the visitor's behalf and says so.
+            reply = (
+                f"Then I'll pick a direction to start: {subject or 'the collection'}. You can change it once something catches your eye."
+                if en
+                else f"那我先替你选个方向：{subject or '馆藏'}。看到感兴趣的，随时可以换。"
+            )
         else:
-            reply = f"I’ll adjust the depth around {quoted} without replacing your question."
-        reply = _clean_reply(reply, language=language)
+            reply = _pick(language, _UNDECIDED_REPLIES[undecided])
+    elif asked == InterviewQuestionId.FEATURED.value and (answer_value or "").startswith(FEATURED_PREFIX):
+        entry = entry_for_question(visitor_question, language)
+        reply = (
+            (
+                f"Good, let's start with {entry.hook(language)}. {entry.plan(language)}"
+                if en
+                else f"好，就从{entry.hook(language)}开始。{entry.plan(language)}"
+            )
+            if entry is not None
+            else heard
+        )
+    elif asked == InterviewQuestionId.CURIOSITY.value and needs_scope_clarification(
+        visitor_question or free_text or ""
+    ):
+        reply = (
+            f"I'll keep {quoted} as a preference, not assume a settled subject or factual claim."
+            if en
+            else f"我先把{quoted}记作偏好，不把它当作已经明确的主题或事实结论。"
+        )
+    elif skipped and asked not in {
+        InterviewQuestionId.CUSTOM_QUESTION.value,
+        InterviewQuestionId.OPEN_QUESTION.value,
+        InterviewQuestionId.EXCLUSIONS.value,
+    }:
+        reply = "Fine, we'll skip that one." if en else "好，这题先跳过。"
+    elif asked in {InterviewQuestionId.CURIOSITY.value, InterviewQuestionId.FEATURED.value}:
+        if free_text:
+            reply = heard
+        elif answer_label:
+            reply = (
+                f"All right, we'll look for a thread through {answer_label}."
+                if en
+                else f"好，就从“{answer_label}”这个方向找。"
+            )
+        else:
+            reply = None
+    elif asked == InterviewQuestionId.MOTIVATION.value:
+        pair = _MOTIVATION_REPLIES.get(answer_value or "")
+        reply = _pick(language, pair) if pair else None
+    elif asked == InterviewQuestionId.CUSTOM_QUESTION.value:
+        if free_text:
+            reply = (
+                f"Good. Every object will have to help answer {quoted}."
+                if en
+                else f"好，就让每件展品都来回答{quoted}。"
+            )
+        elif answer_value == KEEP_SCOPE_VALUE or skipped:
+            reply = (
+                "Fine, I'll keep it open and won't settle it for you."
+                if en
+                else "好，先保留这个偏好，我不替你下结论。"
+            )
+        elif answer_label:
+            reply = f"Good: {answer_label}." if en else f"好，{answer_label}。"
+        else:
+            reply = None
+    elif asked == InterviewQuestionId.PRIOR_KNOWLEDGE.value:
+        pair = _PRIOR_KNOWLEDGE_REPLIES.get(answer_value or "")
+        reply = _pick(language, pair) if pair else None
+    elif asked == InterviewQuestionId.DURATION.value:
+        plan = DURATION_PLAN.get(int(answer_value)) if (answer_value or "").isdigit() else None
+        if plan is None:
+            reply = None
+        elif en:
+            reply = f"{answer_value} minutes: I'll lay out {plan[0]} objects in {plan[1]} parts."
+        else:
+            reply = (
+                f"{answer_value} 分钟，我排 {plan[0]} 件展品，"
+                f"分{_SEGMENT_COUNT_ZH.get(plan[1], str(plan[1]))}段来讲。"
+            )
+    elif asked == InterviewQuestionId.OPEN_QUESTION.value:
+        if free_text or (answer_value and answer_value != NO_OPEN_QUESTION_VALUE):
+            reply = (
+                f"Good. Every object will have to help answer {quoted}."
+                if en
+                else f"好，就让每件展品都来回答{quoted}。"
+            )
+        else:
+            reply = "Then I'll lead the way." if en else "好，那这条线由我来带。"
+    elif asked == InterviewQuestionId.NEGOTIATION.value:
+        if free_text:
+            reply = f"Good, we'll go with {quoted}." if en else f"好，改成{quoted}。"
+        elif (answer_value or "").startswith(RECOMMENDED_QUESTION_PREFIX):
+            reply = "Good, we'll go with that question." if en else "好，就换成这个问题。"
+        elif answer_label:
+            reply = f"Good: {answer_label}." if en else f"好，{answer_label}。"
+        else:
+            reply = None
+    elif asked == InterviewQuestionId.EXCLUSIONS.value:
+        excluded = (answer_label or "").strip()
+        nothing = {"没有", "Nothing", "跳过", "Skipped", ""}
+        if excluded in nothing:
+            reply = "Right, I'll start building your room." if en else "好，我这就开始搭展厅。"
+        else:
+            reply = (
+                f"Right, I'll keep {excluded} out and start building your room."
+                if en
+                else f"好，我会避开{excluded}，这就开始搭展厅。"
+            )
+    else:
+        reply = None
+
+    reply = _clean_reply(reply, language=language) if reply else None
+
+    if en:
         suggestion_subject = subject or "this subject"
         suggestions = (
             f"How did different cultures use {suggestion_subject}?",
@@ -223,24 +397,6 @@ def compose_immediate(
             f"Which object most changes how we understand {suggestion_subject}?",
         )
     else:
-        quoted = f"“{anchor}”" if anchor else "你的问题"
-        if scope_is_open:
-            reply = f"我先把{quoted}记作偏好，不把它当作已经明确的主题或事实结论。"
-        elif skipped:
-            reply = f"我会保留{quoted}这条主线，把刚才跳过的选择留白。"
-        elif asked in {
-            InterviewQuestionId.CURIOSITY.value,
-            InterviewQuestionId.CUSTOM_QUESTION.value,
-            InterviewQuestionId.OPEN_QUESTION.value,
-        }:
-            reply = f"我会把{quoted}作为主线，让每件展品都帮助回答它。"
-        elif asked == InterviewQuestionId.DURATION.value:
-            reply = f"我会把{quoted}收束成一条在所选时长内走得完的线。"
-        elif asked == InterviewQuestionId.EXCLUSIONS.value:
-            reply = f"我会保留{quoted}这条主线，同时避开你不想看的内容。"
-        else:
-            reply = f"我会围绕{quoted}调整讲解深度，不会换掉你的问题。"
-        reply = _clean_reply(reply, language=language)
         suggestion_subject = subject or "这些藏品"
         suggestions = (
             f"不同文化怎样围绕{suggestion_subject}形成不同做法？",

@@ -812,7 +812,7 @@ FRAME_PROMPT = """你是 AI 策展人“彦远”的策展编辑系统，为一�
 展品的共同点不能靠题材名称概括出来；bigIdea 可以提出具体观看问题，不能宣称每件都表现同一现象。
 keyMessages 只写所给记录真正支持的要点。作者国籍、创作地、画中地点、收藏地分别处理，不相互代替。
 参观者面向中文读者，不能把收藏机构所在城市称作“本地”或假设访客有当地生活经验。
-selectionRationale 说明本件有哪些已记录信息与原题相关；relation 采用具体的比较邀请，而非预先断言两件的差异或影响。
+selectionRationale 说明本件有哪些已记录信息与原题相关。relation 是参观者从上一件走到这一件时的一句提示：点出这一件自己值得看的一处具体东西（一种材料、一个画面元素、一种用途或一条记录）；只有双方记录都支持时，才写两件之间的具体差别，而且直接说差别是什么。不要把每件都写成比较：不用“与前面的……相比”“你可以比较”“对比一下”这类句式，全部 relation 里“比较”“对比”“相比”合计最多出现一次。
 如果没有同时引用双方来源，不写“比前一件更早、更轻、更密集”等结论；也不要用“可能”保留这些无据结论。
 未提供图片，不描写没有文字记录的视角、人物动作或构图细节；可以邀请参观者在相应对象中观察，但不能预设已经看到了什么。
 保留简洁、有主题的标题和章节名；无需把所有地点、年代、媒介塞进副标题。每段都推动原问题，不反复宣称“跨越时空”“不同审美”。
@@ -840,6 +840,7 @@ selectionRationale 说明本件有哪些已记录信息与原题相关；relatio
 5. 不得出现“作为引入／核心证据／对照／综合”“承担……角色”“承接前文”“铺垫后文”“推进叙事”“呼应开篇”“收束本章”“两条线索在此汇合”等内部编排语言。
 6. 避免无信息的三项排比，以及反复使用“既……又……”“不是……而是……”“可以被读作”。每句话必须增加一个具体信息。
 7. 不把“馆方未说明”当作默认安全话术。只在核对所给来源后确实无法确认时说明“本次提供的记录未能确认……”，不能因片段未提及就断言馆方全部记录均未说明。
+8. 也不把“可以比较”“形成对照”当作安全话术。证据不够下结论时，指出这一件上一处具体可看的东西，比泛泛地请人去比较有用。
 
 先完成结构化 curatorialBrief，再据此写展览框架；不要写展签。输出单个 JSON 对象：
 {
@@ -849,7 +850,7 @@ selectionRationale 说明本件有哪些已记录信息与原题相关；relatio
     "bigIdea": {"text": 一句话可讨论的策展命题, "evidenceIds": [...], "confidence": "supported|provisional|uncertain"},
     "keyMessages": [{"text": 支撑命题的分论点, "evidenceIds": [...], "confidence": "supported|provisional|uncertain"}],
     "criticalQuestions": [2-4 个关键问题],
-    "objects": [{"objectId": 输入objectId, "role": 输入role, "selectionRationale": 面向访客的一句具体入选理由, "relation": 可与前后展品比较的具体差异, "evidenceIds": [...]}],
+    "objects": [{"objectId": 输入objectId, "role": 输入role, "selectionRationale": 面向访客的一句具体入选理由, "relation": 走到这一件时该留意的一处具体东西（一句）, "evidenceIds": [...]}],
     "evaluationTargets": [{"statement": 访客可理解或专业审阅的具体目标, "method": "visitor_prompt|comprehension_check|expert_review"}]
   },
   "chapters": [{"title": 章节名 4-10 字, "leadIn": 章节引导语 40-90 字}],
@@ -931,6 +932,7 @@ Public voice:
 5. Do not expose process language such as "opening object", "core evidence", "advances the narrative", "echoes the opening" or "brings the chapter to a close".
 6. Avoid empty triads and repeated "not X but Y" constructions. Every sentence must add a concrete detail.
 7. Do not use "the institution record does not say" as a default safety phrase. Only after checking the supplied sources may you state that these excerpts do not establish something; do not infer silence across all institution records from a limited excerpt.
+8. Nor use "compare" or "contrast" as a safety phrase. relation is one sentence on a specific thing to notice in this object as the visitor arrives from the previous one; state a difference between the two only when both records support it, and then say what the difference is. Across all relations, "compare", "contrast" and "in comparison" may appear at most once.
 
 Write the structured curatorialBrief first, then the exhibition frame from it. Do not write labels. Output a single JSON object:
 {
@@ -940,7 +942,7 @@ Write the structured curatorialBrief first, then the exhibition frame from it. D
     "bigIdea": {"text": one arguable curatorial proposition in a sentence, "evidenceIds": [...], "confidence": "supported|provisional|uncertain"},
     "keyMessages": [{"text": a supporting sub-argument, "evidenceIds": [...], "confidence": "supported|provisional|uncertain"}],
     "criticalQuestions": [2-4 critical questions],
-    "objects": [{"objectId": input objectId, "role": input role, "selectionRationale": one visitor-readable concrete reason for inclusion, "relation": a concrete difference that can be compared with adjacent objects, "evidenceIds": [...]}],
+    "objects": [{"objectId": input objectId, "role": input role, "selectionRationale": one visitor-readable concrete reason for inclusion, "relation": one sentence on a specific thing to notice in this object, "evidenceIds": [...]}],
     "evaluationTargets": [{"statement": a concrete target a visitor could recognise or a specialist could review, "method": "visitor_prompt|comprehension_check|expert_review"}]
   },
   "chapters": [{"title": chapter title, 2-5 words, "leadIn": chapter lead-in, 25-55 words}],
@@ -1061,8 +1063,9 @@ def frame_payload(
             "culture": item.object.culture,
             "role": item.role,
             "roleLabel": item.role_label,
-            "currentSelectionRationale": item.why_selected,
-            "currentRelation": item.relation,
+            # The deterministic whySelected/relation placeholders are not sent:
+            # the model copied them verbatim onto every object, which is how
+            # one generic "先比较年代、材料……" line filled whole exhibitions.
             "evidence": [
                 {
                     "id": chunk.id,
@@ -1711,6 +1714,103 @@ def apply_localized_metadata(
         item.localized_metadata = item.localized_metadata.model_copy(update=updates)
         applied += 1
     return applied
+
+
+TOMBSTONES_PROMPT = """你是博物馆的中文著录编辑。为输入的每件展品写中文展品名，并把著录字段逐字段译成简体中文。只做翻译，不写解读。
+
+展品名：displayTitle 必须是简洁的中文展品名。
+  · 若 titleOriginal 已是中文，直接沿用；
+  · 否则把英文题名意译成中文，不要音译，不要保留英文或拉丁字母，保留原题里的全部阿拉伯数字；
+  · 不得添加题名里没有的人名、地名、年代或解释；拿不准时输出空字符串。
+
+著录译文：localizedMetadata 只翻 creator、date、medium、culture、institution。
+  · 每个字段同时原样回传 sourceValue（逐字符等于输入的同名字段），译文放在 zh；
+  · 原字段为空时对应字段也为空；不得新增人名、数字、年代、地域、材质或机构；
+  · 保留全部阿拉伯数字；BCE/BC 译为“公元前”，CE/AD 译为“公元”；
+  · 不要夹带英文原文或拉丁字母括注；不确定时输出空字符串。
+
+必须为每件展品输出一条记录，objectId 原样返回。只输出一个 JSON 对象：
+{"items": [{"objectId": ..., "displayTitle": 中文展品名,
+  "localizedMetadata": {
+    "creator": {"sourceValue": ..., "zh": ...}, "date": {"sourceValue": ..., "zh": ...},
+    "medium": {"sourceValue": ..., "zh": ...}, "culture": {"sourceValue": ..., "zh": ...},
+    "institution": {"sourceValue": ..., "zh": ...}}}]}"""
+
+
+def tombstones_payload(items: list[ExhibitionItem]) -> dict[str, Any]:
+    """Only the catalogue fields being translated; no evidence, no brief."""
+
+    return {
+        "items": [
+            {
+                "objectId": item.object.id,
+                "title": item.object.title,
+                "titleOriginal": item.object.title_original,
+                **{field: _source_metadata(item, field) for field in _LOCALIZED_METADATA_FIELDS},
+            }
+            for item in items
+        ]
+    }
+
+
+def public_chinese_title(text: str | None) -> bool:
+    """Whether a title can head a Chinese label: Chinese and no Latin script."""
+
+    value = (text or "").strip()
+    return bool(re.search(r"[\u3400-\u9fff]", value)) and not re.search(r"[A-Za-z]", value)
+
+
+def apply_tombstone_translations(
+    items: list[ExhibitionItem],
+    output: dict[str, Any],
+) -> int:
+    """Fill a Chinese title and tombstone fields that the label pass left empty.
+
+    The label pass translates alongside writing, so a label timeout or failed
+    review used to take the Chinese title with it and a label headed "这件展品"
+    reached the hall. This separate, text-only translation only fills gaps:
+    anything the reviewed label pass already set is kept. Fields go through
+    the same source-bound validation as label translations; a title must be
+    Chinese, carry no Latin script and keep the original's numerals.
+    """
+
+    raw_items = output.get("items")
+    if not isinstance(raw_items, list):
+        return 0
+    by_object = {item.object.id: item for item in items}
+    filled = 0
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        item = by_object.get(str(raw.get("objectId", "")))
+        if item is None:
+            continue
+        changed = False
+        if not public_chinese_title(item.display_title):
+            title = to_simplified(str(raw.get("displayTitle") or "").strip()).strip("《》「」 ")
+            if (
+                public_chinese_title(title)
+                and len(title) <= 40
+                and re.findall(r"\d+", title) == re.findall(r"\d+", item.object.title or "")
+            ):
+                item.display_title = title
+                changed = True
+        localized = raw.get("localizedMetadata")
+        if isinstance(localized, dict):
+            updates: dict[str, str] = {}
+            for field in _LOCALIZED_METADATA_FIELDS:
+                if getattr(item.localized_metadata, field, ""):
+                    continue
+                accepted = _validated_chinese_metadata(
+                    _source_metadata(item, field), localized.get(field), field,
+                )
+                if accepted:
+                    updates[field] = accepted
+            if updates:
+                item.localized_metadata = item.localized_metadata.model_copy(update=updates)
+                changed = True
+        filled += changed
+    return filled
 
 
 def apply_labels(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { answerInterview, startInterview } from "@/lib/api";
+import { answerInterview, resolveObjectImageUrl, startInterview } from "@/lib/api";
 import type { InterviewAnswerInput, InterviewState } from "@/lib/types";
 import { fill } from "@/lib/i18n";
 import { useLanguage } from "@/lib/useLanguage";
@@ -121,43 +121,76 @@ export function CuratorChat({
     </form>
   ) : null;
 
+  // Options that start from a specific collection object are shown as the
+  // object, not as another line of text: the point is to see it first.
+  const objectOptions = question?.options.filter((option) => option.objectId) ?? [];
+  const textOptions = question?.options.filter((option) => !option.objectId) ?? [];
+
   const optionControls = question && question.options.length > 0 ? (
     <>
-      <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
-        {question.options.map((option) => {
-          const selected = multiSelected.includes(option.value);
-          return (
+      {objectOptions.length > 0 && (
+        <div className={styles.objectGrid} role="group" aria-label={t.chat.answerGroup}>
+          {objectOptions.map((option) => (
             <button
               key={option.value}
               type="button"
-              className={selected ? styles.optionSelected : styles.option}
-              aria-pressed={question.multiSelect ? selected : undefined}
+              className={styles.objectOption}
               disabled={busy}
-              onClick={() => {
-                if (question.multiSelect) {
-                  // "Nothing in particular" is a complete, exclusive answer,
-                  // not one more topic to add before pressing Confirm.
-                  if (option.value === "none") {
-                    setMultiSelected([]);
-                    void send({ questionId: question.id, value: option.value });
-                    return;
-                  }
-                  setMultiSelected((current) =>
-                    current.includes(option.value)
-                      ? current.filter((value) => value !== option.value)
-                      : [...current.filter((value) => value !== "none"), option.value],
-                  );
-                  return;
-                }
-                void send({ questionId: question.id, value: option.value });
-              }}
+              onClick={() => void send({ questionId: question.id, value: option.value })}
             >
+              <span className={styles.objectImage}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- collection image proxy, sized server-side */}
+                <img
+                  src={resolveObjectImageUrl(option.objectId as string, 512)}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  onError={(event) => { event.currentTarget.hidden = true; }}
+                />
+              </span>
               <strong>{option.label}</strong>
               {option.hint && <small>{option.hint}</small>}
             </button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
+      {textOptions.length > 0 && (
+        <div className={styles.optionGrid} role="group" aria-label={t.chat.answerGroup}>
+          {textOptions.map((option) => {
+            const selected = multiSelected.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={selected ? styles.optionSelected : styles.option}
+                aria-pressed={question.multiSelect ? selected : undefined}
+                disabled={busy}
+                onClick={() => {
+                  if (question.multiSelect) {
+                    // "Nothing in particular" is a complete, exclusive answer,
+                    // not one more topic to add before pressing Confirm.
+                    if (option.value === "none") {
+                      setMultiSelected([]);
+                      void send({ questionId: question.id, value: option.value });
+                      return;
+                    }
+                    setMultiSelected((current) =>
+                      current.includes(option.value)
+                        ? current.filter((value) => value !== option.value)
+                        : [...current.filter((value) => value !== "none"), option.value],
+                    );
+                    return;
+                  }
+                  void send({ questionId: question.id, value: option.value });
+                }}
+              >
+                <strong>{option.label}</strong>
+                {option.hint && <small>{option.hint}</small>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {question.multiSelect && (
         <button
           type="button"

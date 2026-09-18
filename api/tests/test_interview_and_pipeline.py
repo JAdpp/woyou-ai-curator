@@ -80,17 +80,13 @@ def _answer_interview(
     return response.json()
 
 
-def test_open_semantic_interview_names_the_provisional_audit_choice(
+def test_provisional_audit_is_mentioned_not_offered_as_a_choice(
     client: TestClient,
     monkeypatch,
 ) -> None:
-    from app.generator import AgenticRetrievalOutcome, ExhibitionGenerator
-    from app.interview import FREE_TEXT_VALUE, InterviewService
-    from app.models import (
-        InterviewAnswer,
-        InterviewQuestionId,
-        InterviewState,
-    )
+    from app.generator import ExhibitionGenerator
+    from app.interview import InterviewService
+    from app.models import InterviewQuestionId, InterviewState, InterviewTurn
 
     repository = client.app.state.collections
     collection = repository.get()
@@ -123,20 +119,28 @@ def test_open_semantic_interview_names_the_provisional_audit_choice(
         profile=VisitorProfile(freeFormQuestion=original, durationMinutes=5),
     )
 
-    question = service._negotiation_question(state, collection)
+    # Candidates still await the per-object audit, but that runs during
+    # curation regardless; the visitor has nothing to decide about it.
+    assert service._negotiation_question(state, collection) is None
+    assert "逐件核对" in (state.negotiation_note or "")
 
-    assert question is not None
-    assert question.id == InterviewQuestionId.NEGOTIATION
-    assert question.options[0].value == FREE_TEXT_VALUE
-    assert question.options[0].label == "按原问题做语义核查"
-    assert "不能把近邻直接当成答案" in question.prompt
-
-    state.next_question = question
-    updated = service.answer(
-        state,
-        InterviewAnswer(questionId=InterviewQuestionId.NEGOTIATION, value=FREE_TEXT_VALUE),
-    )
-    assert updated.profile.to_agenda(collection.id).question == original
+    state.negotiation_note = None
+    state.transcript = [
+        InterviewTurn(questionId=question_id, prompt="")
+        for question_id in (
+            InterviewQuestionId.CURIOSITY,
+            InterviewQuestionId.MOTIVATION,
+            InterviewQuestionId.PRIOR_KNOWLEDGE,
+            InterviewQuestionId.DURATION,
+        )
+    ]
+    last = service._next(state, collection)
+    assert last is not None and last.id == InterviewQuestionId.EXCLUSIONS
+    # Said in passing with the last question, which is still step 5 of 5.
+    assert last.prompt.startswith("我在馆藏里先找到了一批可能相关的藏品")
+    assert last.prompt.endswith("最后一个：有什么是你不太想看到的？")
+    assert (last.step, last.total_steps) == (5, 5)
+    assert state.profile.to_agenda(collection.id).question == original
 
 
 def test_negotiation_changes_the_active_retrieval_question(
@@ -259,7 +263,7 @@ def test_out_of_domain_negotiation_does_not_offer_unrelated_rich_domains(
     assert {option.value for option in question.options}.isdisjoint(
         {"global:daily-life", "global:making-material"}
     )
-    assert "不会拿馆藏量大的无关门类" in question.prompt
+    assert "不想拿不相干的东西凑数" in question.prompt
     assert question.options[0].value == f"{RECOMMENDED_QUESTION_PREFIX}{reviewed}"
 
     state.next_question = question
@@ -341,6 +345,7 @@ def test_interview_never_promises_runtime_audit_when_capability_is_unavailable(
         return SimpleNamespace(
             status="unsupported",
             requires_runtime_audit=False,
+            decision_basis="audit_unavailable",
             coverage=SimpleNamespace(evidence_domain_ids=[]),
             recommended_questions=[],
         )
@@ -364,6 +369,9 @@ def test_interview_never_promises_runtime_audit_when_capability_is_unavailable(
     assert seen == {"audit_available": False}
     assert question is not None
     assert all(option.label != "按原问题做语义核查" for option in question.options)
+    # An audit outage is not an empty collection, and must not be told as one.
+    assert "服务暂时连不上" in question.prompt
+    assert "没找到" not in question.prompt
 
 
 def test_initial_free_text_question_is_not_asked_again_even_for_explorer(
@@ -643,8 +651,12 @@ def test_curator_replies_keep_dog_and_cobalt_questions_in_context(
     client: TestClient,
     monkeypatch,
 ) -> None:
-    from app import interview_voice
+    from app import interview, interview_voice
 
+    monkeypatch.setattr(interview, "MIN_DOMAIN_OBJECTS", 1)
+    collection = client.app.state.collections.get()
+    for obj in collection.objects:
+        obj.evidence_domain_ids = ["global:making-material"]
     original_compose = interview_voice.compose_immediate
     seen_questions: list[str] = []
 
@@ -667,14 +679,18 @@ def test_curator_replies_keep_dog_and_cobalt_questions_in_context(
         state = _answer_interview(client, state, freeText=question)
         assert keyword in state["transcript"][-1]["curatorReply"]
 
-        # Later answers carry no free text of their own. The reply must still
-        # use the complete visitor-authored question as its source context,
-        # rather than falling back to an automatically selected domain.
+        # Later replies answer the choice just made instead of reading the
+        # question back every turn, but the complete visitor-authored question
+        # stays their source context and an inferred domain never replaces it.
         state = _answer_interview(client, state, value="professional")
-        assert keyword in state["transcript"][-1]["curatorReply"]
+        assert "术语" in state["transcript"][-1]["curatorReply"]
         state = _answer_interview(client, state, value="some")
-        assert keyword in state["transcript"][-1]["curatorReply"]
+        assert "常识" in state["transcript"][-1]["curatorReply"]
         assert seen_questions[before:] == [question, question, question]
+        assert all(
+            "材料与制作" not in (turn["curatorReply"] or "")
+            for turn in state["transcript"]
+        )
 
 
 def test_non_explorer_topic_path_keeps_one_later_open_question(

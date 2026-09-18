@@ -1211,6 +1211,9 @@ class ErrorDetail(ApiModel):
 
 class InterviewQuestionId(str, Enum):
     CURIOSITY = "curiosity"
+    # Only for a visitor who opened without a subject: the curator introduces
+    # the collection and offers a few hand-picked starting objects.
+    FEATURED = "featured"
     MOTIVATION = "motivation"
     CUSTOM_QUESTION = "custom_question"
     PRIOR_KNOWLEDGE = "prior_knowledge"
@@ -1224,6 +1227,9 @@ class InterviewOption(ApiModel):
     value: str
     label: str
     hint: str | None = None
+    # A collection object to show on the option, for choices that start from
+    # a specific piece rather than a topic.
+    object_id: str | None = None
 
 
 class InterviewQuestion(ApiModel):
@@ -1266,8 +1272,10 @@ class InterviewState(ApiModel):
     profile: VisitorProfile = Field(default_factory=VisitorProfile)
     transcript: list[InterviewTurn] = Field(default_factory=list)
     next_question: InterviewQuestion | None = None
-    # Set when the corpus cannot fully answer a free-form question, so the agent
-    # negotiates in conversation instead of refusing (01b decision C).
+    # What the curator said after checking the question against the corpus:
+    # either the coverage gap it negotiates in conversation instead of refusing
+    # (01b decision C), or a heads-up that the candidates it found will still be
+    # checked object by object during curation.
     negotiation_note: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

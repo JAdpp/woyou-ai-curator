@@ -795,8 +795,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         This path is deliberately local and deterministic: the next question
         must not wait on an AI prose call. The original visitor question is
-        carried into every reply so an automatically inferred domain can never
-        replace it conversationally.
+        the context of every reply, so an automatically inferred domain can
+        never replace it conversationally.
         """
         turn = state.transcript[-1]
         next_question = state.next_question
@@ -821,6 +821,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             available_domains=interviews.available_domains(collection, language),
             want_suggestions=wants_suggestions,
             language=language,
+            answer_value=turn.answer_value,
         )
         turn.curator_reply = voice.reply
         if (

@@ -15,6 +15,9 @@ Hard ceiling of seven turns, four of them required. A concrete visitor-written
 question is collected either in the opening turn or one later follow-up, never
 both. An opening with only a generic referent can use that follow-up for one
 optional scope clarification; the evidence gate remains a separate final turn.
+An opening with no subject at all ("I don't know what to ask", "you choose")
+is never stored as a question: it gets one turn of collection introduction
+and hand-picked starting objects instead (``interview_featured``).
 """
 
 from __future__ import annotations
@@ -24,7 +27,14 @@ from uuid import uuid4
 
 from . import i18n
 from .collections import CollectionRepository, LoadedCollection
-from .interview_clarification import needs_scope_clarification
+from .interview_clarification import needs_scope_clarification, undecided_opening_kind
+from .interview_featured import (
+    FEATURED_PREFIX,
+    collection_intro,
+    entry_by_id,
+    entry_for_question,
+    featured_for,
+)
 from .models import (
     AnswerabilityStatus,
     InterviewAnswer,
@@ -187,18 +197,18 @@ class InterviewService:
             id=InterviewQuestionId.CURIOSITY,
             prompt=i18n.pick(
                 language,
-                f"我是{CURATOR_NAME}，这次的 AI 策展人。先问你几个问题，"
-                "然后为你单独搭一座展厅。\n这一次，你最想看点什么？",
-                f"I'm {i18n.CURATOR_NAME_EN}, the AI curator here. A few questions "
-                "first, then I'll build you a room of your own.\n"
-                "What would you most like to look at this time?",
+                f"你好，我是“卧游”的 AI 策展人{CURATOR_NAME}。我会问你几个简单问题，"
+                "然后从我们的馆藏里为你定制一座展厅。\n你有什么最想了解的吗？",
+                f"Hello, I'm {i18n.CURATOR_NAME_EN}, Woyou's AI curator. I'll ask you a "
+                "few simple questions, then build you an exhibition room from our "
+                "collection.\nIs there anything you'd most like to know about?",
             ),
             options=options,
             allow_free_text=True,
             free_text_placeholder=i18n.pick(
                 language,
-                "或者直接告诉我你想弄懂什么…",
-                "Or just tell me what you want to understand…",
+                "想了解什么都可以说，还没想好也没关系…",
+                "Anything you're curious about — or say you're not sure yet…",
             ),
             step=1,
             # Five is the shortest real route (the visitor may type the core
@@ -206,6 +216,57 @@ class InterviewService:
             # progress indicator therefore never moves backwards from 1/6 to
             # 2/5 after the opening answer.
             total_steps=5,
+        )
+
+    def _featured_question(
+        self, state: InterviewState, collection: LoadedCollection
+    ) -> InterviewQuestion:
+        """Show the collection to a visitor who has nothing to ask yet.
+
+        Reached only when ``featured_for`` finds at least two showable
+        entries. Each card carries a question the collection has answered
+        before; the last option hands the choice back to the curator.
+        """
+        language = state.profile.language
+        options = [
+            InterviewOption(
+                value=f"{FEATURED_PREFIX}{entry.id}",
+                label=entry.title(language),
+                hint=entry.caption(language),
+                object_id=entry.object_id,
+            )
+            for entry in featured_for(collection)
+        ]
+        options.append(
+            InterviewOption(
+                value=UNSURE_VALUE,
+                label=i18n.pick(language, "还是你替我定吧", "You pick one for me"),
+                hint=i18n.pick(
+                    language,
+                    f"由{CURATOR_NAME}从这几件里挑一个开头",
+                    f"{i18n.CURATOR_NAME_EN} chooses where to start",
+                ),
+            )
+        )
+        return InterviewQuestion(
+            id=InterviewQuestionId.FEATURED,
+            prompt=collection_intro(collection, language)
+            + "\n"
+            + i18n.pick(
+                language,
+                "我先挑了几件给你看看，哪件让你想多看两眼？也可以直接告诉我你对什么感兴趣。",
+                "Here are a few I'd start with. Which one would you like a closer look at? "
+                "Or just tell me what interests you.",
+            ),
+            options=options,
+            allow_free_text=True,
+            free_text_placeholder=i18n.pick(
+                language,
+                "比如：我想看看……",
+                "For example: I'd like to see…",
+            ),
+            step=2,
+            total_steps=TOTAL_STEPS,
         )
 
     @staticmethod
@@ -412,14 +473,17 @@ class InterviewService:
         )
 
     @staticmethod
-    def _exclusions_question(language: str = "zh") -> InterviewQuestion:
+    def _exclusions_question(
+        language: str = "zh", lead: str | None = None
+    ) -> InterviewQuestion:
+        last = i18n.pick(
+            language,
+            "最后一个：有什么是你不太想看到的？",
+            "Last one: is there anything you'd rather not be shown?",
+        )
         return InterviewQuestion(
             id=InterviewQuestionId.EXCLUSIONS,
-            prompt=i18n.pick(
-                language,
-                "最后一个：有什么是你不太想看到的？",
-                "Last one: is there anything you'd rather not be shown?",
-            ),
+            prompt=f"{lead}\n{last}" if lead else last,
             options=[
                 InterviewOption(
                     value=value,
@@ -441,6 +505,14 @@ class InterviewService:
         This is decision C: the answerability gate still runs, but a visitor
         never hits a dead end. Returns ``None`` when the corpus can answer the
         question as asked.
+
+        When retrieval found candidates that still await the per-object
+        evidence audit, there is nothing for the visitor to decide: the audit
+        runs during curation either way. Asking "audit or narrow?" exposed the
+        machinery and read like a form, so that case is no longer a turn. The
+        curator says it in passing instead (``negotiation_note``, spoken with
+        the last question), which keeps the interview honest without making
+        the visitor approve an internal step.
         """
         question_text = (
             state.profile.open_question or state.profile.free_form_question or ""
@@ -448,6 +520,11 @@ class InterviewService:
         if not question_text:
             return None
         language = state.profile.language
+        if entry_for_question(question_text, language) is not None:
+            # The curator just offered this question as a starting point; it
+            # has produced an exhibition from this collection before. The
+            # generation-time evidence audit still runs.
+            return None
 
         from .generator import ExhibitionGenerator  # local import avoids a cycle
 
@@ -460,8 +537,14 @@ class InterviewService:
             )
         except Exception:  # noqa: BLE001 - probing must never break the interview
             return None
-        provisional = bool(check.requires_runtime_audit)
-        if check.status == AnswerabilityStatus.SUPPORTED.value and not provisional:
+        if check.status == AnswerabilityStatus.SUPPORTED.value:
+            if check.requires_runtime_audit:
+                state.negotiation_note = i18n.pick(
+                    language,
+                    "我在馆藏里先找到了一批可能相关的藏品，搭展厅时会逐件核对馆方记录，对不上的会拿掉。",
+                    "I've found a first set of possibly relevant objects; while building the room "
+                    "I'll check each against the museum's record and drop any that don't hold up.",
+                )
             return None
 
         # A negotiation may only offer domains that overlap this question's
@@ -474,124 +557,101 @@ class InterviewService:
             for domain in self._available_domains(collection, language)
             if domain[0] in evidence_domain_ids
         ][:3]
-        reviewed_alternatives = [
-            question
+        # Prefer the hand-picked featured questions: they are in a visitor's
+        # voice and were checked against this collection. The probe's question
+        # cards ("不同文化如何把自然景观变成……") read like a syllabus.
+        featured = [
+            (entry.question(language), entry.title(language))
+            for entry in featured_for(collection)
+            if entry.question(language) != question_text
+        ][:2]
+        reviewed_alternatives = featured or [
+            (question, question)
             for question in check.recommended_questions
             if question.strip() and question.strip() != question_text
         ][:2]
+        limit = 90 if language == "en" else 40
+        quoted = question_text if len(question_text) <= limit else question_text[: limit - 1] + "…"
 
-        alternative_options = [
+        options = [
+            InterviewOption(
+                value=domain_id,
+                label=i18n.pick(language, f"从「{label}」看起", f"Start from “{label}”"),
+                hint=hint,
+            )
+            for domain_id, label, hint in available
+        ] + [
             InterviewOption(
                 value=f"{RECOMMENDED_QUESTION_PREFIX}{question}",
-                label=i18n.pick(
-                    language,
-                    f"换成已审定问题：{question}",
-                    f"Switch to a reviewed question: {question}",
-                ),
+                label=label,
                 hint=i18n.pick(
                     language,
-                    "这是另一个可回答的问题，不是原问题的替代证据",
-                    "This is a different answerable question, not evidence for the original",
+                    "馆藏能回答的另一个问题",
+                    "A different question the collection can answer",
                 ),
             )
-            for question in reviewed_alternatives
+            for question, label in reviewed_alternatives
         ]
-        if language == "en" and provisional:
-            state.negotiation_note = (
-                f"For “{question_text}”, semantic search found promising collection "
-                "candidates, but similarity is only recall: Yan Yuan still needs "
-                "to verify each object against its institution record."
+        audit_down = getattr(check, "decision_basis", None) == "audit_unavailable"
+        if audit_down:
+            # Saying "the collection has nothing" here would be false: the
+            # service that checks candidates is down, not the collection empty.
+            state.negotiation_note = i18n.pick(
+                language,
+                f"关于“{quoted}”，我这边核对馆藏记录的服务暂时连不上，现在没法确认馆藏能不能回答它。",
+                f"For “{quoted}”, the service I use to check museum records isn't reachable right now, "
+                "so I can't yet confirm whether the collection can answer it.",
             )
-            options = [
-                InterviewOption(
-                    value=FREE_TEXT_VALUE,
-                    label="Audit my question as written",
-                    hint="Keep the wording; reject weak nearest neighbours before curation",
-                ),
-                *[
-                    InterviewOption(
-                        value=domain_id,
-                        label=f"Narrow to “{label}”",
-                        hint=hint,
-                    )
-                    for domain_id, label, hint in available
-                ],
-            ]
-            prompt = f"{state.negotiation_note}\nWould you like the audit or a narrower route?"
+            follow_up = i18n.pick(
+                language,
+                "可以稍后再试；也可以换个问法，或从下面挑一个。"
+                if options
+                else "可以稍后再试，或者换个问法。",
+                "You could try again shortly, put it another way, or pick one below."
+                if options
+                else "You could try again shortly, or put it another way.",
+            )
         elif language == "en":
             if available:
-                covered = " and ".join(label for _id, label, _hint in available[:2])
+                covered = " and ".join(f"“{label}”" for _id, label, _hint in available[:2])
                 state.negotiation_note = (
-                    f"For “{question_text}”, the evidence directly retrieved so far "
-                    f"overlaps with {covered}, but does not support the whole question."
+                    f"For “{quoted}”, the objects that match directly aren't enough to fill a "
+                    f"room, but there is related material under {covered}."
                 )
             else:
                 state.negotiation_note = (
-                    f"For “{question_text}”, the collection does not currently yield "
-                    "a defensible evidence chain. I will not substitute an unrelated "
-                    "high-volume category."
+                    f"For “{quoted}”, I haven't found enough objects that really match, and "
+                    "I'd rather not pad the room with unrelated ones."
                 )
-            options = [
-                InterviewOption(value=domain_id, label=f"Go in through “{label}”", hint=hint)
-                for domain_id, label, hint in available
-            ] + alternative_options
-            prompt = (
-                f"{state.negotiation_note}\nChoose an explicitly different reviewed "
-                "question, a related evidence route, or rewrite your question."
+            follow_up = (
+                "Want to come at it from another angle? Pick one below, or put the question another way."
+                if options
+                else "Could you put it another way? Something more specific helps: one kind of object, a period or a place."
             )
-        elif provisional:
-            state.negotiation_note = (
-                f"关于“{question_text}”，语义检索已经找到一批可能相关的馆藏候选；"
-                "但相似度只负责召回，彦远还需要逐件核对馆方证据，不能把近邻直接当成答案。"
-            )
-            options = [
-                InterviewOption(
-                    value=FREE_TEXT_VALUE,
-                    label="按原问题做语义核查",
-                    hint="保留原问法；策展前逐件审核，弱相关近邻会被剔除",
-                ),
-                *[
-                    InterviewOption(
-                        value=domain_id,
-                        label=f"收窄到「{label}」",
-                        hint=hint,
-                    )
-                    for domain_id, label, hint in available
-                ],
-            ]
-            prompt = f"{state.negotiation_note}\n你想先核查原问题，还是收窄方向？"
         else:
             if available:
-                covered = "、".join(label for _id, label, _hint in available[:2])
+                covered = "、".join(f"「{label}」" for _id, label, _hint in available[:2])
                 state.negotiation_note = (
-                    f"关于“{question_text}”，当前直接召回的证据与{covered}有交集，"
-                    "但还不能支撑完整问题。"
+                    f"关于“{quoted}”，馆里能直接对上的藏品还不够撑起一整个展厅，"
+                    f"不过在{covered}这些方向上有一些相关的东西。"
                 )
             else:
                 state.negotiation_note = (
-                    f"关于“{question_text}”，当前馆藏还没有形成可靠的证据链；"
-                    "我不会拿馆藏量大的无关门类替代你的问题。"
+                    f"关于“{quoted}”，我在馆藏里还没找到足够能对上的藏品，也不想拿不相干的东西凑数。"
                 )
-            options = [
-                InterviewOption(value=domain_id, label=f"从「{label}」进去", hint=hint)
-                for domain_id, label, hint in available
-            ] + alternative_options
-            prompt = (
-                f"{state.negotiation_note}\n你可以明确换成另一个已审定问题、"
-                "选择有证据交集的方向，或直接改写问题。"
+            follow_up = (
+                "要不要换个角度？可以从下面挑一个，也可以换个问法告诉我。"
+                if options
+                else "能换个问法吗？说得具体一点会更好找，比如一种物件、一个时代或一个地方。"
             )
         return InterviewQuestion(
             id=InterviewQuestionId.NEGOTIATION,
-            prompt=prompt,
+            prompt=f"{state.negotiation_note}\n{follow_up}",
             options=options,
-            allow_free_text=not provisional,
-            free_text_placeholder=(
-                "Rewrite the question you want audited…"
-                if language == "en"
-                else "换一种更具体的问法……"
-            )
-            if not provisional
-            else None,
+            allow_free_text=True,
+            free_text_placeholder=i18n.pick(
+                language, "换一种更具体的问法……", "Put it another way…"
+            ),
             step=4,
             total_steps=TOTAL_STEPS,
         )
@@ -629,6 +689,15 @@ class InterviewService:
             # keep the input-only question active until it has an answer.
             return state
 
+        if (
+            current.id == InterviewQuestionId.FEATURED
+            and not (answer.free_text or "").strip()
+            and answer.value not in {option.value for option in current.options}
+        ):
+            # The featured turn has no skip: an unknown card id would
+            # otherwise record an empty turn and leave the visit subjectless.
+            return state
+
         turn = InterviewTurn(
             question_id=answer.question_id,
             prompt=current.prompt,
@@ -656,7 +725,16 @@ class InterviewService:
         language = profile.language
 
         if question_id == InterviewQuestionId.CURIOSITY:
-            if free_text:
+            undecided = (answer.value == UNSURE_VALUE and not free_text) or bool(
+                free_text and undecided_opening_kind(free_text)
+            )
+            if undecided and self._can_feature(collection):
+                # Nothing to curate from yet. The next turn shows the
+                # collection; nothing about this answer becomes a question.
+                turn.answer_label = free_text[:60] if free_text else i18n.pick(
+                    language, "由策展人推荐", "Curator's pick"
+                )
+            elif free_text and not undecided:
                 profile.free_form_question = free_text[:500]
                 matched = self._match_domain(free_text, collection)
                 if matched:
@@ -670,12 +748,42 @@ class InterviewService:
                 )[0]
                 turn.answer_label = profile.curiosity_label
             else:
-                # "Recommend something" -> take the richest routable domain.
+                # "Recommend something" with no featured objects to show (a
+                # small test or legacy collection): take the richest routable
+                # domain so the interview can keep moving.
                 available = self._available_domains(collection, language)
                 if available:
                     profile.curiosity_domain_id = available[0][0]
                     profile.curiosity_label = available[0][1]
-                turn.answer_label = i18n.pick(language, "由策展人推荐", "Curator's pick")
+                turn.answer_label = (
+                    free_text[:60]
+                    if free_text
+                    else i18n.pick(language, "由策展人推荐", "Curator's pick")
+                )
+
+        elif question_id == InterviewQuestionId.FEATURED:
+            entry = None
+            if free_text and not undecided_opening_kind(free_text):
+                profile.free_form_question = free_text[:500]
+                matched = self._match_domain(free_text, collection)
+                if matched:
+                    profile.curiosity_domain_id = matched
+                    profile.curiosity_label = domain_choices_for(collection, language)[matched][0]
+                turn.answer_label = free_text[:60]
+            elif free_text or answer.value == UNSURE_VALUE:
+                # Asked twice and still undecided: the curator chooses, as a
+                # person showing someone round would.
+                entry = featured_for(collection)[0]
+                turn.answer_label = free_text[:60] if free_text else i18n.pick(
+                    language, "你替我定", "You choose"
+                )
+            else:
+                entry = entry_by_id((answer.value or "")[len(FEATURED_PREFIX):])
+                turn.answer_label = entry.title(language) if entry else None
+            if entry is not None:
+                profile.free_form_question = entry.question(language)
+                profile.curiosity_domain_id = None
+                profile.curiosity_label = ""
 
         elif question_id == InterviewQuestionId.MOTIVATION:
             if answer.value in {item.value for item in VisitorMotivation}:
@@ -754,7 +862,8 @@ class InterviewService:
                 profile.open_question = reviewed_question
                 profile.curiosity_domain_id = None
                 profile.curiosity_label = ""
-                turn.answer_label = reviewed_question[:60]
+                entry = entry_for_question(reviewed_question, language)
+                turn.answer_label = (entry.title(language) if entry else reviewed_question)[:60]
             elif answer.value and answer.value != FREE_TEXT_VALUE:
                 profile.curiosity_domain_id = answer.value
                 profile.curiosity_label = domain_choices_for(collection, language).get(
@@ -767,8 +876,8 @@ class InterviewService:
                 profile.open_question = profile.curiosity_label
                 turn.answer_label = i18n.pick(
                     language,
-                    f"从「{profile.curiosity_label}」进去",
-                    f"Through “{profile.curiosity_label}”",
+                    f"从「{profile.curiosity_label}」看起",
+                    f"Start from “{profile.curiosity_label}”",
                 )
             else:
                 turn.answer_label = i18n.pick(
@@ -837,8 +946,18 @@ class InterviewService:
             (state.profile.open_question or state.profile.free_form_question or "").strip()
         )
         if (
+            InterviewQuestionId.FEATURED not in asked
+            and not has_specific_question
+            and self._opening_was_undecided(state)
+            and self._can_feature(collection)
+        ):
+            return self._with_progress(state, self._featured_question(state, collection))
+        if (
             InterviewQuestionId.CUSTOM_QUESTION not in asked
             and InterviewQuestionId.MOTIVATION not in asked
+            # The featured turn already offered concrete starting points; a
+            # further scope turn would push the interview past seven turns.
+            and InterviewQuestionId.FEATURED not in asked
             and needs_scope_clarification(state.profile.free_form_question or "")
         ):
             return self._with_progress(state, self._scope_clarification_question(state, collection))
@@ -869,13 +988,37 @@ class InterviewService:
                 state,
                 self.open_question_question(state.profile.curiosity_label, language=language),
             )
-        if InterviewQuestionId.NEGOTIATION not in asked:
-            negotiation = self._negotiation_question(state, collection)
-            if negotiation is not None:
-                return self._with_progress(state, negotiation)
         if InterviewQuestionId.EXCLUSIONS not in asked:
-            return self._with_progress(state, self._exclusions_question(language))
+            # The gate runs once, before the last question. Re-probing after
+            # the final answer only re-ran hybrid retrieval to no effect.
+            lead = None
+            if InterviewQuestionId.NEGOTIATION not in asked:
+                negotiation = self._negotiation_question(state, collection)
+                if negotiation is not None:
+                    return self._with_progress(state, negotiation)
+                lead = state.negotiation_note
+            return self._with_progress(state, self._exclusions_question(language, lead))
         return None
+
+    @staticmethod
+    def _can_feature(collection: LoadedCollection) -> bool:
+        return len(featured_for(collection)) >= 2
+
+    @staticmethod
+    def _opening_was_undecided(state: InterviewState) -> bool:
+        opening = next(
+            (
+                turn
+                for turn in state.transcript
+                if turn.question_id == InterviewQuestionId.CURIOSITY
+            ),
+            None,
+        )
+        if opening is None:
+            return False
+        if opening.free_text:
+            return undecided_opening_kind(opening.free_text) is not None
+        return opening.answer_value == UNSURE_VALUE
 
     def _replace_auto_domain_from_question(
         self,
@@ -891,15 +1034,7 @@ class InterviewService:
         domain explicitly selected or named in the opening turn is preserved.
         """
 
-        opening_turn = next(
-            (
-                previous
-                for previous in state.transcript
-                if previous.question_id == InterviewQuestionId.CURIOSITY
-            ),
-            None,
-        )
-        if opening_turn is None or opening_turn.answer_value != UNSURE_VALUE:
+        if not self._opening_was_undecided(state):
             return
         matched = self._match_domain(question_text, collection)
         state.profile.curiosity_domain_id = matched
@@ -929,7 +1064,14 @@ class InterviewService:
         total = 5 if opening_already_specific else TOTAL_STEPS
         if opening_already_specific and question.id == InterviewQuestionId.CUSTOM_QUESTION:
             total += 1
-        if InterviewQuestionId.NEGOTIATION in asked or state.negotiation_note:
+        if opening_already_specific and InterviewQuestionId.FEATURED in asked:
+            # The question came from the featured turn, one turn later than
+            # an opening that already carried it.
+            total += 1
+        if (
+            InterviewQuestionId.NEGOTIATION in asked
+            or question.id == InterviewQuestionId.NEGOTIATION
+        ):
             total += 1
         question.step = len(state.transcript) + 1
         question.total_steps = max(total, question.step)

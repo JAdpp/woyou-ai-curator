@@ -3577,7 +3577,7 @@ class ExhibitionGenerator:
                     self.settings.deepseek_frame_timeout_seconds,
                 )
                 frame = await self._generate_model_json(
-                    curation.frame_prompt(exhibition.agenda.language) + "\nSource boundaries apply to titles and relations too: depicted location is not maker perspective; do not substitute a famous city for the documented location or transfer a neighbouring object's city. Overlapping date intervals cannot establish earlier/later. A material inventory does not map materials to specific parts or prove how decoration was applied. No images are supplied to this frame task: do not invent detailed visible features such as facial parts, motif anatomy or construction details. Those belong to the later single-object visual label pass. Frame text should guide the visitor's comparison using documented context and questions, not anticipate what unseen pixels show. Use chapter membership exactly as supplied. If uncertain, give a neutral invitation to compare.",
+                    curation.frame_prompt(exhibition.agenda.language) + "\nSource boundaries apply to titles and relations too: depicted location is not maker perspective; do not substitute a famous city for the documented location or transfer a neighbouring object's city. Overlapping date intervals cannot establish earlier/later. A material inventory does not map materials to specific parts or prove how decoration was applied. No images are supplied to this frame task: do not invent detailed visible features such as facial parts, motif anatomy or construction details. Those belong to the later single-object visual label pass. Frame text should point the visitor to documented, concrete things to notice, not anticipate what unseen pixels show. Use chapter membership exactly as supplied. If uncertain, point to one documented detail of the object itself rather than inventing a comparison.",
                     {**curation.frame_payload(
                         plan,
                         exhibition.items,
@@ -4053,9 +4053,36 @@ class ExhibitionGenerator:
                 unavailable_label(item, missing_image=visual_provider and vision_image is None)
                 return False
 
+        async def translate_tombstones() -> dict[str, Any] | None:
+            # Shares the label stage's deadline; it must never outlive it.
+            remaining = label_deadline - perf_counter()
+            if remaining <= 0.05:
+                return None
+            try:
+                return await self._generate_model_json(
+                    curation.TOMBSTONES_PROMPT,
+                    curation.tombstones_payload(list(by_id.values())),
+                    stage="tombstones",
+                    timeout_seconds=min(20.0, remaining),
+                )
+            except Exception as error:  # noqa: BLE001 - optional; labels stand without it
+                logger.warning("tombstone translation failed (%s: %s)", type(error).__name__, error)
+                return None
+
+        # Chinese titles and tombstones must not depend on each label passing
+        # its visual review; this runs alongside and only fills what is left.
+        tombstones = (
+            asyncio.create_task(translate_tombstones())
+            if profile.language != "en"
+            else None
+        )
         results = await asyncio.gather(
             *(write(item) for item in by_id.values())
         )
+        if tombstones is not None:
+            output = await tombstones
+            if output is not None:
+                curation.apply_tombstone_translations(list(by_id.values()), output)
         return sum(1 for ok in results if ok)
 
     def _profile_skeleton(
@@ -4925,20 +4952,21 @@ class ExhibitionGenerator:
             "哪件藏品能够提供对照、限制或其他声音？",
         ]
 
+    # Deterministic floors for when the frame call fails. They used to quote
+    # the internal sub-question ("哪件藏品能够提供对照、限制或其他声音？") and
+    # tell every object to "compare", which read as boilerplate. They now say
+    # only what is true of any recorded object.
     @staticmethod
     def _why_selected(role_label: str, sub_question: str) -> str:
-        del role_label
-        return (
-            "馆方记录提供了可核对的题名、年代或材料信息，"
-            f"可用来追问：{sub_question}"
-        )
+        del role_label, sub_question
+        return "馆方记录写明了它的题名、年代和材料，都可以在“来源”里逐条核对。"
 
     @staticmethod
     def _relation(index: int, role_label: str) -> str:
         del role_label
         if index == 0:
-            return "先从一件有明确馆方记录的实物开始，确认我们究竟在比较什么。"
-        return "与前一件并看时，先比较年代、材料、用途或形象是否真的相同。"
+            return "先看清它是什么、用什么做的，再往下走。"
+        return "先读它自己的馆方记录，别急着和前一件归成一类。"
 
     @staticmethod
     def _label_sentences(

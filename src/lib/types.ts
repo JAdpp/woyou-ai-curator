@@ -23,6 +23,7 @@ export type VisitorPace = "grasshopper" | "butterfly" | "ant";
 
 export type InterviewQuestionId =
   | "curiosity"
+  | "featured"
   | "motivation"
   | "custom_question"
   | "prior_knowledge"
@@ -35,6 +36,8 @@ export interface InterviewOption {
   value: string;
   label: string;
   hint?: string | null;
+  /** A collection object shown on the option, for choices that start from one piece. */
+  objectId?: string | null;
 }
 
 export interface InterviewQuestion {

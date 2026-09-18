@@ -70,6 +70,8 @@ def test_profile_generation_passes_planned_editorial_to_all_writing_stages(clien
     monkeypatch.setattr(generator, "prepare_initial_retrieval", prepare)
     monkeypatch.setattr(provider, "generate_json", text_call)
     asyncio.run(generator.generate_from_profile(VisitorProfile(duration_minutes=5)))
+    # Tombstone translation writes no prose, so it carries no editorial context.
+    captures = [(prompt, payload) for prompt, payload in captures if prompt != curation.TOMBSTONES_PROMPT]
     assert captures
     assert all(payload["editorialConstraints"] == list(BOUNDARIES) for _prompt, payload in captures)
     assert any("publicCopyFields" in payload for _prompt, payload in captures)

@@ -154,7 +154,10 @@ def test_writer_and_critic_share_one_absolute_stage_budget(client, monkeypatch):
     original_generate = generator._generate_model_json
 
     async def tracked(*args, **kwargs):
-        budgets.append((kwargs["stage"], kwargs["timeout_seconds"], perf_counter()))
+        # The parallel tombstone translation has its own clamp to the same
+        # deadline; this test is about the writer/critic pair.
+        if kwargs["stage"] != "tombstones":
+            budgets.append((kwargs["stage"], kwargs["timeout_seconds"], perf_counter()))
         return await original_generate(*args, **kwargs)
 
     monkeypatch.setattr(generator, "_generate_model_json", tracked)
@@ -282,3 +285,63 @@ def test_shape_check_is_transactional_and_prompt_covers_nonvisual_claims(client)
     assert "Metal" in prompt and "would have held" in prompt
     assert "部位与主体归属" in prompt and "夹入 visual_observation" in prompt
     assert "localizedMetadata" in prompt and "同一件馆方原文" in prompt
+
+
+class _TombstoneProvider(_CriticProvider):
+    """A critic that can fail, plus the separate text-only tombstone pass."""
+
+    def __init__(self, *, title="金属香水瓶", **kwargs):
+        super().__init__(**kwargs)
+        self.title = title
+        self.text_calls = []
+
+    async def generate_json(self, prompt, payload):
+        self.text_calls.append((prompt, deepcopy(payload)))
+        return {"items": [{
+            "objectId": record["objectId"],
+            "displayTitle": self.title,
+            "localizedMetadata": {"medium": {"sourceValue": record["medium"], "zh": "金属"}},
+        } for record in payload["items"]]}
+
+
+def test_failed_label_still_gets_a_checked_chinese_title_and_tombstone(client):
+    exhibition, profile = _fixture(client)
+    item = exhibition.items[0]
+    provider = _TombstoneProvider(fail_review="provider")
+    count = asyncio.run(_generator(client, provider)._write_labels(exhibition, profile))
+
+    assert count == 0
+    # Never the writer draft's unreviewed "铁制香水瓶": a separate translation.
+    assert item.display_title == "金属香水瓶"
+    assert item.localized_metadata.medium == "金属"
+    prompt, payload = provider.text_calls[0]
+    assert prompt == curation.TOMBSTONES_PROMPT
+    assert set(payload["items"][0]) == {
+        "objectId", "title", "titleOriginal", "creator", "date", "medium", "culture", "institution",
+    }
+
+
+def test_tombstone_translation_never_overrides_a_reviewed_label_title(client):
+    exhibition, profile = _fixture(client)
+    provider = _TombstoneProvider(title="别的名字")
+    asyncio.run(_generator(client, provider)._write_labels(exhibition, profile))
+    assert exhibition.items[0].display_title == "金属小瓶"
+
+
+@pytest.mark.parametrize("title", ["Flask 香水瓶", "香水瓶 2 号", ""])
+def test_tombstone_title_must_be_plain_chinese_with_the_same_numerals(client, title):
+    exhibition, profile = _fixture(client)
+    item = exhibition.items[0]
+    before = item.display_title
+    provider = _TombstoneProvider(title=title, fail_review="provider")
+    asyncio.run(_generator(client, provider)._write_labels(exhibition, profile))
+    assert item.display_title == before
+
+
+def test_english_exhibitions_skip_the_tombstone_translation(client):
+    exhibition, _profile = _fixture(client)
+    provider = _TombstoneProvider(fail_review="provider")
+    asyncio.run(_generator(client, provider)._write_labels(
+        exhibition, VisitorProfile(duration_minutes=5, language="en"),
+    ))
+    assert provider.text_calls == []

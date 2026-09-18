@@ -5,6 +5,8 @@ import {
   publicInstitutionName,
   publicObjectMetadata,
   publicObjectTitle,
+  spokenObjectTitle,
+  visitorRoleTag,
 } from "./localizedMetadata";
 
 const item = {
@@ -38,11 +40,20 @@ test("Chinese public tombstone uses only localized metadata", () => {
   assert.equal(publicInstitutionName(item, "zh-CN"), "克利夫兰艺术博物馆");
 });
 
-test("Chinese public tombstone never falls back to raw English", () => {
+test("Chinese tombstone keeps English out of metadata but still names the object", () => {
   const legacy = { ...item, displayTitle: "Woman with a Dog", localizedMetadata: undefined };
-  assert.equal(publicObjectTitle(legacy, "zh-CN"), "这件展品");
+  assert.equal(publicObjectTitle(legacy, "zh-CN"), "Woman with a Dog");
+  assert.equal(spokenObjectTitle(legacy, "zh-CN"), "这件展品");
   assert.deepEqual(publicObjectMetadata(legacy, "zh-CN"), []);
   assert.equal(publicInstitutionName(legacy, "zh-CN"), "");
+});
+
+test("role tags use visitor words, never the internal curatorial role", () => {
+  const core = { ...item, role: "core_evidence", roleLabel: "核心证据" } as ExhibitionItem;
+  const contrast = { ...item, role: "contrast", roleLabel: "对照／其他声音" } as ExhibitionItem;
+  assert.equal(visitorRoleTag(core, "zh-CN"), "重点");
+  assert.equal(visitorRoleTag(contrast, "zh-CN"), "换个角度");
+  assert.equal(visitorRoleTag(contrast, "en"), "Another angle");
 });
 
 test("English exhibitions preserve the institution record", () => {
