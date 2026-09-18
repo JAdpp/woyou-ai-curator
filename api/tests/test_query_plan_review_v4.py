@@ -210,12 +210,30 @@ def test_same_source_explicit_record_scope_cannot_be_weakened_to_visual(kind):
 
 
 @pytest.mark.parametrize("kind", ["admission", "set_witness"])
-def test_record_explanation_rejects_visual_scope(kind):
+def test_record_explanation_narrows_visual_scope_instead_of_granting_or_discarding_it(kind):
     intents = [_admission(evidenceScope="institution_record")]
     intents.append(_witness() if kind == "set_witness" else _admission("i2", text="another admission"))
     fixture = _fixture(_draft(evidence_mode="record_explanation", visual_predicate_ids=()), intents=intents)
+    snapshot = deepcopy(fixture[1])
     result = _parse(fixture)
-    assert not result.reviewed
+    assert result.reviewed
+    assert fixture[1] == snapshot
+    assert result.plan.evidence_mode == "record_explanation"
+    assert result.plan.visual_predicate_ids == ()
+    assert all(row["evidenceScope"] == "institution_record" for row in result.plan.exhibition_set_requirements)
+    assert [row["evidenceScope"] for row in result.diagnostics["compiledBindings"]] == ["institution_record"] * 2
+    assert result.diagnostics["evidenceScopeNarrowings"] == [{
+        "intentId": "i2", "type": kind, "declared": "visible_features_or_record",
+        "compiled": "institution_record", "reason": "record_explanation_mode"}]
+    assert result.diagnostics["intents"][1]["evidenceScope"] == "visible_features_or_record"
+
+
+@pytest.mark.parametrize("value", ["historical_inference", "", None, [], True])
+def test_record_explanation_still_rejects_unknown_evidence_scope(value):
+    intents = [_admission(evidenceScope="institution_record"), _witness(evidenceScope=value)]
+    fixture = _fixture(_draft(evidence_mode="record_explanation", visual_predicate_ids=()), intents=intents)
+    result = _parse(fixture)
+    assert not result.reviewed and result.plan is fixture[0]
     assert result.diagnostics["reason"] == "invalid_v4_evidence_scope"
 
 

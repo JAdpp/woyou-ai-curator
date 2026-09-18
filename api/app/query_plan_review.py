@@ -578,6 +578,7 @@ def parse_query_plan_review_v4(
     preferences: list[str] = []
     bindings: list[dict[str, Any]] = []
     non_witness_annotations: list[dict[str, Any]] = []
+    scope_narrowings: list[dict[str, Any]] = []
     bound_intents: list[dict[str, Any]] = []
     original = question.strip()[:500]
     record_quotes = {
@@ -625,9 +626,16 @@ def parse_query_plan_review_v4(
                                             "value": evidence_scope, "authority": "none"})
         if kind in {"admission", "set_witness"}:
             if (not isinstance(evidence_scope, str)
-                    or evidence_scope not in {"institution_record", "visible_features_or_record"}
-                    or (mode == "record_explanation" and evidence_scope != "institution_record")):
+                    or evidence_scope not in {"institution_record", "visible_features_or_record"}):
                 return unreviewed_query_plan(draft, "invalid_v4_evidence_scope")
+            if mode == "record_explanation" and evidence_scope != "institution_record":
+                # A record plan gives images no authority; the audit already
+                # judges its predicates on records. Narrowing keeps the visitor's
+                # condition and grants nothing, whereas widening the mode or
+                # dropping the intent would change what the visitor asked.
+                scope_narrowings.append({"intentId": identifier, "type": kind, "declared": evidence_scope,
+                                         "compiled": "institution_record", "reason": "record_explanation_mode"})
+                evidence_scope = "institution_record"
             if quote in record_quotes and evidence_scope != "institution_record":
                 return unreviewed_query_plan(draft, "review_weakened_set_evidence_scope")
         binding: dict[str, Any] = {"intentId": identifier, "type": kind, "sourceQuote": quote}
@@ -690,6 +698,7 @@ def parse_query_plan_review_v4(
         "changedFields": changed_fields, "intents": bound_intents, "intentCount": len(bound_intents),
         "compiledBindings": bindings, "conditionAuthority": "single_source_intents",
         "nonWitnessAnnotations": non_witness_annotations,
+        "evidenceScopeNarrowings": scope_narrowings,
         "sourceQuotesBound": True, "declaredTargetScopesConsistent": True,
         "exhibitionSetRequirementCount": len(requirements), "editorialConstraintCount": len(editorial),
         "draftEvidenceModeChanged": draft.evidence_mode != parsed.evidence_mode,
