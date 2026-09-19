@@ -2,13 +2,15 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, type RootState } from "@react-three/fiber";
+import { PerformanceMonitor } from "@react-three/drei";
 import type { Exhibition } from "@/lib/types";
 import { logEvent } from "@/lib/api";
 import { useIsTouchPrimary, usePrefersReducedMotion } from "@/lib/useClientCapability";
 import { buildHallLayout, EYE_HEIGHT, type TourStop } from "./layout";
 import { clampStopIndex } from "./progress";
-import { FreeWalkCamera, GuidedCamera, type JoystickState } from "./Controls";
-import { HallScene } from "./Scene";
+import { CameraProbe, FreeWalkCamera, GuidedCamera, type JoystickState } from "./Controls";
+import type { CameraPose } from "./minimap";
+import { HallScene, type HallQuality } from "./Scene";
 import { HallOverlay } from "./HallOverlay";
 import { TouchJoystick } from "./TouchJoystick";
 import styles from "./hall.module.css";
@@ -46,6 +48,22 @@ export function Hall3D({
   const touchPrimary = useIsTouchPrimary();
   const [cameraArrived, setCameraArrived] = useState(reduceMotion);
   const joystick = useRef<JoystickState>({ x: 0, y: 0 });
+  const poseRef = useRef<CameraPose>({
+    x: layout.lobbyViewpoint[0],
+    z: layout.lobbyViewpoint[2],
+    forwardX: 0,
+    forwardZ: -1,
+  });
+  const [visited, setVisited] = useState<ReadonlySet<number>>(
+    () => new Set([clampStopIndex(layout.stops.length, initialStopIndex)]),
+  );
+  // Desktop keeps the object list open beside the hall; a narrow screen has
+  // no room for it, so the guide becomes a drawer that starts closed.
+  const [listOpen, setListOpen] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // The reflective floor renders the hall twice. Touch devices never get it,
+  // and a desktop that cannot hold its frame rate loses it.
+  const [quality, setQuality] = useState<HallQuality>("high");
   const visitedRef = useRef<Set<string>>(new Set());
   const canvasCleanupRef = useRef<(() => void) | null>(null);
   const runtimeFailureRef = useRef(onRuntimeFailure);
@@ -59,6 +77,7 @@ export function Hall3D({
       if (clamped === stopIndex) return;
       setCameraArrived(false);
       setStopIndex(clamped);
+      setVisited((current) => (current.has(clamped) ? current : new Set(current).add(clamped)));
       onStopChange?.(clamped);
       const next = layout.stops[clamped];
       if (next?.kind === "chapter" && next.chapterId && !visitedRef.current.has(next.chapterId)) {
@@ -93,6 +112,14 @@ export function Hall3D({
     setCameraArrived(false);
     logEvent("free_walk_entered", exhibition.id);
   }, [exhibition.id, touchPrimary]);
+
+  // From the guide or the plan: always lands in guided mode at that stop, and
+  // closes the drawer on a narrow screen so the object is actually visible.
+  const jumpTo = useCallback((index: number) => {
+    if (effectiveMode === "free") enterGuided();
+    goTo(index);
+    setDrawerOpen(false);
+  }, [effectiveMode, enterGuided, goTo]);
 
   const handleLookInteraction = useCallback(() => {
     setFreeLookUsed(true);
@@ -159,9 +186,12 @@ export function Hall3D({
         camera={{ fov: 58, near: 0.1, far: 120, position: [0, EYE_HEIGHT, 6] }}
         onCreated={handleCanvasCreated}
       >
+        <PerformanceMonitor onDecline={() => setQuality("low")} />
+        <CameraProbe poseRef={poseRef} />
         <Suspense fallback={null}>
           <HallScene
             layout={layout}
+            quality={touchPrimary ? "low" : quality}
             activeItemId={activeItemId}
             onSelectItem={(itemId) => {
               const index = layout.stops.findIndex((candidate) => candidate.itemId === itemId);
@@ -202,6 +232,13 @@ export function Hall3D({
         freeLookUsed={freeLookUsed}
         reduceMotion={reduceMotion}
         freeWalkAvailable={!touchPrimary}
+        poseRef={poseRef}
+        visited={visited}
+        listOpen={listOpen}
+        drawerOpen={drawerOpen}
+        onToggleList={() => setListOpen((open) => !open)}
+        onToggleDrawer={() => setDrawerOpen((open) => !open)}
+        onJump={jumpTo}
         onGoTo={goTo}
         onEnterGuided={enterGuided}
         onEnterFree={enterFree}

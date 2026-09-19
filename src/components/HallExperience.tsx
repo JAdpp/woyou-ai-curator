@@ -81,6 +81,10 @@ export function HallExperience({
   const [hallFailed, setHallFailed] = useState(false);
   const [hallAttempt, setHallAttempt] = useState(0);
   const [restoreTextFocus, setRestoreTextFocus] = useState(forceTextView);
+  // `?view=text` pins the entry, not the whole visit: it must never be
+  // overridden by the WebGL probe, but a visitor who chooses the hall from
+  // the text page gets it, and the address bar then says `view=3d`.
+  const [textPinned, setTextPinned] = useState(forceTextView);
   const entryResolvedRef = useRef(false);
   const autoEnteredRef = useRef(false);
   const sessionKey = `${HALL_SESSION_PREFIX}${exhibition.id}`;
@@ -103,12 +107,12 @@ export function HallExperience({
     const safeIndex = clampStopIndex(layout.stops.length, stopIndex);
     const href = exhibitionViewHref(
       window.location.href,
-      forceTextView ? "text" : mode,
+      textPinned ? "text" : mode,
       safeIndex,
       layout.stops[safeIndex],
     );
     window.history.replaceState(window.history.state, "", href);
-  }, [forceTextView, layout.stops]);
+  }, [layout.stops, textPinned]);
 
   // Resolve the entry mode once. A desktop with usable WebGL enters 3D on its
   // first visit; a coarse-pointer device starts in 2D. An explicit `view=text`
@@ -182,19 +186,27 @@ export function HallExperience({
   }, [currentStopIndex, exhibition.id, persist, replaceViewUrl]);
 
   const enterHall = useCallback(() => {
-    if (capability !== "ok" || forceTextView) return;
+    if (capability !== "ok") return;
+    setTextPinned(false);
     setHallFailed(false);
     setRestoreTextFocus(false);
     setHallAttempt((attempt) => attempt + 1);
     setInHall(true);
     persist("3d", currentStopIndex);
-    replaceViewUrl("3d", currentStopIndex);
+    // Written directly: `replaceViewUrl` still closes over the pinned state
+    // until the next render.
+    const safeIndex = clampStopIndex(layout.stops.length, currentStopIndex);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      exhibitionViewHref(window.location.href, "3d", safeIndex, layout.stops[safeIndex]),
+    );
     void logEvent("hall_entered", exhibition.id, {
       mode: "3d",
       stopIndex: currentStopIndex,
-      source: "visitor_choice",
+      source: textPinned ? "text_view_choice" : "visitor_choice",
     });
-  }, [capability, currentStopIndex, exhibition.id, forceTextView, persist, replaceViewUrl]);
+  }, [capability, currentStopIndex, exhibition.id, layout.stops, persist, textPinned]);
 
   const fallbackFromHall = useCallback((error: unknown) => {
     setHallFailed(true);
@@ -231,7 +243,7 @@ export function HallExperience({
       onActiveStopChange={updateProgress}
       hallRuntimeFailed={hallFailed}
       webglAvailable={capability === "ok"}
-      onEnterHall={forceTextView ? undefined : enterHall}
+      onEnterHall={enterHall}
     />
   );
 }

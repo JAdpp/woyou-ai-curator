@@ -4,6 +4,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -22,7 +23,9 @@ import {
   visitorRoleTag,
 } from "@/lib/localizedMetadata";
 import { EpilogueConversation } from "../EpilogueConversation";
+import { GuideRail } from "./GuideRail";
 import type { HallLayout, TourStop } from "./layout";
+import type { CameraPose } from "./minimap";
 import { exhibitionViewHref } from "./progress";
 import { useAudioGuide } from "./useAudioGuide";
 import styles from "./hall.module.css";
@@ -403,6 +406,13 @@ export function HallOverlay({
   freeLookUsed,
   reduceMotion,
   freeWalkAvailable,
+  poseRef,
+  visited,
+  listOpen,
+  drawerOpen,
+  onToggleList,
+  onToggleDrawer,
+  onJump,
   onGoTo,
   onEnterGuided,
   onEnterFree,
@@ -419,6 +429,16 @@ export function HallOverlay({
   freeLookUsed: boolean;
   reduceMotion: boolean;
   freeWalkAvailable: boolean;
+  poseRef: RefObject<CameraPose>;
+  visited: ReadonlySet<number>;
+  /** Desktop: whether the object list under the plan is expanded. */
+  listOpen: boolean;
+  /** Narrow screens: whether the guide is open as a drawer. */
+  drawerOpen: boolean;
+  onToggleList: () => void;
+  onToggleDrawer: () => void;
+  /** Go to a stop from the guide, leaving free walk if needed. */
+  onJump: (index: number) => void;
   onGoTo: (index: number) => void;
   onEnterGuided: () => void;
   onEnterFree: () => void;
@@ -532,154 +552,207 @@ export function HallOverlay({
       <p className={styles.srOnly} aria-live="polite" aria-atomic="true" lang={contentLang}>
         {stop.label}
       </p>
-      {/* ------------------------------------------------------- top bar */}
-      <header className={styles.topBar}>
-        <button type="button" className={styles.ghostButton} onClick={onExit}>
-          {t.leaveHall}
-        </button>
-        <div className={styles.topRight}>
-          <a className={styles.accessibleLink} href={accessibleHref}>
-            {t.accessibleVersion}
-          </a>
-          <div className={styles.audioControl}>
+      <GuideRail
+        exhibition={exhibition}
+        layout={layout}
+        stopIndex={stopIndex}
+        visited={visited}
+        poseRef={poseRef}
+        contentLang={contentLang}
+        listOpen={listOpen}
+        drawerOpen={drawerOpen}
+        onToggleList={onToggleList}
+        onCloseDrawer={onToggleDrawer}
+        onGoTo={onJump}
+      />
+
+      <div className={styles.stage}>
+        {/* ------------------------------------------------------- top bar */}
+        <header className={styles.topBar}>
+          <div className={styles.topLeft}>
+            <button type="button" className={styles.ghostButton} onClick={onExit}>
+              {t.leaveHall}
+            </button>
             <button
               type="button"
-              className={styles.ghostButton}
-              aria-pressed={audioIsActive}
-              aria-busy={audio.status === "preparing"}
-              onClick={audio.toggle}
-              disabled={!audio.supported || mode === "free" || !cameraArrived}
-              title={
-                !audio.supported
-                  ? t.noAudio
-                  : mode === "free"
-                    ? t.resumeInGuided
-                    : !cameraArrived
-                      ? t.playOnArrival
-                    : "千问 TTS AI 合成 · 专业播音声线"
-              }
+              className={`${styles.ghostButton} ${styles.guideToggle}`}
+              onClick={onToggleDrawer}
+              aria-expanded={drawerOpen}
             >
-              {audioButtonLabel}
+              ☰ {t.openGuide}
             </button>
-            {audioStatusMessage && (
-              <span
-                className={styles.audioStatus}
-                role="status"
-                aria-live="polite"
-                data-state={audio.status}
+          </div>
+          <div className={styles.topRight}>
+            <a className={styles.accessibleLink} href={accessibleHref}>
+              {t.accessibleVersion}
+            </a>
+            <div className={styles.audioControl}>
+              <button
+                type="button"
+                className={styles.ghostButton}
+                aria-pressed={audioIsActive}
+                aria-busy={audio.status === "preparing"}
+                onClick={audio.toggle}
+                disabled={!audio.supported || mode === "free" || !cameraArrived}
+                title={
+                  !audio.supported
+                    ? t.noAudio
+                    : mode === "free"
+                      ? t.resumeInGuided
+                      : !cameraArrived
+                        ? t.playOnArrival
+                      : "千问 TTS AI 合成 · 专业播音声线"
+                }
               >
-                {audioStatusMessage}
-              </span>
+                {audioButtonLabel}
+              </button>
+              {audioStatusMessage && (
+                <span
+                  className={styles.audioStatus}
+                  role="status"
+                  aria-live="polite"
+                  data-state={audio.status}
+                >
+                  {audioStatusMessage}
+                </span>
+              )}
+            </div>
+            {freeWalkAvailable && (
+              <div className={styles.modeToggle} role="group" aria-label={t.modeGroup}>
+                <button
+                  type="button"
+                  aria-pressed={mode === "guided"}
+                  onClick={onEnterGuided}
+                  className={mode === "guided" ? styles.modeActive : undefined}
+                >
+                  {t.guided}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={mode === "free"}
+                  onClick={onEnterFree}
+                  className={mode === "free" ? styles.modeActive : undefined}
+                >
+                  {t.freeWalk}
+                </button>
+              </div>
             )}
           </div>
-          {freeWalkAvailable && (
-            <div className={styles.modeToggle} role="group" aria-label={t.modeGroup}>
-              <button
-                type="button"
-                aria-pressed={mode === "guided"}
-                onClick={onEnterGuided}
-                className={mode === "guided" ? styles.modeActive : undefined}
-              >
-                {t.guided}
-              </button>
-              <button
-                type="button"
-                aria-pressed={mode === "free"}
-                onClick={onEnterFree}
-                className={mode === "free" ? styles.modeActive : undefined}
-              >
-                {t.freeWalk}
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
+        </header>
 
-      {/* ------------------------------------------------------- content */}
-      {mode === "guided" && (
-        <>
-          {stop.kind === "lobby" && (
-            <section className={styles.lobbyCard}>
-              <LobbyPoster
-                key={exhibition.poster?.backgroundUrl ?? "collection-fallback"}
-                exhibition={exhibition}
-              />
-              <div>
-                <span className={styles.eyebrow}>{t.curatedBy}</span>
-                <h1 lang={contentLang}>{exhibition.title}</h1>
-                {exhibition.subtitle && <p className={styles.subtitle} lang={contentLang}>{exhibition.subtitle}</p>}
-                <p className={styles.thesis} lang={contentLang}>{exhibition.curatorialThesis}</p>
-                <dl className={styles.lobbyStats}>
-                  <div>
-                    <dt>{t.segments}</dt>
-                    <dd>{exhibition.chapters.length}</dd>
-                  </div>
-                  <div>
-                    <dt>{t.objects}</dt>
-                    <dd>{exhibition.items.length}</dd>
-                  </div>
-                  <div>
-                    <dt>{t.estimated}</dt>
-                    <dd>{fill(t.minutes, { n: exhibition.visitorProfile?.durationMinutes ?? 10 })}</dd>
-                  </div>
-                </dl>
-                <button type="button" className={styles.primaryAction} onClick={() => onGoTo(1)}>
-                  {t.startVisit}
-                </button>
-              </div>
-            </section>
-          )}
+        {/* ------------------------------------------------------- content */}
+        {mode === "guided" && (
+          <>
+            {stop.kind === "lobby" && (
+              <section className={styles.lobbyCard}>
+                <LobbyPoster
+                  key={exhibition.poster?.backgroundUrl ?? "collection-fallback"}
+                  exhibition={exhibition}
+                />
+                <div>
+                  <span className={styles.eyebrow}>{t.curatedBy}</span>
+                  <h1 lang={contentLang}>{exhibition.title}</h1>
+                  {exhibition.subtitle && <p className={styles.subtitle} lang={contentLang}>{exhibition.subtitle}</p>}
+                  <p className={styles.thesis} lang={contentLang}>{exhibition.curatorialThesis}</p>
+                  <dl className={styles.lobbyStats}>
+                    <div>
+                      <dt>{t.segments}</dt>
+                      <dd>{exhibition.chapters.length}</dd>
+                    </div>
+                    <div>
+                      <dt>{t.objects}</dt>
+                      <dd>{exhibition.items.length}</dd>
+                    </div>
+                    <div>
+                      <dt>{t.estimated}</dt>
+                      <dd>{fill(t.minutes, { n: exhibition.visitorProfile?.durationMinutes ?? 10 })}</dd>
+                    </div>
+                  </dl>
+                  <button type="button" className={styles.primaryAction} onClick={() => onGoTo(1)}>
+                    {t.startVisit}
+                  </button>
+                </div>
+              </section>
+            )}
 
-          {stop.kind === "chapter" && chapter && (
-            <section className={styles.chapterCard}>
-              <span className={styles.eyebrow}>
-                {fill(t.chapterOf, { n: chapter.order + 1, total: exhibition.chapters.length })}
-              </span>
-              <h2 lang={contentLang}>{chapter.title}</h2>
-              <p lang={contentLang}>{chapter.leadIn}</p>
-            </section>
-          )}
+            {stop.kind === "chapter" && chapter && (
+              <section className={styles.chapterCard}>
+                <span className={styles.eyebrow}>
+                  {fill(t.chapterOf, { n: chapter.order + 1, total: exhibition.chapters.length })}
+                </span>
+                <h2 lang={contentLang}>{chapter.title}</h2>
+                <p lang={contentLang}>{chapter.leadIn}</p>
+              </section>
+            )}
 
-          {stop.kind === "artwork" && item && (
-            // Keyed by item so the source panel closes when the visitor moves
-            // on, without an effect resetting derived state.
-            <ArtworkLabel
-              key={item.id}
-              item={item}
-              exhibitionId={exhibition.id}
-              contentLang={contentLang}
-            />
-          )}
+            {stop.kind === "epilogue" && (
+              <section className={styles.epilogueCard}>
+                <span className={styles.eyebrow}>{t.epilogueEyebrow}</span>
+                <h2>{t.epilogueTitle}</h2>
+                <p className={styles.epilogueText} lang={contentLang}>{exhibition.epilogue.text}</p>
+                <EpilogueConversation
+                  exhibitionId={exhibition.id}
+                  openQuestions={exhibition.epilogue.openQuestions}
+                  context="hall"
+                />
+                <details className={styles.boundaryDetails}>
+                  <summary>{t.materialLimits}</summary>
+                  <ul>
+                    {exhibition.epilogue.materialBoundary.map((limit) => (
+                      <li key={limit}>{limit}</li>
+                    ))}
+                  </ul>
+                </details>
+                <div className={styles.epilogueActions}>
+                  <button type="button" onClick={() => onGoTo(0)}>
+                    {t.replay}
+                  </button>
+                  <button type="button" className={styles.primaryAction} onClick={onExit}>
+                    {t.endVisit}
+                  </button>
+                </div>
+              </section>
+            )}
+          </>
+        )}
 
-          {stop.kind === "epilogue" && (
-            <section className={styles.epilogueCard}>
-              <span className={styles.eyebrow}>{t.epilogueEyebrow}</span>
-              <h2>{t.epilogueTitle}</h2>
-              <p className={styles.epilogueText} lang={contentLang}>{exhibition.epilogue.text}</p>
-              <EpilogueConversation
-                exhibitionId={exhibition.id}
-                openQuestions={exhibition.epilogue.openQuestions}
-                context="hall"
-              />
-              <details className={styles.boundaryDetails}>
-                <summary>{t.materialLimits}</summary>
-                <ul>
-                  {exhibition.epilogue.materialBoundary.map((limit) => (
-                    <li key={limit}>{limit}</li>
-                  ))}
-                </ul>
-              </details>
-              <div className={styles.epilogueActions}>
-                <button type="button" onClick={() => onGoTo(0)}>
-                  {t.replay}
-                </button>
-                <button type="button" className={styles.primaryAction} onClick={onExit}>
-                  {t.endVisit}
-                </button>
-              </div>
-            </section>
-          )}
-        </>
+        {/* ------------------------------------------------------ bottom bar */}
+        {mode === "guided" && (
+          <nav className={styles.bottomBar} aria-label={t.progressNav}>
+            <button type="button" onClick={() => onGoTo(stopIndex - 1)} disabled={atStart}>
+              {t.previous}
+            </button>
+            <ol className={styles.stopTrack}>
+              {layout.stops.map((candidate, index) => (
+                <li key={`${candidate.kind}-${index}`}>
+                  <button
+                    type="button"
+                    data-kind={candidate.kind}
+                    aria-current={index === stopIndex ? "step" : undefined}
+                    aria-label={candidate.label}
+                    className={index === stopIndex ? styles.stopActive : styles.stopDot}
+                    onClick={() => onGoTo(index)}
+                  />
+                </li>
+              ))}
+            </ol>
+            <button type="button" onClick={() => onGoTo(stopIndex + 1)} disabled={atEnd}>
+              {t.next}
+            </button>
+          </nav>
+        )}
+      </div>
+
+      {mode === "guided" && stop.kind === "artwork" && item && (
+        // Keyed by item so the source panel closes when the visitor moves
+        // on, without an effect resetting derived state. Positioned against
+        // the whole overlay, so its drag maths stays in viewport pixels.
+        <ArtworkLabel
+          key={item.id}
+          item={item}
+          exhibitionId={exhibition.id}
+          contentLang={contentLang}
+        />
       )}
 
       {mode === "free" && !pointerLocked && !freeLookUsed && (
@@ -687,32 +760,6 @@ export function HallOverlay({
           <p>{t.dragToLook}</p>
           <small>{t.dragWalkHint}</small>
         </div>
-      )}
-
-      {/* ------------------------------------------------------ bottom bar */}
-      {mode === "guided" && (
-        <nav className={styles.bottomBar} aria-label={t.progressNav}>
-          <button type="button" onClick={() => onGoTo(stopIndex - 1)} disabled={atStart}>
-            {t.previous}
-          </button>
-          <ol className={styles.stopTrack}>
-            {layout.stops.map((candidate, index) => (
-              <li key={`${candidate.kind}-${index}`}>
-                <button
-                  type="button"
-                  data-kind={candidate.kind}
-                  aria-current={index === stopIndex ? "step" : undefined}
-                  aria-label={candidate.label}
-                  className={index === stopIndex ? styles.stopActive : styles.stopDot}
-                  onClick={() => onGoTo(index)}
-                />
-              </li>
-            ))}
-          </ol>
-          <button type="button" onClick={() => onGoTo(stopIndex + 1)} disabled={atEnd}>
-            {t.next}
-          </button>
-        </nav>
       )}
 
       {reduceMotion && mode === "guided" && (

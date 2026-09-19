@@ -22,16 +22,349 @@
 .hallRoot[data-mode="free"][data-pointer-locked="true"] canvas { cursor: none; }
 
 .overlay {
+  --guide-width: 18.5rem;
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: var(--guide-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   pointer-events: none;
   z-index: 2;
 }
 
 .overlay > * {
   pointer-events: auto;
+}
+
+/* Everything that is not the guide: top bar, stop cards, bottom bar. The
+   column itself lets clicks through to the artworks; its children opt in. */
+.overlay > .stage {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.stage > * {
+  pointer-events: auto;
+}
+
+/* --------------------------------------------------------------- guide */
+
+.guide {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  box-sizing: border-box;
+  min-height: 0;
+  max-height: calc(100% - 1.5rem);
+  margin: 0.75rem 0 0.75rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  background: rgba(16, 13, 10, 0.88);
+  border: 1px solid rgba(243, 239, 230, 0.14);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+
+.guideHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem 0.55rem;
+}
+
+.guideEyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  color: rgba(243, 239, 230, 0.58);
+}
+
+.guideTitle {
+  margin: 0;
+  font-size: 1.08rem;
+  line-height: 1.38;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.guidePlace {
+  margin: 0.4rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: #e8c98a;
+}
+
+.guideClose {
+  display: none;
+  flex: 0 0 auto;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgba(243, 239, 230, 0.22);
+  border-radius: 0.32rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+/* Floor plan. */
+.planFigure {
+  margin: 0 0.75rem;
+  padding: 0.4rem 0.4rem 0.5rem;
+  border-radius: 0.35rem;
+  background: rgba(243, 239, 230, 0.04);
+  border: 1px solid rgba(243, 239, 230, 0.08);
+}
+
+.plan {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.planApproach { fill: rgba(243, 239, 230, 0.05); }
+.planRoom { fill: rgba(243, 239, 230, 0.07); }
+.planRoomActive { fill: rgba(232, 201, 138, 0.16); }
+.planRoomNumber {
+  fill: rgba(243, 239, 230, 0.34);
+  font: 600 10px ui-sans-serif, system-ui, sans-serif;
+  pointer-events: none;
+}
+.planDivider {
+  stroke: rgba(243, 239, 230, 0.32);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+.planWalls {
+  fill: none;
+  stroke: rgba(243, 239, 230, 0.62);
+  stroke-width: 1.4;
+}
+.planArtwork { cursor: pointer; }
+.planArtwork rect:last-child { fill: rgba(243, 239, 230, 0.72); transition: fill 0.15s; }
+.planArtwork:hover rect:last-child { fill: #f7f1e7; }
+.planArtwork[data-active="true"] rect:last-child { fill: #e8c98a; }
+.planHitArea { fill: transparent; }
+.planMarker { pointer-events: none; }
+.planCone { fill: rgba(232, 201, 138, 0.3); }
+.planDot { fill: #e8c98a; stroke: #16120d; stroke-width: 1.2; }
+
+.planFigure figcaption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.4rem;
+  margin-top: 0.3rem;
+  font-size: 0.66rem;
+  color: rgba(243, 239, 230, 0.7);
+}
+
+.planKey {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #e8c98a;
+}
+
+.planHint {
+  margin-left: auto;
+  color: rgba(243, 239, 230, 0.46);
+}
+
+/* Object list. */
+.guideListToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.55rem 0.75rem 0;
+  padding: 0.5rem 0.25rem;
+  min-height: 2.75rem;
+  border: 0;
+  border-top: 1px solid rgba(243, 239, 230, 0.12);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.guideListToggle small {
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: rgba(243, 239, 230, 0.58);
+}
+
+.guideList {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.5rem 0.6rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(243, 239, 230, 0.25) transparent;
+}
+
+.guideList[hidden] { display: none; }
+
+.guideList ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guideStop,
+.guideChapter,
+.guideItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 0.32rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.guideStop {
+  font-size: 0.8rem;
+  color: rgba(243, 239, 230, 0.78);
+}
+
+.guideChapter {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.05rem;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.guideChapter small {
+  font-size: 0.64rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: rgba(243, 239, 230, 0.52);
+}
+
+.guideChapter[data-in-chapter="true"] small { color: #e8c98a; }
+
+.guideItem { padding-left: 0.35rem; }
+
+.guideNumber {
+  flex: 0 0 1.35rem;
+  font: 0.68rem ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: rgba(243, 239, 230, 0.45);
+}
+
+.guideThumb {
+  flex: 0 0 2.4rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  background: rgba(243, 239, 230, 0.08);
+}
+
+.guideThumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.guideItemText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.guideItemText strong {
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.guideItemText small {
+  font-size: 0.66rem;
+  color: rgba(243, 239, 230, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guideStop:hover,
+.guideChapter:hover,
+.guideItem:hover { background: rgba(243, 239, 230, 0.07); }
+
+.guideStop[aria-current="step"],
+.guideChapter[aria-current="step"],
+.guideItem[aria-current="step"] {
+  background: rgba(232, 201, 138, 0.16);
+  color: #f7f1e7;
+}
+
+.guideItem[aria-current="step"] .guideNumber { color: #e8c98a; font-weight: 700; }
+.guideItem[data-visited="true"]:not([aria-current="step"]) .guideNumber { color: rgba(232, 201, 138, 0.62); }
+
+.guideStop:focus-visible,
+.guideChapter:focus-visible,
+.guideItem:focus-visible,
+.guideListToggle:focus-visible,
+.guideClose:focus-visible {
+  outline: 2px solid #e8c98a;
+  outline-offset: 1px;
+}
+
+.topLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Only shown where the guide becomes a drawer. */
+.topLeft > .guideToggle { display: none; }
+
+@media (max-width: 899px) {
+  .overlay { grid-template-columns: minmax(0, 1fr); }
+  .overlay > .stage { grid-column: 1; }
+  .guide {
+    display: none;
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    bottom: 0.5rem;
+    width: min(21rem, calc(100vw - 1rem));
+    max-height: none;
+    margin: 0;
+    z-index: 6;
+    background: rgba(16, 13, 10, 0.97);
+  }
+  .guide[data-drawer="open"] { display: flex; }
+  .guideClose { display: grid; place-items: center; }
+  .guideListToggle { display: none; }
+  .topLeft > .guideToggle { display: inline-flex; }
 }
 
 .srOnly {

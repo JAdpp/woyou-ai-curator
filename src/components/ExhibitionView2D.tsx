@@ -517,10 +517,15 @@ export function ExhibitionView2D({
     if (!restoreInitialFocus || restoredFocusRef.current || safeInitialStopIndex <= 0) return;
     const anchor = stopAnchor(layout.stops[safeInitialStopIndex]);
     if (!anchor) return;
-    restoredFocusRef.current = true;
     const frame = window.requestAnimationFrame(() => {
+      // Marked here, once it has happened: marking it before the frame let
+      // Strict Mode's effect replay cancel the frame and then skip the retry.
+      restoredFocusRef.current = true;
       const target = document.getElementById(anchor);
-      target?.scrollIntoView({ block: "start" });
+      // "instant", not the page's CSS smooth scrolling: the scroll spy reads
+      // the position on the next frame, and mid-animation it would see the
+      // top of the page and reset the resume point to the lobby.
+      target?.scrollIntoView({ block: "start", behavior: "instant" });
       target?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);

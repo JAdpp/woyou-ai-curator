@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { EYE_HEIGHT, flightDuration, walkableBounds, type HallLayout, type TourStop } from "./layout";
+import type { CameraPose } from "./minimap";
 import {
   accumulatePointerTravel,
   DRAG_GESTURE_DISTANCE,
@@ -381,6 +382,28 @@ export function FreeWalkCamera({
     next.y = EYE_HEIGHT;
 
     camera.position.copy(next);
+  });
+
+  return null;
+}
+
+/**
+ * Copies the camera's floor position and heading into a plain object each
+ * frame. The minimap reads it on its own animation frame, so following the
+ * visitor never re-renders React.
+ */
+export function CameraProbe({ poseRef }: { poseRef: React.RefObject<CameraPose> }) {
+  const camera = useThree((state) => state.camera);
+  const forward = useRef(new THREE.Vector3());
+
+  useFrame(() => {
+    const pose = poseRef.current;
+    if (!pose) return;
+    camera.getWorldDirection(forward.current);
+    pose.x = camera.position.x;
+    pose.z = camera.position.z;
+    pose.forwardX = forward.current.x;
+    pose.forwardZ = forward.current.z;
   });
 
   return null;
