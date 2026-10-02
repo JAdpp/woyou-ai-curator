@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -18,7 +19,7 @@ import paramiko
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_SERVER = "47.89.246.208"
+PROJECT_SERVER = os.environ["PROJECT_SERVER"]  # 部署服务器地址，不写入仓库
 PROVIDERS = (
     ("aliyun_business", "https://llm-nwypztqdwtzyt9zd.cn-beijing.maas.aliyuncs.com/"),
     ("dashscope", "https://dashscope.aliyuncs.com/"),

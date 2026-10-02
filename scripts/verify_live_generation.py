@@ -2,12 +2,13 @@
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import time
 import httpx
 
 ROOT=Path(__file__).resolve().parents[1]
-BASE='http://47.89.246.208:8081'
+BASE=os.environ.get('WOYOU_BASE_URL','http://127.0.0.1:8081')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
