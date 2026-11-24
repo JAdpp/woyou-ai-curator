@@ -205,3 +205,94 @@ export function softRectTexture(tone: "dark" | "light"): THREE.CanvasTexture {
   context.fillRect(inset - size * 2, inset, size - inset * 2, size - inset * 2);
   return finish(key, canvas, false);
 }
+
+export interface WallTextLine {
+  text: string;
+  /** Font size as a fraction of the texture's height. */
+  size: number;
+  color: string;
+  weight?: number;
+  /** Extra space between characters, as a fraction of the font size. */
+  tracking?: number;
+  family?: "serif" | "sans";
+}
+
+const SERIF_STACK = '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif';
+const SANS_STACK = '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif';
+
+function drawTracked(
+  context: CanvasRenderingContext2D,
+  text: string,
+  centerX: number,
+  baseline: number,
+  tracking: number,
+) {
+  if (!tracking) {
+    context.fillText(text, centerX, baseline);
+    return;
+  }
+  const characters = Array.from(text);
+  const widths = characters.map((character) => context.measureText(character).width);
+  const total = widths.reduce((sum, width) => sum + width, 0) + tracking * (characters.length - 1);
+  let x = centerX - total / 2;
+  context.textAlign = "left";
+  characters.forEach((character, index) => {
+    context.fillText(character, x, baseline);
+    x += widths[index] + tracking;
+  });
+  context.textAlign = "center";
+}
+
+/**
+ * Painted wall lettering: section titles on the screen walls, the exhibition
+ * title over the entrance, the heading of the retrospective wall.
+ *
+ * Decorative by design: the canvas is hidden from assistive technology and
+ * every word here is also in the HTML overlay, which stays the readable copy.
+ * A 2D canvas uses the system's CJK fonts, so no glyph atlas is shipped.
+ */
+export function wallTextTexture(lines: WallTextLine[], aspect: number): THREE.CanvasTexture {
+  const key = `text:${aspect.toFixed(3)}:${JSON.stringify(lines)}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const height = 512;
+  const width = Math.min(4096, Math.round(height * aspect));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("2D canvas unavailable");
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+
+  const gap = height * 0.08;
+  const sized = lines.map((line) => {
+    let fontSize = line.size * height;
+    const family = line.family === "sans" ? SANS_STACK : SERIF_STACK;
+    const font = (size: number) => `${line.weight ?? 600} ${size}px ${family}`;
+    // Shrink a long title until it fits the panel rather than overflowing.
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      context.font = font(fontSize);
+      const tracking = (line.tracking ?? 0) * fontSize;
+      const measured = context.measureText(line.text).width + tracking * Math.max(0, Array.from(line.text).length - 1);
+      if (measured <= width * 0.94) break;
+      fontSize *= 0.92;
+    }
+    return { line, fontSize, font: font(fontSize) };
+  });
+  const blockHeight = sized.reduce((sum, row) => sum + row.fontSize, 0) + gap * Math.max(0, sized.length - 1);
+  let y = (height - blockHeight) / 2;
+  for (const row of sized) {
+    y += row.fontSize;
+    context.font = row.font;
+    context.fillStyle = row.line.color;
+    drawTracked(context, row.line.text, width / 2, y - row.fontSize * 0.12, (row.line.tracking ?? 0) * row.fontSize);
+    y += gap;
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  cache.set(key, texture);
+  return texture;
+}

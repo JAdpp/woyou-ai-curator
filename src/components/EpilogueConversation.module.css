@@ -1,3 +1,7 @@
+.frame {
+  container: epilogue-note / inline-size;
+}
+
 .root {
   --note-paper: var(--surface, #f2ede3);
   --note-ink: var(--ink, #241f19);
@@ -375,6 +379,21 @@
 .root[data-context="hall"] .validation { color: #f0a08f; }
 
 .skipButton { display: block; margin: 0.65rem 0 0 auto; }
+
+/* Narrow by its own width, not the window's: in the hall it sits in a side
+   panel on a wide screen. Text and actions stack instead of sharing a row,
+   which squeezed the curator's copy to a few characters per line. */
+@container epilogue-note (max-width: 34rem) {
+  .root { padding: 1rem 0.95rem 0.95rem 2.6rem; }
+  .folioMark { left: 0.55rem; }
+  .root[data-state="compact"] { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  .compactActions { justify-content: flex-start; }
+  .header { flex-wrap: wrap; gap: 0.4rem 1rem; }
+  .headerActions { margin-left: auto; }
+  .turn, .pendingTurn { grid-template-columns: 2.7rem minmax(0, 1fr); gap: 0.55rem; }
+  .formFooter { flex-direction: column; gap: 0.55rem; }
+  .formFooter .primaryButton { align-self: flex-end; }
+}
 
 @media (max-width: 600px) {
   .root { padding: 1rem 0.85rem 0.95rem 2.5rem; }

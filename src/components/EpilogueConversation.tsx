@@ -240,199 +240,206 @@ export function EpilogueConversation({
 
   if (!open) {
     return (
-      <section className={styles.root} data-context={context} data-state="compact">
-        <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
-        <div className={styles.compactIdentity}>
-          <CuratorAvatar size="sm" />
-          <div className={styles.compactCopy}>
-            <p className={styles.kicker}>{t.kicker}</p>
-            <h3>{skipped ? t.skippedTitle : t.openTitle}</h3>
-            <p>
-              {skipped
-                ? t.skippedBody
-                : fill(t.openBody, { n: Math.max(openQuestions.length, 1) })}
-            </p>
+      // The frame is the size container: the note lays itself out by the
+      // width it is given (a side panel in the hall, a column on the page),
+      // not by the width of the window.
+      <div className={styles.frame}>
+        <section className={styles.root} data-context={context} data-state="compact">
+          <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
+          <div className={styles.compactIdentity}>
+            <CuratorAvatar size="sm" />
+            <div className={styles.compactCopy}>
+              <p className={styles.kicker}>{t.kicker}</p>
+              <h3>{skipped ? t.skippedTitle : t.openTitle}</h3>
+              <p>
+                {skipped
+                  ? t.skippedBody
+                  : fill(t.openBody, { n: Math.max(openQuestions.length, 1) })}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className={styles.compactActions}>
-          <button
-            ref={compactPrimaryRef}
-            type="button"
-            className={styles.primaryButton}
-            onClick={openConversation}
-          >
-            {skipped ? t.reopen : t.start}
-          </button>
-          {!skipped && (
-            <button type="button" className={styles.textButton} onClick={() => closeConversation("skip")}>
-              {t.skipNow}
+          <div className={styles.compactActions}>
+            <button
+              ref={compactPrimaryRef}
+              type="button"
+              className={styles.primaryButton}
+              onClick={openConversation}
+            >
+              {skipped ? t.reopen : t.start}
             </button>
-          )}
-        </div>
-      </section>
+            {!skipped && (
+              <button type="button" className={styles.textButton} onClick={() => closeConversation("skip")}>
+                {t.skipNow}
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
     );
   }
 
   return (
-    <section className={styles.root} data-context={context} data-state="open" aria-label={t.sectionLabel}>
-      <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
-      <header className={styles.header}>
-        <div className={styles.headerIdentity}>
-          <CuratorAvatar size="sm" />
-          <div>
-            <p className={styles.kicker}>{t.kicker}</p>
-            <h3>{t.liveTitle}</h3>
+    <div className={styles.frame}>
+      <section className={styles.root} data-context={context} data-state="open" aria-label={t.sectionLabel}>
+        <span className={styles.folioMark} aria-hidden="true">{t.folioMark}</span>
+        <header className={styles.header}>
+          <div className={styles.headerIdentity}>
+            <CuratorAvatar size="sm" />
+            <div>
+              <p className={styles.kicker}>{t.kicker}</p>
+              <h3>{t.liveTitle}</h3>
+            </div>
           </div>
-        </div>
-        <div className={styles.headerActions}>
-          {conversation.turns.length > 0 && (
-            <button type="button" className={styles.textButton} onClick={clearConversation} disabled={pending}>
-              {t.clear}
+          <div className={styles.headerActions}>
+            {conversation.turns.length > 0 && (
+              <button type="button" className={styles.textButton} onClick={clearConversation} disabled={pending}>
+                {t.clear}
+              </button>
+            )}
+            <button type="button" className={styles.textButton} onClick={() => closeConversation("collapse")}>
+              {t.collapse}
             </button>
+          </div>
+        </header>
+
+        <p className={styles.intro}>
+          {t.noScoring}
+        </p>
+
+        {conversation.turns.length === 0 && (
+          <p className={styles.emptyNote}>{t.emptyNote}</p>
+        )}
+
+        <div className={styles.transcript} role="log" aria-live="polite" aria-relevant="additions text">
+          {conversation.turns.map((turn) => (
+            <article className={styles.turn} data-role={turn.role} key={turn.id}>
+              {turn.role === "assistant" ? (
+                <div className={styles.speaker}>
+                  <CuratorAvatar size="xs" />
+                  <span>{t.curator}</span>
+                </div>
+              ) : (
+                <p className={styles.speaker}>{t.visitor}</p>
+              )}
+              <div className={styles.turnBody}>
+                <p>{turn.content}</p>
+                {turn.notice && <p className={styles.serviceNotice}>{turn.notice}</p>}
+                {turn.citations && turn.citations.length > 0 && (
+                  <details className={styles.citations}>
+                    <summary>{t.citationsSummary}</summary>
+                    <ul>
+                      {turn.citations.map((citation, index) => (
+                        <li key={`${citation.itemId || citation.objectId || "evidence"}-${index}`}>
+                          {citation.label || citation.itemId || citation.objectId || fill(t.citationFallback, { n: citation.evidenceIds?.length ?? 0 })}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            </article>
+          ))}
+          {pending && lastAttempt && (
+            <article className={styles.turn} data-role="user">
+              <p className={styles.speaker}>{t.visitor}</p>
+              <div className={styles.turnBody}><p>{lastAttempt.message}</p></div>
+            </article>
           )}
-          <button type="button" className={styles.textButton} onClick={() => closeConversation("collapse")}>
-            {t.collapse}
-          </button>
-        </div>
-      </header>
-
-      <p className={styles.intro}>
-        {t.noScoring}
-      </p>
-
-      {conversation.turns.length === 0 && (
-        <p className={styles.emptyNote}>{t.emptyNote}</p>
-      )}
-
-      <div className={styles.transcript} role="log" aria-live="polite" aria-relevant="additions text">
-        {conversation.turns.map((turn) => (
-          <article className={styles.turn} data-role={turn.role} key={turn.id}>
-            {turn.role === "assistant" ? (
-              <div className={styles.speaker}>
+          {pending && (
+            <div className={styles.pendingTurn} role="status">
+              <span className={styles.pendingSpeaker}>
                 <CuratorAvatar size="xs" />
                 <span>{t.curator}</span>
-              </div>
-            ) : (
-              <p className={styles.speaker}>{t.visitor}</p>
-            )}
-            <div className={styles.turnBody}>
-              <p>{turn.content}</p>
-              {turn.notice && <p className={styles.serviceNotice}>{turn.notice}</p>}
-              {turn.citations && turn.citations.length > 0 && (
-                <details className={styles.citations}>
-                  <summary>{t.citationsSummary}</summary>
-                  <ul>
-                    {turn.citations.map((citation, index) => (
-                      <li key={`${citation.itemId || citation.objectId || "evidence"}-${index}`}>
-                        {citation.label || citation.itemId || citation.objectId || fill(t.citationFallback, { n: citation.evidenceIds?.length ?? 0 })}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
+              </span>
+              <p>{t.thinking}</p>
             </div>
-          </article>
-        ))}
-        {pending && lastAttempt && (
-          <article className={styles.turn} data-role="user">
-            <p className={styles.speaker}>{t.visitor}</p>
-            <div className={styles.turnBody}><p>{lastAttempt.message}</p></div>
-          </article>
+          )}
+          <div ref={endRef} />
+        </div>
+
+        {!hasVisitorTurn && openQuestions.length > 0 && (
+          <fieldset className={styles.starters}>
+            <legend>{conversation.selectedOpenQuestion ? t.changeNote : t.pickNote}</legend>
+            {openQuestions.map((question) => (
+              <button
+                type="button"
+                key={question}
+                aria-pressed={conversation.selectedOpenQuestion === question}
+                onClick={() => chooseOpeningQuestion(question)}
+              >
+                {question}
+              </button>
+            ))}
+          </fieldset>
         )}
-        {pending && (
-          <div className={styles.pendingTurn} role="status">
-            <span className={styles.pendingSpeaker}>
-              <CuratorAvatar size="xs" />
-              <span>{t.curator}</span>
-            </span>
-            <p>{t.thinking}</p>
+
+        {conversation.suggestedReplies.length > 0 && !pending && (
+          <div className={styles.suggestions} aria-label={t.suggestionsLabel}>
+            <span>{t.suggestionsLead}</span>
+            {conversation.suggestedReplies.map((reply) => (
+              <button
+                type="button"
+                key={reply}
+                onClick={() => {
+                  setDraft(reply);
+                  setValidationMessage(null);
+                  inputRef.current?.focus();
+                }}
+              >
+                {reply}
+              </button>
+            ))}
           </div>
         )}
-        <div ref={endRef} />
-      </div>
 
-      {!hasVisitorTurn && openQuestions.length > 0 && (
-        <fieldset className={styles.starters}>
-          <legend>{conversation.selectedOpenQuestion ? t.changeNote : t.pickNote}</legend>
-          {openQuestions.map((question) => (
+        {error && (
+          <div className={styles.error} role="alert">
+            <span>{error}</span>
+            {lastAttempt && (
+              <button type="button" onClick={() => void performAttempt(lastAttempt)} disabled={pending}>
+                {t.retry}
+              </button>
+            )}
+          </div>
+        )}
+
+        <form className={styles.form} onSubmit={submitDraft} onKeyDown={(event) => event.stopPropagation()}>
+          <label htmlFor={`${formHintId}-input`}>{t.inputLabel}</label>
+          <textarea
+            ref={inputRef}
+            id={`${formHintId}-input`}
+            value={draft}
+            rows={context === "hall" ? 2 : 3}
+            maxLength={800}
+            placeholder={conversation.selectedOpenQuestion ? t.placeholderWithNote : t.placeholderOpen}
+            aria-describedby={`${formHintId} ${validationMessage ? validationId : ""}`.trim()}
+            aria-invalid={validationMessage ? true : undefined}
+            disabled={pending}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (validationMessage && event.target.value.trim()) setValidationMessage(null);
+            }}
+            onKeyDown={handleInputKeyDown}
+          />
+          <div className={styles.formFooter}>
+            <p id={formHintId}>
+              {t.privacy}
+            </p>
             <button
-              type="button"
-              key={question}
-              aria-pressed={conversation.selectedOpenQuestion === question}
-              onClick={() => chooseOpeningQuestion(question)}
+              type="submit"
+              className={styles.primaryButton}
+              disabled={pending || trimEpilogueDraft(draft).length === 0}
             >
-              {question}
+              {pending ? t.sending : t.send}
             </button>
-          ))}
-        </fieldset>
-      )}
+          </div>
+          {validationMessage && <p className={styles.validation} id={validationId}>{validationMessage}</p>}
+        </form>
 
-      {conversation.suggestedReplies.length > 0 && !pending && (
-        <div className={styles.suggestions} aria-label={t.suggestionsLabel}>
-          <span>{t.suggestionsLead}</span>
-          {conversation.suggestedReplies.map((reply) => (
-            <button
-              type="button"
-              key={reply}
-              onClick={() => {
-                setDraft(reply);
-                setValidationMessage(null);
-                inputRef.current?.focus();
-              }}
-            >
-              {reply}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className={styles.error} role="alert">
-          <span>{error}</span>
-          {lastAttempt && (
-            <button type="button" onClick={() => void performAttempt(lastAttempt)} disabled={pending}>
-              {t.retry}
-            </button>
-          )}
-        </div>
-      )}
-
-      <form className={styles.form} onSubmit={submitDraft} onKeyDown={(event) => event.stopPropagation()}>
-        <label htmlFor={`${formHintId}-input`}>{t.inputLabel}</label>
-        <textarea
-          ref={inputRef}
-          id={`${formHintId}-input`}
-          value={draft}
-          rows={context === "hall" ? 2 : 3}
-          maxLength={800}
-          placeholder={conversation.selectedOpenQuestion ? t.placeholderWithNote : t.placeholderOpen}
-          aria-describedby={`${formHintId} ${validationMessage ? validationId : ""}`.trim()}
-          aria-invalid={validationMessage ? true : undefined}
-          disabled={pending}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            if (validationMessage && event.target.value.trim()) setValidationMessage(null);
-          }}
-          onKeyDown={handleInputKeyDown}
-        />
-        <div className={styles.formFooter}>
-          <p id={formHintId}>
-            {t.privacy}
-          </p>
-          <button
-            type="submit"
-            className={styles.primaryButton}
-            disabled={pending || trimEpilogueDraft(draft).length === 0}
-          >
-            {pending ? t.sending : t.send}
-          </button>
-        </div>
-        {validationMessage && <p className={styles.validation} id={validationId}>{validationMessage}</p>}
-      </form>
-
-      <button type="button" className={styles.skipButton} onClick={() => closeConversation("skip")}>
-        {t.optOut}
-      </button>
-    </section>
+        <button type="button" className={styles.skipButton} onClick={() => closeConversation("skip")}>
+          {t.optOut}
+        </button>
+      </section>
+    </div>
   );
 }
