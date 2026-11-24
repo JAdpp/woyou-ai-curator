@@ -487,6 +487,63 @@ def test_retrieval_infrastructure_failure_does_not_blame_topic(
     assert "相近方向" not in (job.error or "")
 
 
+def test_retrieval_capacity_exhausted_job_is_retryable_and_does_not_blame_collection_data() -> None:
+    async def scenario():
+        jobs = JobStore(max_job_seconds=1)
+        job = jobs.create()
+
+        async def overloaded_retrieval(_jobs: JobStore, _job_id: str) -> None:
+            _jobs.start_step(_job_id, "retrieve")
+            raise CollectionDataError(
+                "RETRIEVAL_CAPACITY_EXHAUSTED",
+                "All bounded catalogue workers are occupied; retry after an active search finishes.",
+            )
+
+        jobs.run(job.id, overloaded_retrieval)
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if jobs.get(job.id).status == "failed":
+                break
+        return jobs.get(job.id)
+
+    job = asyncio.run(scenario())
+    assert job.status == "failed"
+    assert job.error_code == "retrieval_capacity_exhausted"
+    assert "稍后重试" in (job.error or "")
+    assert "馆藏数据" not in (job.error or "")
+    assert "occupied" not in (job.error or "")
+    assert "调整范围" not in (job.error or "")
+    assert "问题仍然保留" in (job.error or "")
+
+
+def test_genuine_collection_data_error_still_reports_collection_data_problem() -> None:
+    async def scenario():
+        jobs = JobStore(max_job_seconds=1)
+        job = jobs.create()
+
+        async def missing_collection(_jobs: JobStore, _job_id: str) -> None:
+            _jobs.start_step(_job_id, "retrieve")
+            raise CollectionDataError(
+                "COLLECTION_NOT_FOUND",
+                "internal collection path and checksum detail",
+            )
+
+        jobs.run(job.id, missing_collection)
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if jobs.get(job.id).status == "failed":
+                break
+        return jobs.get(job.id)
+
+    job = asyncio.run(scenario())
+    assert job.status == "failed"
+    assert job.error_code == "collection_not_found"
+    assert "馆藏数据" in (job.error or "")
+    assert "稍后重试" in (job.error or "")
+    assert "checksum" not in (job.error or "")
+    assert "internal collection path" not in (job.error or "")
+
+
 def test_interrupted_persisted_skeleton_becomes_an_honest_draft(client) -> None:
     generator = ExhibitionGenerator(
         client.app.state.settings, client.app.state.collections

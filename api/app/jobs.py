@@ -259,6 +259,8 @@ class JobStore:
                         "证据检索或相关性审查暂时没有完成。你的问题仍然保留，"
                         "这不代表馆藏不支持该主题；请直接重试。"
                     )
+                elif error.code == "RETRIEVAL_CAPACITY_EXHAUSTED":
+                    message = "策展服务暂时繁忙。你的问题仍然保留，请稍后重试。"
                 else:
                     message = (
                         "馆藏数据暂时无法完成本次策展。你的问题仍然保留，请稍后重试。"
