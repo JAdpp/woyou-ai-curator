@@ -149,6 +149,7 @@
   stroke: rgba(243, 239, 230, 0.62);
   stroke-width: 1.4;
 }
+.planScreen { fill: rgba(243, 239, 230, 0.55); }
 .planArtwork { cursor: pointer; }
 .planArtwork rect:last-child { fill: rgba(243, 239, 230, 0.72); transition: fill 0.15s; }
 .planArtwork:hover rect:last-child { fill: #f7f1e7; }
@@ -657,16 +658,25 @@
 
 .primaryAction:hover { background: #f0d69f; }
 
-.chapterCard {
-  max-width: 30rem;
-  text-align: center;
-  margin-left: auto;
-  margin-right: auto;
+/* Chapter and closing text sit beside the view, like an object label, so the
+   screen wall and the retrospective wall stay visible in the centre. */
+.stage > .chapterCard,
+.stage > .epilogueCard {
+  position: absolute;
+  right: clamp(0.85rem, 3vw, 2rem);
+  margin: 0;
+  max-width: none;
+  z-index: 3;
+}
+
+.stage > .chapterCard {
+  bottom: 5.2rem;
+  width: min(25rem, calc(100vw - 1.7rem));
 }
 
 .chapterCard h2 {
-  font-size: clamp(1.6rem, 5vw, 2.4rem);
-  margin: 0 0 0.8rem;
+  font-size: clamp(1.4rem, 3.4vw, 1.9rem);
+  margin: 0 0 0.7rem;
   letter-spacing: 0.02em;
 }
 
@@ -881,7 +891,12 @@
 
 /* ------------------------------------------------------------ epilogue */
 
-.epilogueCard { margin-left: auto; margin-right: auto; width: min(40rem, calc(100vw - 1.7rem)); max-width: 40rem; }
+.stage > .epilogueCard {
+  top: 5.4rem;
+  bottom: 5.2rem;
+  width: min(29rem, calc(100vw - 1.7rem));
+  max-height: none;
+}
 .epilogueCard > h2 { margin: 0 0 0.8rem; font-size: 1.45rem; }
 .epilogueText { line-height: 1.85; margin: 0 0 1.2rem; font-size: 1.05rem; }
 
@@ -1051,13 +1066,21 @@
 }
 
 @media (max-width: 640px) {
-  .lobbyCard, .chapterCard, .epilogueCard {
+  .lobbyCard {
     width: calc(100vw - 1.2rem);
     max-width: calc(100vw - 1.2rem);
     margin-left: 0.6rem;
     margin-right: 0.6rem;
     max-height: calc(100dvh - 14rem);
   }
+  .stage > .chapterCard,
+  .stage > .epilogueCard {
+    left: 0.6rem;
+    right: 0.6rem;
+    width: auto;
+  }
+  .stage > .chapterCard { bottom: 4.7rem; max-height: 42dvh; }
+  .stage > .epilogueCard { top: 9.5rem; bottom: 4.7rem; }
   .labelCard {
     right: 0.6rem;
     bottom: 4.7rem;

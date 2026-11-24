@@ -3,7 +3,14 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
-import { EYE_HEIGHT, flightDuration, walkableBounds, type HallLayout, type TourStop } from "./layout";
+import {
+  EYE_HEIGHT,
+  flightDuration,
+  resolveObstacles,
+  walkableBounds,
+  type HallLayout,
+  type TourStop,
+} from "./layout";
 import type { CameraPose } from "./minimap";
 import {
   accumulatePointerTravel,
@@ -379,9 +386,42 @@ export function FreeWalkCamera({
     const bounds = walkableBounds(layout, next.z);
     next.x = Math.max(bounds.minX, Math.min(bounds.maxX, next.x));
     next.z = Math.max(bounds.minZ, Math.min(bounds.maxZ, next.z));
-    next.y = EYE_HEIGHT;
+    const free = resolveObstacles(camera.position, next, layout.obstacles);
+    next.set(free.x, EYE_HEIGHT, free.z);
 
     camera.position.copy(next);
+  });
+
+  return null;
+}
+
+/**
+ * Shifts the camera's optical centre sideways, in CSS pixels, without moving
+ * the camera. The guide covers the left of the screen and label panels the
+ * right, so what the visitor should look at belongs in the middle of what is
+ * left, not the middle of the canvas. Eased, so a change of stop never jumps.
+ */
+export function ViewFraming({ shift }: { shift: number }) {
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const current = useRef(shift);
+
+  useEffect(() => () => {
+    if (camera instanceof THREE.PerspectiveCamera) camera.clearViewOffset();
+  }, [camera]);
+
+  useFrame((_state, delta) => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    current.current += (shift - current.current) * Math.min(1, delta * 4);
+    if (Math.abs(shift - current.current) < 0.05) current.current = shift;
+    const view = camera.view;
+    if (
+      view?.enabled
+      && view.offsetX === current.current
+      && view.fullWidth === size.width
+      && view.fullHeight === size.height
+    ) return;
+    camera.setViewOffset(size.width, size.height, current.current, 0, size.width, size.height);
   });
 
   return null;

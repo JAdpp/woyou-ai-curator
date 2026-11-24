@@ -93,33 +93,56 @@ function HallPlan({
           width={plan.approach.width}
           height={plan.approach.height}
         />
-        {plan.rooms.map((room) => (
-          <g key={room.chapterId}>
-            <rect
-              className={room.chapterId === activeChapterId ? styles.planRoomActive : styles.planRoom}
-              x={room.x}
-              y={room.y}
-              width={room.width}
-              height={room.height}
-            />
-            <text
-              className={styles.planRoomNumber}
-              x={room.x + room.width / 2}
-              y={room.y + room.height / 2 + 3.5}
-              textAnchor="middle"
-            >
-              {room.index + 1}
-            </text>
-          </g>
-        ))}
-        {plan.rooms.slice(1).map((room) => (
+        {plan.rooms.map((room) => {
+          const screen = plan.screens.find((candidate) => candidate.chapterId === room.chapterId);
+          // The number sits in the entry zone, ahead of the screen wall.
+          const numberX = screen ? room.x + (screen.x - room.x) / 2 : room.x + room.width / 2;
+          return (
+            <g key={room.chapterId}>
+              <rect
+                className={room.chapterId === activeChapterId ? styles.planRoomActive : styles.planRoom}
+                x={room.x}
+                y={room.y}
+                width={room.width}
+                height={room.height}
+              />
+              <text
+                className={styles.planRoomNumber}
+                x={numberX}
+                y={room.y + room.height / 2 + 3.5}
+                textAnchor="middle"
+              >
+                {room.index + 1}
+              </text>
+            </g>
+          );
+        })}
+        <rect
+          className={styles.planRoom}
+          x={plan.epilogue.x}
+          y={plan.epilogue.y}
+          width={plan.epilogue.width}
+          height={plan.epilogue.height}
+        />
+        {[...plan.rooms.slice(1).map((room) => ({ key: room.chapterId, x: room.x, y: room.y, h: room.height })),
+          { key: "epilogue", x: plan.epilogue.x, y: plan.epilogue.y, h: plan.epilogue.height }].map((edge) => (
           <line
-            key={`divider-${room.chapterId}`}
+            key={`divider-${edge.key}`}
             className={styles.planDivider}
-            x1={room.x}
-            x2={room.x}
-            y1={room.y}
-            y2={room.y + room.height}
+            x1={edge.x}
+            x2={edge.x}
+            y1={edge.y}
+            y2={edge.y + edge.h}
+          />
+        ))}
+        {plan.screens.map((screen) => (
+          <rect
+            key={`screen-${screen.chapterId}`}
+            className={styles.planScreen}
+            x={screen.x}
+            y={screen.y}
+            width={Math.max(2, screen.width)}
+            height={screen.height}
           />
         ))}
         <path className={styles.planWalls} d={outline} />

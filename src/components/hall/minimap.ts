@@ -35,7 +35,7 @@ export interface PlanRoom extends PlanRect {
 export interface PlanArtwork extends PlanRect {
   itemId: string;
   tourIndex: number;
-  side: "left" | "right";
+  side: "left" | "right" | "screen";
 }
 
 export interface HallPlan {
@@ -46,6 +46,10 @@ export interface HallPlan {
   hall: PlanRect;
   approach: PlanRect;
   rooms: PlanRoom[];
+  /** The closing room after the last chapter. */
+  epilogue: PlanRect;
+  /** Freestanding screen walls, one per chapter. */
+  screens: (PlanRect & { chapterId: string })[];
   artworks: PlanArtwork[];
   project: (x: number, z: number) => [number, number];
   /** Plan-space heading, in degrees, for a world-space forward vector. */
@@ -64,10 +68,9 @@ export function buildHallPlan(
   padding = 6,
 ): HallPlan {
   const firstRoom = layout.rooms[0];
-  const lastRoom = layout.rooms[layout.rooms.length - 1];
   const hallWidth = firstRoom?.width ?? 11;
   const zEntrance = firstRoom?.zStart ?? 0;
-  const zEnd = lastRoom?.zEnd ?? -8;
+  const zEnd = layout.endZ;
   const zMax = Math.max(zEntrance + APPROACH_SHOWN, layout.lobbyViewpoint[2] + 0.5);
   const span = Math.max(1, zMax - zEnd);
 
@@ -102,10 +105,29 @@ export function buildHallPlan(
     chapterId: room.chapter.id,
     index: room.index,
   }));
+  const epilogue = rectBetween(-half, layout.epilogueZone.zStart, half, layout.epilogueZone.zEnd);
+  const screens = layout.rooms.map((room) => ({
+    ...rectBetween(
+      -room.screen.width / 2,
+      room.screen.z + room.screen.thickness / 2,
+      room.screen.width / 2,
+      room.screen.z - room.screen.thickness / 2,
+    ),
+    chapterId: room.chapter.id,
+  }));
 
   const artworks = layout.artworks.map((placement) => {
     const along = placement.width / 2;
     const z = placement.position[2];
+    if (placement.side === "screen") {
+      // A bar lying along the screen wall's face toward the entrance.
+      return {
+        ...rectBetween(-along, z + ARTWORK_DEPTH, along, z),
+        itemId: placement.itemId,
+        tourIndex: placement.tourIndex,
+        side: placement.side,
+      };
+    }
     const wallX = placement.side === "left" ? -half : half;
     const innerX = placement.side === "left" ? -half + ARTWORK_DEPTH : half - ARTWORK_DEPTH;
     return {
@@ -120,5 +142,5 @@ export function buildHallPlan(
   const heading = (forwardX: number, forwardZ: number) =>
     (Math.atan2(forwardX, -forwardZ) * 180) / Math.PI;
 
-  return { width, height, scale, hall, approach, rooms, artworks, project, heading };
+  return { width, height, scale, hall, approach, rooms, epilogue, screens, artworks, project, heading };
 }

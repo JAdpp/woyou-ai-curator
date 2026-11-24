@@ -1,4 +1,4 @@
-import type { HallLayout, TourStop } from "./layout";
+import { walkableBounds, type HallLayout, type Obstacle, type TourStop } from "./layout";
 
 export type NavigationPoint = [number, number, number];
 
@@ -64,7 +64,7 @@ export function buildGuidedRoute(
   const sameChapterSection = fromRoomIndex >= 0 && fromRoomIndex === toRoomIndex;
 
   if (sameChapterSection || layout.rooms.length === 0) {
-    return createNavigationRoute([from, destination]);
+    return createNavigationRoute(avoidObstacles([from, destination], layout));
   }
 
   const travellingForward = destination[2] < from[2];
@@ -95,7 +95,133 @@ export function buildGuidedRoute(
   points.push(...centreLineCandidates.filter((point) => between(point[2])));
   points.push(destination);
 
-  return createNavigationRoute(points);
+  return createNavigationRoute(avoidObstacles(points, layout));
+}
+
+/** Clearance kept between the camera's path and any freestanding footprint. */
+const OBSTACLE_MARGIN = 0.45;
+const MAX_DETOUR_DEPTH = 8;
+
+type Box = { x0: number; x1: number; z0: number; z1: number };
+
+function expanded(obstacle: Obstacle, margin: number): Box {
+  return {
+    x0: obstacle.x0 - margin,
+    x1: obstacle.x1 + margin,
+    z0: obstacle.z0 - margin,
+    z1: obstacle.z1 + margin,
+  };
+}
+
+function inside(point: NavigationPoint, box: Box): boolean {
+  return point[0] > box.x0 && point[0] < box.x1 && point[2] > box.z0 && point[2] < box.z1;
+}
+
+/** Parameter along a→b where the segment enters the box, or null if it misses. */
+function segmentEntry(a: NavigationPoint, b: NavigationPoint, box: Box): number | null {
+  let enter = 0;
+  let leave = 1;
+  const axes: [number, number, number, number][] = [
+    [a[0], b[0] - a[0], box.x0, box.x1],
+    [a[2], b[2] - a[2], box.z0, box.z1],
+  ];
+  for (const [origin, delta, low, high] of axes) {
+    if (Math.abs(delta) < POINT_EPSILON) {
+      if (origin <= low || origin >= high) return null;
+      continue;
+    }
+    let near = (low - origin) / delta;
+    let far = (high - origin) / delta;
+    if (near > far) [near, far] = [far, near];
+    enter = Math.max(enter, near);
+    leave = Math.min(leave, far);
+    if (enter >= leave) return null;
+  }
+  return enter;
+}
+
+function pathLength(points: NavigationPoint[]): number {
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) total += distance(points[index - 1], points[index]);
+  return total;
+}
+
+/**
+ * The two corners that take a→b round the box on its shorter side. Travel
+ * mostly along the hall passes beside the box; travel mostly across it
+ * passes in front of or behind it. A side that would put the camera into a
+ * wall is never chosen while the other is open.
+ */
+function detourCorners(
+  a: NavigationPoint,
+  b: NavigationPoint,
+  box: Box,
+  layout: HallLayout,
+): NavigationPoint[] {
+  const y = a[1];
+  const alongHall = Math.abs(b[2] - a[2]) >= Math.abs(b[0] - a[0]);
+  const candidates: NavigationPoint[][] = [];
+  if (alongHall) {
+    const [zNear, zFar] = a[2] > b[2] ? [box.z1, box.z0] : [box.z0, box.z1];
+    for (const x of [box.x0, box.x1]) candidates.push([[x, y, zNear], [x, y, zFar]]);
+  } else {
+    const [xNear, xFar] = a[0] < b[0] ? [box.x0, box.x1] : [box.x1, box.x0];
+    for (const z of [box.z1, box.z0]) candidates.push([[xNear, y, z], [xFar, y, z]]);
+  }
+  const walkable = (corner: NavigationPoint) => {
+    const bounds = walkableBounds(layout, corner[2]);
+    return corner[0] >= bounds.minX && corner[0] <= bounds.maxX;
+  };
+  const ranked = candidates
+    .map((corners) => ({ corners, open: corners.every(walkable), length: pathLength([a, ...corners, b]) }))
+    .sort((left, right) => Number(right.open) - Number(left.open) || left.length - right.length);
+  return ranked[0].corners;
+}
+
+function detourSegment(
+  a: NavigationPoint,
+  b: NavigationPoint,
+  layout: HallLayout,
+  depth: number,
+): NavigationPoint[] {
+  if (depth >= MAX_DETOUR_DEPTH) return [b];
+  let first: { box: Box; entry: number } | null = null;
+  for (const obstacle of layout.obstacles ?? []) {
+    const box = expanded(obstacle, OBSTACLE_MARGIN);
+    // A stop placed deliberately close to a case is still reached.
+    if (inside(a, box) || inside(b, box)) continue;
+    const entry = segmentEntry(a, b, box);
+    if (entry !== null && (!first || entry < first.entry)) first = { box, entry };
+  }
+  if (!first) return [b];
+  const result: NavigationPoint[] = [];
+  let previous = a;
+  for (const waypoint of [...detourCorners(a, b, first.box, layout), b]) {
+    result.push(...detourSegment(previous, waypoint, layout, depth + 1));
+    previous = waypoint;
+  }
+  return result;
+}
+
+/**
+ * Bend a waypoint route round screen walls and cases. The hall's
+ * centre line now carries a screen wall in every chapter, so without this a
+ * guided flight would pass straight through the key object.
+ */
+export function avoidObstacles(points: NavigationPoint[], layout: HallLayout): NavigationPoint[] {
+  const obstacles = layout.obstacles ?? [];
+  if (!points.length || !obstacles.length) return points;
+  // A centre-line waypoint that falls inside a footprint's clearance (the
+  // "step back to the axis" point beside a case, say) is dropped; the
+  // detour round that footprint replaces it.
+  const boxes = obstacles.map((obstacle) => expanded(obstacle, OBSTACLE_MARGIN));
+  const kept = points.filter((point, index) =>
+    index === 0 || index === points.length - 1 || !boxes.some((box) => inside(point, box)));
+  const result: NavigationPoint[] = [kept[0]];
+  for (let index = 1; index < kept.length; index += 1) {
+    result.push(...detourSegment(result[result.length - 1], kept[index], layout, 0));
+  }
+  return result;
 }
 
 /** Create a measured route while removing adjacent duplicate waypoints. */

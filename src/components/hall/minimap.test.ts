@@ -54,6 +54,9 @@ test("the whole route, lobby included, fits inside the plan", () => {
     assert.ok(lobbyX >= 0 && lobbyX <= 240 && lobbyY >= 0 && lobbyY <= 84);
     assert.equal(plan.rooms.length, layout.rooms.length);
     assert.equal(plan.artworks.length, layout.artworks.length);
+    assert.equal(plan.screens.length, layout.rooms.length);
+    for (const screen of plan.screens) assert.ok(inside(screen, 240, 84));
+    assert.ok(inside(plan.epilogue, 240, 84));
   }
 });
 

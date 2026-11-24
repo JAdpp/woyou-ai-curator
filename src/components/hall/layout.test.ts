@@ -3,11 +3,13 @@ import test from "node:test";
 import type { Exhibition, ExhibitionItem } from "@/lib/types";
 import {
   buildHallLayout,
+  resolveObstacles,
   walkableBounds,
   DOORWAY_WIDTH,
   EYE_HEIGHT,
   isVitrineObject,
 } from "./layout";
+import { buildGuidedRoute, sampleNavigationRoute } from "./navigation";
 
 /**
  * Hall geometry is pure, so it can be checked without a GPU. These guard the
@@ -42,8 +44,15 @@ function makeItem(id: string, type = "Painting"): ExhibitionItem {
   } as unknown as ExhibitionItem;
 }
 
+const ROLES = ["opening", "context", "core_evidence", "contrast", "synthesis"] as const;
+
 function makeExhibition(itemCount: number, chapterCount: number): Exhibition {
-  const items = Array.from({ length: itemCount }, (_unused, index) => makeItem(`i${index}`));
+  const items = Array.from({ length: itemCount }, (_unused, index) => {
+    const item = makeItem(`i${index}`);
+    // Varied roles, so a chapter's key object is not always its first.
+    item.role = ROLES[index % ROLES.length];
+    return item;
+  });
   const perChapter = Math.ceil(itemCount / chapterCount);
   const chapters = Array.from({ length: chapterCount }, (_unused, index) => ({
     id: `c${index}`,
@@ -126,8 +135,9 @@ test("artworks sit inside their room and face into it", () => {
       );
       assert.ok(z <= room.zStart && z >= room.zEnd, "artwork sits outside the room depth");
       assert.ok(y > 0 && y < 4.6, "artwork hangs outside the wall height");
-      // Left wall faces +x, right wall faces -x.
-      assert.equal(artwork.rotationY, artwork.side === "left" ? Math.PI / 2 : -Math.PI / 2);
+      // Left wall faces +x, right wall faces -x, the screen wall faces the entrance.
+      const facing = { left: Math.PI / 2, right: -Math.PI / 2, screen: 0 }[artwork.side];
+      assert.equal(artwork.rotationY, facing);
     }
   }
 });
@@ -138,6 +148,11 @@ test("guided viewpoints stand in front of the artwork at eye height", () => {
     const [viewX, viewY, viewZ] = artwork.viewpoint;
     const [artX, , artZ] = artwork.position;
     assert.equal(viewY, EYE_HEIGHT);
+    if (artwork.side === "screen") {
+      assert.equal(viewX, artX, "viewpoint is not aligned with the key object");
+      assert.ok(viewZ > artZ, "viewpoint is behind the screen wall");
+      continue;
+    }
     assert.equal(viewZ, artZ, "viewpoint is not aligned with the artwork");
     // The camera must be on the room side of the wall, not inside it.
     assert.ok(
@@ -175,14 +190,84 @@ test("chapter boundaries stay full-width while only the exterior entrance narrow
   );
 });
 
-test("the final wall is a hard walking boundary", () => {
+test("the retrospective wall is a hard walking boundary after the last chapter", () => {
   const layout = buildHallLayout(makeExhibition(8, 3));
   const lastRoom = layout.rooms[layout.rooms.length - 1];
-  for (const probeZ of [lastRoom.zEnd + 1, lastRoom.zEnd, lastRoom.zEnd - 10]) {
+  assert.ok(layout.endZ < lastRoom.zEnd, "no closing room after the last chapter");
+  assert.equal(layout.epilogueZone.zStart, lastRoom.zEnd);
+  for (const probeZ of [layout.endZ + 1, layout.endZ, layout.endZ - 10]) {
     const bounds = walkableBounds(layout, probeZ);
-    assert.ok(bounds.minZ > lastRoom.zEnd, "bounds allow crossing the final wall");
+    assert.ok(bounds.minZ > layout.endZ, "bounds allow crossing the final wall");
   }
 });
+
+test("every chapter's view down the axis ends on its key object", () => {
+  const layout = buildHallLayout(makeExhibition(12, 4));
+  for (const room of layout.rooms) {
+    const hero = room.artworks.find((artwork) => artwork.side === "screen");
+    assert.ok(hero, `chapter ${room.index} has an empty screen wall`);
+    assert.equal(room.screen.heroItemId, hero.itemId);
+    const stop = layout.stops.find(
+      (candidate) => candidate.kind === "chapter" && candidate.chapterId === room.chapter.id,
+    );
+    assert.ok(stop);
+    assert.equal(stop.target[0], 0);
+    assert.equal(stop.target[2], room.screen.z, "the chapter view does not face the screen wall");
+    // Core evidence is the key object whenever a chapter has one.
+    const core = room.artworks.find((artwork) => artwork.item.role === "core_evidence");
+    if (core) assert.equal(hero.itemId, core.itemId);
+  }
+});
+
+test("the narrative leads up to the key object and continues behind it", () => {
+  const layout = buildHallLayout(makeExhibition(12, 4));
+  for (const room of layout.rooms) {
+    const order = room.chapter.itemIds;
+    const heroIndex = order.indexOf(room.screen.heroItemId ?? "");
+    for (const artwork of room.artworks) {
+      if (artwork.side === "screen") continue;
+      const index = order.indexOf(artwork.itemId);
+      const [, , z] = artwork.position;
+      if (index < heroIndex) assert.ok(z > room.screen.z, `${artwork.itemId} should precede the screen`);
+      else assert.ok(z < room.screen.z, `${artwork.itemId} should follow the screen`);
+      assert.ok(Math.abs(z - room.screen.z) >= 1.9, `${artwork.itemId} crowds the screen wall`);
+    }
+    // Tour order is narrative order.
+    const tour = [...room.artworks]
+      .sort((a, b) => a.tourIndex - b.tourIndex)
+      .map((artwork) => artwork.itemId);
+    assert.deepEqual(tour, order);
+  }
+});
+
+test("no stop, viewpoint or guided flight passes through a wall or case", () => {
+  for (const [items, chapters] of [[5, 2], [8, 3], [12, 4]] as const) {
+    const layout = buildHallLayout(makeExhibition(items, chapters));
+    const blocked = (x: number, z: number) => layout.obstacles.some((obstacle) =>
+      x > obstacle.x0 && x < obstacle.x1 && z > obstacle.z0 && z < obstacle.z1);
+    for (const stop of layout.stops) {
+      assert.ok(!blocked(stop.position[0], stop.position[2]), `${stop.label} stands inside furniture`);
+    }
+    for (let index = 1; index < layout.stops.length; index += 1) {
+      const route = buildGuidedRoute(layout.stops[index - 1].position, layout.stops[index], layout);
+      for (let travelled = 0; travelled <= route.totalLength; travelled += 0.05) {
+        const [x, , z] = sampleNavigationRoute(route, travelled);
+        assert.ok(!blocked(x, z), `flight to ${layout.stops[index].label} passes through furniture`);
+      }
+    }
+  }
+});
+
+test("a walker sliding into a screen wall keeps moving along it", () => {
+  const layout = buildHallLayout(makeExhibition(8, 3));
+  const screen = layout.obstacles.find((obstacle) => obstacle.kind === "screen")!;
+  const from = { x: 0.5, z: screen.z1 + 0.5 };
+  // Walking diagonally into the wall: forward is blocked, sideways is not.
+  const to = resolveObstacles(from, { x: 0.7, z: screen.z1 + 0.2 }, layout.obstacles);
+  assert.equal(to.z, from.z);
+  assert.equal(to.x, 0.7);
+});
+
 
 test("every guided stop and artwork viewpoint is reachable", () => {
   const layout = buildHallLayout(makeExhibition(12, 4));

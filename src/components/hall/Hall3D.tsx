@@ -8,7 +8,7 @@ import { logEvent } from "@/lib/api";
 import { useIsTouchPrimary, usePrefersReducedMotion } from "@/lib/useClientCapability";
 import { buildHallLayout, EYE_HEIGHT, type TourStop } from "./layout";
 import { clampStopIndex } from "./progress";
-import { CameraProbe, FreeWalkCamera, GuidedCamera, type JoystickState } from "./Controls";
+import { CameraProbe, FreeWalkCamera, GuidedCamera, ViewFraming, type JoystickState } from "./Controls";
 import type { CameraPose } from "./minimap";
 import { HallScene, type HallQuality } from "./Scene";
 import { HallOverlay } from "./HallOverlay";
@@ -20,9 +20,10 @@ export type HallMode = "guided" | "free";
 /**
  * The generated 3D hall.
  *
- * All text lives in an HTML overlay rather than in the scene: it stays crisp,
- * it needs no CJK font atlas, and it can be read by assistive tech that cannot
- * see into a canvas. The canvas draws space, artworks and light only.
+ * All readable text lives in an HTML overlay rather than in the scene: it
+ * stays crisp and assistive tech can read it, which it cannot inside a canvas.
+ * The canvas draws space, artworks and light, plus wall lettering (section
+ * titles, the exhibition name) that only repeats what the overlay says.
  */
 export function Hall3D({
   exhibition,
@@ -68,6 +69,7 @@ export function Hall3D({
   const canvasCleanupRef = useRef<(() => void) | null>(null);
   const runtimeFailureRef = useRef(onRuntimeFailure);
   const effectiveMode: HallMode = touchPrimary ? "guided" : mode;
+  const viewportWidth = useViewportWidth();
 
   const stop: TourStop = layout.stops[stopIndex] ?? layout.stops[0];
 
@@ -188,6 +190,7 @@ export function Hall3D({
       >
         <PerformanceMonitor onDecline={() => setQuality("low")} />
         <CameraProbe poseRef={poseRef} />
+        <ViewFraming shift={framingShift(viewportWidth, effectiveMode, layout.stops[stopIndex]?.kind)} />
         <Suspense fallback={null}>
           <HallScene
             layout={layout}
@@ -248,4 +251,33 @@ export function Hall3D({
       {effectiveMode === "free" && <TouchJoystick stateRef={joystick} />}
     </div>
   );
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => (typeof window === "undefined" ? 1280 : window.innerWidth));
+  useEffect(() => {
+    const update = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return width;
+}
+
+/**
+ * How far to move the optical centre so the subject sits between the guide
+ * (left, from 900px up, see hall.module.css) and whatever panel the stop
+ * opens on the right. Matches the panels' CSS widths in rem.
+ */
+function framingShift(viewportWidth: number, mode: HallMode, kind: TourStop["kind"] | undefined): number {
+  if (viewportWidth < 900 || typeof document === "undefined") return 0;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const left = 19.25 * rem;
+  const right = mode !== "guided"
+    ? 0
+    : kind === "artwork" || kind === "chapter"
+      ? 27 * rem
+      : kind === "epilogue"
+        ? 31 * rem
+        : 0;
+  return (right - left) / 2;
 }

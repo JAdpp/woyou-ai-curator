@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { HallLayout, RoomLayout, TourStop } from "./layout";
+import type { HallLayout, Obstacle, RoomLayout, TourStop } from "./layout";
 import {
   buildGuidedRoute,
   createNavigationRoute,
@@ -27,12 +27,18 @@ function room(index: number, zStart: number, zEnd: number): RoomLayout {
     entryViewpoint: [0, 1.6, zStart - 1.5],
     artworks: [],
     exitZ: index < 2 ? zEnd : null,
+    screen: { z: zEnd + 3, width: 4, height: 4.3, thickness: 0.32, heroItemId: null },
   };
 }
 
-function layout(): HallLayout {
+function layout(obstacles: Obstacle[] = []): HallLayout {
   const rooms = [room(0, 0, -8), room(1, -8, -16), room(2, -16, -24)];
   return {
+    epilogueZone: { zStart: -24, zEnd: -32 },
+    endZ: -32,
+    obstacles,
+    title: "T",
+    language: "zh",
     rooms,
     artworks: [],
     stops: [],
@@ -139,4 +145,39 @@ test("extends a long route at approximately four scene units per second", () => 
 
 test("caps long guided flights at six seconds", () => {
   assert.equal(routeFlightDuration(2.4, 100), 6);
+});
+
+/** Every point the camera passes, sampled every 5 cm along the route. */
+function sampled(route: ReturnType<typeof buildGuidedRoute>): NavigationPoint[] {
+  const points: NavigationPoint[] = [];
+  for (let travelled = 0; travelled <= route.totalLength; travelled += 0.05) {
+    points.push(sampleNavigationRoute(route, travelled));
+  }
+  return points;
+}
+
+function passesThrough(route: ReturnType<typeof buildGuidedRoute>, obstacle: Obstacle): boolean {
+  return sampled(route).some(([x, , z]) =>
+    x > obstacle.x0 && x < obstacle.x1 && z > obstacle.z0 && z < obstacle.z1);
+}
+
+const screenWall: Obstacle = { x0: -2, x1: 2, z0: -5.16, z1: -4.84, kind: "screen" };
+
+test("a flight down the axis goes round a screen wall instead of through it", () => {
+  const route = buildGuidedRoute([0, 1.6, -1], artworkStop(1, [0, 1.6, -12]), layout([screenWall]));
+  assert.equal(passesThrough(route, screenWall), false);
+  assert.ok(route.points.some(([x]) => Math.abs(x) > 2), "the route never stepped aside");
+});
+
+test("crossing behind a screen within a chapter takes the nearer side", () => {
+  const route = buildGuidedRoute([3, 1.6, -2], artworkStop(0, [2.5, 1.6, -7]), layout([screenWall]));
+  assert.equal(passesThrough(route, screenWall), false);
+  assert.ok(route.points.every(([x]) => x > 0), "the detour swung to the far side");
+});
+
+test("a stop placed just in front of a case is still reached directly", () => {
+  const displayCase: Obstacle = { x0: -0.8, x1: 0.8, z0: -3.25, z1: -2.75, kind: "case" };
+  const route = buildGuidedRoute([0, 1.6, -1], artworkStop(0, [0, 1.6, -2.4]), layout([displayCase]));
+  assert.deepEqual(route.points[route.points.length - 1], [0, 1.6, -2.4]);
+  assert.equal(passesThrough(route, displayCase), false);
 });
